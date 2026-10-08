@@ -64,8 +64,12 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_adsSensScale",       "1",    0,            CODOFS( adsSensScale ),       0 },
 	{ "cod_adsBobScale",        "0.85", 0,            CODOFS( adsBobScale ),        0 },
 	// codmod: FOV zoom magnifies the RF_DEPTHHACK viewmodel; push it forward while ADS so
-	// it doesn't fill the screen from the hip. 6 u at fovScale 0.8 → +1.2 u of fwd.
-	{ "cod_adsGunFovComp",      "6",    0,            CODOFS( adsGunFovComp ),      0 },
+	// it doesn't fill the screen from the hip. Used as a fine bias on top of tag_flash align.
+	{ "cod_adsGunFovComp",      "2",    0,            CODOFS( adsGunFovComp ),      0 },
+	// codmod: CoD-style iron-sight auto-align defaults (cgame). Per-weapon table can override.
+	{ "cod_adsSightHeight",     "1.4",  0,            CODOFS( adsSightHeight ),     0 },
+	{ "cod_adsBarrelBack",      "11",   0,            CODOFS( adsBarrelBack ),      0 },
+	{ "cod_adsSightDist",       "10",   0,            CODOFS( adsSightDist ),       0 },
 	{ "cod_scopeSwitchTime",    "0",    0,            CODOFS( scopeSwitchTime ),    0 },
 
 	// codmod: Phase 3.5 alignment tooling -- see docs/phase-3-ads.md "Alignment tooling".

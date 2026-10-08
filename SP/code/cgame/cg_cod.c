@@ -5,32 +5,25 @@
 
 #include "cg_local.h"
 
-// codmod: Phase 3.5 per-weapon ADS viewmodel offsets (fwd, right, up, pitch, yaw, roll).
-// RTCW viewmodels were never authored for ADS -- the goal is a clear CoD-style raise to
-// screen center (rear sight toward the crosshair), not a pixel-perfect sight picture.
-// The first shipped guesses (~1-3 u) only nudged the gun and felt like "FOV zoom only";
-// these are much more aggressive so ADS is obvious. Fine-tune in-game with:
-//   cod_adsLock 1; cod_adsTune 1; cod_adsTuneLoad; set cod_adsTuneUp 8; ...; cod_adsTuneDump
-// Not const: the tuning tool overwrites entries live while cod_adsTune is set.
+// codmod: Phase 3.5 per-weapon iron-sight ADS. Primary pose is computed every frame from
+// tag_flash (see CG_CodApplyIronSightAds) so the rear sight sits on the screen center like
+// CoD -- no new models required. Table fields:
+//   sightHeight / barrelBack / sightDist  -- geometry of the sight line (0 sightDist => cvar)
+//   fwd/right/up/pitch/yaw/roll           -- fine bias after auto-align (tune these live)
+// Not const: cod_adsTune overwrites the fine-bias fields while tuning.
 codAdsView_t cg_codAdsView[WP_NUM_WEAPONS] = {
-	// pistols: pull in, raise high, center from hip. Slight nose-down so the slide sits
-	// nearer the screen midline.
-	[WP_LUGER]          = { 8.0f, -7.5f, 7.0f, -2.0f, 0.0f, 0.0f },
-	[WP_SILENCER]       = { 8.5f, -7.5f, 7.0f, -2.0f, 0.0f, 0.0f },
-	[WP_COLT]           = { 8.0f, -7.5f, 7.0f, -2.0f, 0.0f, 0.0f },
+	//                          sightH  barrelB  sightD   fwd   right  up   pitch yaw roll
+	[WP_LUGER]          = { 1.5f,  10.0f,  9.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_SILENCER]       = { 1.5f,  12.0f,  9.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_COLT]           = { 1.5f,  10.0f,  9.0f,   0, 0, 0,  0, 0, 0 },
 
-	// SMGs: same idea, a bit less raise (bulkier receivers)
-	[WP_MP40]           = { 7.0f, -8.0f, 5.5f, -1.5f, 0.0f, 0.0f },
-	[WP_THOMPSON]       = { 7.0f, -8.0f, 5.5f, -1.5f, 0.0f, 0.0f },
-	[WP_STEN]           = { 6.5f, -7.5f, 5.5f, -1.5f, 0.0f, 0.0f },
+	[WP_MP40]           = { 1.8f,  14.0f, 11.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_THOMPSON]       = { 1.8f,  14.0f, 11.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_STEN]           = { 1.6f,  13.0f, 11.0f,   0, 0, 0,  0, 0, 0 },
 
-	// rifles (iron sights): longer guns need more forward pull
-	[WP_MAUSER]         = { 9.0f, -5.0f, 5.0f, -1.0f, 0.0f, 0.0f },
-	[WP_GARAND]         = { 9.0f, -5.0f, 5.0f, -1.0f, 0.0f, 0.0f },
-	[WP_FG42]           = { 8.0f, -5.5f, 5.0f, -1.0f, 0.0f, 0.0f },
-
-	// scoped variants draw no viewmodel offset of their own -- the real scope (phase 3.8)
-	// takes over the whole screen, so these stay zeroed.
+	[WP_MAUSER]         = { 2.0f,  22.0f, 14.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_GARAND]         = { 2.0f,  22.0f, 14.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_FG42]           = { 1.8f,  18.0f, 13.0f,   0, 0, 0,  0, 0, 0 },
 };
 
 /*
@@ -48,6 +41,112 @@ float CG_CodAdsFrac( void ) {
 		return 1.0f;
 	}
 	return cg.predictedPlayerState.stats[STAT_COD_ADS] / 1000.0f;
+}
+
+/*
+================
+CG_CodApplyIronSightAds
+
+codmod: CoD-style iron-sight ADS without new models (phase 3.5).
+
+Builds the current first-person hand+gun transform, reads tag_flash (muzzle), estimates the
+rear-sight point (back along the bore by barrelBack, up by sightHeight), then translates
+(and lightly rotates) the hand so that rear sight lands on the view axis at sightDist --
+exactly the "eye behind the sights, front post in the notch" picture. Fine bias from
+cg_codAdsView and cod_adsGunFovComp is applied on top. Falls back to bias-only if tags
+are missing.
+================
+*/
+void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, float e ) {
+	weaponInfo_t *weapon;
+	codAdsView_t *ads;
+	refEntity_t hand;
+	refEntity_t gun;
+	orientation_t flash;
+	vec3_t flashAxis[3];
+	vec3_t flashOrigin;
+	vec3_t sightPos;
+	vec3_t desired;
+	vec3_t delta;
+	vec3_t flashFwd;
+	vec3_t viewFwd;
+	vec3_t flashAngles, viewAngles;
+	float sightHeight, barrelBack, sightDist;
+	float fovScale, fovComp;
+	int i;
+
+	if ( e <= 0.0f || weaponNum <= WP_NONE || weaponNum >= WP_NUM_WEAPONS ) {
+		return;
+	}
+
+	weapon = &cg_weapons[weaponNum];
+	ads = &cg_codAdsView[weaponNum];
+
+	sightHeight = ( ads->sightHeight != 0.0f ) ? ads->sightHeight : bg_cod.adsSightHeight;
+	barrelBack  = ( ads->barrelBack  != 0.0f ) ? ads->barrelBack  : bg_cod.adsBarrelBack;
+	sightDist   = ( ads->sightDist   != 0.0f ) ? ads->sightDist   : bg_cod.adsSightDist;
+
+	fovScale = ( bg_cod.adsTune && weaponNum == cg.weaponSelect )
+			   ? bg_cod.adsTuneFov : BG_CodAdsFovScale( weaponNum );
+	fovComp = bg_cod.adsGunFovComp * ( 1.0f - fovScale );
+
+	// Build a throwaway hand entity at the current hip-fire pose so we can resolve tags.
+	memset( &hand, 0, sizeof( hand ) );
+	VectorCopy( handOrigin, hand.origin );
+	AnglesToAxis( angles, hand.axis );
+	hand.hModel = weapon->handsModel;
+	hand.frame = hand.oldframe = 0;
+	hand.backlerp = 0;
+
+	memset( &gun, 0, sizeof( gun ) );
+	gun.hModel = weapon->weaponModel[W_FP_MODEL];
+	gun.frame = gun.oldframe = 0;
+	gun.backlerp = 0;
+
+	if ( !hand.hModel || !gun.hModel ) {
+		// no models yet -- fall through to bias-only
+	} else {
+		CG_PositionEntityOnTag( &gun, &hand, "tag_weapon", 0, NULL );
+
+		if ( trap_R_LerpTag( &flash, &gun, "tag_flash", 0 ) >= 0 ) {
+			// flash origin in world space
+			VectorCopy( gun.origin, flashOrigin );
+			for ( i = 0; i < 3; i++ ) {
+				VectorMA( flashOrigin, flash.origin[i], gun.axis[i], flashOrigin );
+			}
+			// flash axes in world space (tag local * gun)
+			MatrixMultiply( flash.axis, gun.axis, flashAxis );
+
+			// Rear sight: back along the bore from the muzzle, then up off the bore axis.
+			// MD3 tag X (axis[0]) is forward for RTCW weapon flashes; axis[2] is up.
+			VectorCopy( flashAxis[0], flashFwd );
+			VectorMA( flashOrigin, -barrelBack, flashAxis[0], sightPos );
+			VectorMA( sightPos, sightHeight, flashAxis[2], sightPos );
+
+			// Desired: rear sight on the optical axis, a comfortable distance ahead.
+			VectorMA( cg.refdef.vieworg, sightDist + fovComp, cg.refdef.viewaxis[0], desired );
+
+			VectorSubtract( desired, sightPos, delta );
+			VectorMA( handOrigin, e, delta, handOrigin );
+
+			// Lightly rotate so the bore matches the view forward (hip guns often point a
+			// few degrees off). Re-derive flash forward after the translation would be more
+			// accurate, but one pass is enough -- the gun already inherits viewangles.
+			VectorCopy( cg.refdef.viewaxis[0], viewFwd );
+			vectoangles( flashFwd, flashAngles );
+			vectoangles( viewFwd, viewAngles );
+			angles[PITCH] += AngleDelta( viewAngles[PITCH], flashAngles[PITCH] ) * e;
+			angles[YAW]   += AngleDelta( viewAngles[YAW],   flashAngles[YAW] )   * e;
+		}
+	}
+
+	// Fine bias (table / live tune) -- small corrections after auto-align.
+	VectorMA( handOrigin, ads->fwd   * e, cg.refdef.viewaxis[0], handOrigin );
+	VectorMA( handOrigin, ads->right * e, cg.refdef.viewaxis[1], handOrigin );
+	VectorMA( handOrigin, ads->up    * e, cg.refdef.viewaxis[2], handOrigin );
+	angles[PITCH] += ads->pitch * e;
+	angles[YAW]   += ads->yaw   * e;
+	angles[ROLL]  += ads->roll  * e;
 }
 
 /*
@@ -155,11 +254,17 @@ void CG_CodAdsTuneDump_f( void ) {
 	name = CG_CodWeaponName( weapon );
 
 	if ( name ) {
-		CG_Printf( "[%s] = { %gf, %gf, %gf, %gf, %gf, %gf },\n",
-				   name, ads->fwd, ads->right, ads->up, ads->pitch, ads->yaw, ads->roll );
+		CG_Printf( "[%s] = { %gf, %gf, %gf,  %gf, %gf, %gf,  %gf, %gf, %gf },\n",
+				   name,
+				   ads->sightHeight, ads->barrelBack, ads->sightDist,
+				   ads->fwd, ads->right, ads->up,
+				   ads->pitch, ads->yaw, ads->roll );
 	} else {
-		CG_Printf( "[%d] = { %gf, %gf, %gf, %gf, %gf, %gf },\n",
-				   weapon, ads->fwd, ads->right, ads->up, ads->pitch, ads->yaw, ads->roll );
+		CG_Printf( "[%d] = { %gf, %gf, %gf,  %gf, %gf, %gf,  %gf, %gf, %gf },\n",
+				   weapon,
+				   ads->sightHeight, ads->barrelBack, ads->sightDist,
+				   ads->fwd, ads->right, ads->up,
+				   ads->pitch, ads->yaw, ads->roll );
 	}
 }
 

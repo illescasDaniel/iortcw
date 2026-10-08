@@ -3068,28 +3068,14 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		VectorMA( hand.origin, ( gunoff[1] + fovOffset[1] ), cg.refdef.viewaxis[1], hand.origin );
 		VectorMA( hand.origin, ( gunoff[2] + fovOffset[2] ), cg.refdef.viewaxis[2], hand.origin );
 
-		// codmod: ADS viewmodel offset (phase 3.5). e ramps 0..1 with STAT_COD_ADS,
-		// smoothstepped so the raise/lower doesn't feel linear; cod_adsLock pins e to 1 for
-		// the alignment tooling (CG_CodAdsFrac, cg_cod.c). Added after the fov offset so
-		// FOV-induced gun drop/push and ADS centering stack cleanly. cod_adsGunFovComp
-		// pushes the gun forward in proportion to the FOV zoom, since the viewmodel is
-		// drawn in the main scene (RF_DEPTHHACK) and gets magnified by it too.
+		// codmod: CoD-style iron-sight ADS (phase 3.5). Aligns tag_flash-derived rear sight
+		// to the screen center -- see CG_CodApplyIronSightAds in cg_cod.c. Not a simple
+		// "nudge the gun"; this is what makes ADS look like aiming through the sights.
 		if ( bg_cod.enable && bg_cod.adsEnable && ps->weapon > WP_NONE && ps->weapon < WP_NUM_WEAPONS ) {
 			float e = BG_CodSmoothstep( CG_CodAdsFrac() );
 
 			if ( e > 0.0f ) {
-				codAdsView_t *ads = &cg_codAdsView[ps->weapon];
-				float fovScale = ( bg_cod.adsTune && ps->weapon == cg.weaponSelect )
-								  ? bg_cod.adsTuneFov : BG_CodAdsFovScale( ps->weapon );
-				float fovComp = bg_cod.adsGunFovComp * ( 1.0f - fovScale ) * e;
-
-				VectorMA( hand.origin, ( ads->fwd + fovComp ) * e, cg.refdef.viewaxis[0], hand.origin );
-				VectorMA( hand.origin, ads->right * e, cg.refdef.viewaxis[1], hand.origin );
-				VectorMA( hand.origin, ads->up * e, cg.refdef.viewaxis[2], hand.origin );
-
-				angles[PITCH] += ads->pitch * e;
-				angles[YAW]   += ads->yaw * e;
-				angles[ROLL]  += ads->roll * e;
+				CG_CodApplyIronSightAds( hand.origin, angles, ps->weapon, e );
 			}
 		}
 

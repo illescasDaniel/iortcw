@@ -54,12 +54,15 @@ typedef struct {
 	float adsSensScale;     // extra multiplier on top of the FOV-derived sensitivity scale
 	float adsBobScale;      // viewmodel bob/land-dip/idle-drift are scaled by 1 - e*adsBobScale
 	float adsGunFovComp;    // pushes the viewmodel forward in proportion to the FOV zoom (cgame)
+	float adsSightHeight;   // default u above tag_flash bore to the rear sight (cgame auto-align)
+	float adsBarrelBack;    // default u from tag_flash back to the rear sight along the bore
+	float adsSightDist;     // default u ahead of the camera for the rear sight when fully ADS
 	float scopeSwitchTime;  // ms, rifle<->scope weapon-change time when >0 (phase 3.8); 0 = vanilla 250ms
 
 	int adsLock;      // debug: cgame treats ADS as fully in, visual only (alignment tooling)
-	int adsTune;      // debug: live-overwrite cg_codAdsView[current weapon] from the Tune* cvars below
-	float adsTuneFwd, adsTuneRight, adsTuneUp;      // u, cgame-only
-	float adsTunePitch, adsTuneYaw, adsTuneRoll;    // degrees, cgame-only
+	int adsTune;      // debug: live-overwrite cg_codAdsView fine-bias from the Tune* cvars below
+	float adsTuneFwd, adsTuneRight, adsTuneUp;      // u, cgame-only fine bias
+	float adsTunePitch, adsTuneYaw, adsTuneRoll;    // degrees, cgame-only fine bias
 	float adsTuneFov;                               // fovScale preview while tuning, cgame-only
 
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed

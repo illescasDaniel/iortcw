@@ -43,15 +43,23 @@ If you have questions concerning this license or the applicable additional terms
 #include "../game/bg_cod.h"    // codmod: phase 2 tuning (bg_cod.c is built into cgame too)
 #include "cg_public.h"
 
-// codmod: per-weapon viewmodel "sight" offset while ADS (phase 3.5). Cgame-only (unlike
-// bg_cod.h's codWeaponTuning_t, this never needs to match qagame) and NOT const -- the
-// alignment tooling (cod_adsTune, cg_cod.c) overwrites entries live while tuning.
+// codmod: per-weapon iron-sight ADS alignment (phase 3.5). Cgame-only and NOT const --
+// the alignment tooling (cod_adsTune, cg_cod.c) overwrites the fine-bias fields live.
+// Primary pose comes from tag_flash auto-align (CoD-style: rear sight on screen center);
+// the six bias fields are small manual corrections on top.
 typedef struct {
-	float fwd, right, up;      // u, along cg.refdef.viewaxis[0..2]
-	float pitch, yaw, roll;    // degrees, added to the viewmodel angles
+	float sightHeight;         // u above the bore (tag_flash up) to the rear sight
+	float barrelBack;          // u back from tag_flash along the bore to the rear sight
+	float sightDist;           // u ahead of the camera for the rear sight when ADS; 0 => cvar
+	float fwd, right, up;      // fine bias along cg.refdef.viewaxis[0..2]
+	float pitch, yaw, roll;    // fine bias degrees
 } codAdsView_t;
 
 extern codAdsView_t cg_codAdsView[WP_NUM_WEAPONS];
+
+// codmod: apply CoD-style iron-sight ADS to the first-person hand origin/angles.
+// e is the smoothstepped ADS fraction 0..1. Uses tag_flash on the viewmodel.
+void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, float e );
 
 
 #define POWERUP_BLINKS      5
