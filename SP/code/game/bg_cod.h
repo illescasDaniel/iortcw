@@ -57,6 +57,9 @@ typedef struct {
 	float adsSightHeight;   // default u above tag_flash bore to the rear sight (cgame auto-align)
 	float adsBarrelBack;    // default u from tag_flash back to the rear sight along the bore
 	float adsSightDist;     // default u ahead of the camera for the rear sight when fully ADS
+	float adsPitch;         // degrees, global ADS angle bias after auto-align (cgame)
+	float adsYaw;           // degrees, global ADS angle bias (neg = clockwise from above)
+	float adsRoll;          // degrees, global ADS angle bias (pos ≈ clockwise looking forward)
 	float scopeSwitchTime;  // ms, rifle<->scope weapon-change time when >0 (phase 3.8); 0 = vanilla 250ms
 
 	int adsLock;      // debug: cgame treats ADS as fully in, visual only (alignment tooling)

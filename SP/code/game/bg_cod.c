@@ -71,6 +71,11 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_adsSightHeight",     "4",    0,            CODOFS( adsSightHeight ),     0 },
 	{ "cod_adsBarrelBack",      "10",   0,            CODOFS( adsBarrelBack ),      0 },
 	{ "cod_adsSightDist",       "18",   0,            CODOFS( adsSightDist ),       0 },
+	// codmod: RTCW viewmodels are built for hip-fire; tag_flash "straight" can still look
+	// diagonally held. Global angle bias after auto-align (Luger: ~7° clockwise from above).
+	{ "cod_adsPitch",           "0",    0,            CODOFS( adsPitch ),           0 },
+	{ "cod_adsYaw",             "-7",   0,            CODOFS( adsYaw ),             0 },
+	{ "cod_adsRoll",            "0",    0,            CODOFS( adsRoll ),            0 },
 	{ "cod_scopeSwitchTime",    "0",    0,            CODOFS( scopeSwitchTime ),    0 },
 
 	// codmod: Phase 3.5 alignment tooling -- see docs/phase-3-ads.md "Alignment tooling".
