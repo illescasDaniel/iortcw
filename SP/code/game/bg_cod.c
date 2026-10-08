@@ -67,15 +67,15 @@ const codCvarDef_t bg_codCvars[] = {
 	// it doesn't fill the screen from the hip. Used as a fine bias on top of tag_flash align.
 	{ "cod_adsGunFovComp",      "2",    0,            CODOFS( adsGunFovComp ),      0 },
 	// codmod: CoD-style iron-sight auto-align defaults (cgame). Per-weapon table can override.
-	// Tuned in-game on the starting pistol (Luger): Dist 18 / Height 4.
-	{ "cod_adsSightHeight",     "4",    0,            CODOFS( adsSightHeight ),     0 },
+	// Tuned in-game on the starting pistol (Luger): Dist 18 / Height 3 / Yaw -5 / Roll 11.
+	{ "cod_adsSightHeight",     "3",    0,            CODOFS( adsSightHeight ),     0 },
 	{ "cod_adsBarrelBack",      "10",   0,            CODOFS( adsBarrelBack ),      0 },
 	{ "cod_adsSightDist",       "18",   0,            CODOFS( adsSightDist ),       0 },
 	// codmod: RTCW viewmodels are built for hip-fire; tag_flash "straight" can still look
-	// diagonally held. Global angle bias after auto-align (Luger: ~7° clockwise from above).
+	// diagonally held. Applied before sight centering (Luger in-game tune).
 	{ "cod_adsPitch",           "0",    0,            CODOFS( adsPitch ),           0 },
-	{ "cod_adsYaw",             "-7",   0,            CODOFS( adsYaw ),             0 },
-	{ "cod_adsRoll",            "0",    0,            CODOFS( adsRoll ),            0 },
+	{ "cod_adsYaw",             "-5",   0,            CODOFS( adsYaw ),             0 },
+	{ "cod_adsRoll",            "11",   0,            CODOFS( adsRoll ),            0 },
 	{ "cod_scopeSwitchTime",    "0",    0,            CODOFS( scopeSwitchTime ),    0 },
 
 	// codmod: Phase 3.5 alignment tooling -- see docs/phase-3-ads.md "Alignment tooling".

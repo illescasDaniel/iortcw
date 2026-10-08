@@ -153,7 +153,7 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	sightDist   = bg_cod.adsSightDist   + ads->sightDist;
 
 	// codmod: too small = looking inside the mesh; too large = floating mid-screen arms.
-	// Pistol sweet spot from in-game tuning is Dist 18 / Height 4.
+	// Pistol sweet spot from in-game tuning is Dist 18 / Height 3 / Yaw -5 / Roll 11.
 	if ( sightDist < 8.0f ) {
 		sightDist = 8.0f;
 	}
@@ -204,7 +204,13 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 		// Level the gun to the view (kills idle/bob roll that reads as a crooked ADS).
 		alignedAngles[ROLL] += AngleDelta( cg.refdefViewAngles[ROLL], alignedAngles[ROLL] );
 
-		// Pass 2: at the straightened orientation, put the rear sight on the optical axis.
+		// Mesh hold bias BEFORE sight centering -- applying yaw/roll after translate left the
+		// sights off-axis and kept ADS looking diagonal vs CoD.
+		alignedAngles[PITCH] += bg_cod.adsPitch + ads->pitch;
+		alignedAngles[YAW]   += bg_cod.adsYaw   + ads->yaw;
+		alignedAngles[ROLL]  += bg_cod.adsRoll  + ads->roll;
+
+		// Pass 2: at the biased orientation, put the rear sight on the optical axis.
 		VectorCopy( alignedOrigin, hand.origin );
 		AnglesToAxis( alignedAngles, hand.axis );
 		if ( CG_CodResolveFlashTag( &hand, &gun, flashOrigin, flashFwd ) ) {
@@ -227,14 +233,10 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 		angles[i] += AngleDelta( alignedAngles[i], angles[i] ) * e;
 	}
 
-	// Fine bias after auto-align: global cod_adsPitch/Yaw/Roll (mesh vs tag mismatch) plus
-	// per-weapon table / live tune. Yaw -7 ≈ clockwise ~7° from above (Luger default).
+	// Position-only fine bias (table / live tune). Angle bias is already in alignedAngles.
 	VectorMA( handOrigin, ads->fwd   * e, cg.refdef.viewaxis[0], handOrigin );
 	VectorMA( handOrigin, ads->right * e, cg.refdef.viewaxis[1], handOrigin );
 	VectorMA( handOrigin, ads->up    * e, cg.refdef.viewaxis[2], handOrigin );
-	angles[PITCH] += ( bg_cod.adsPitch + ads->pitch ) * e;
-	angles[YAW]   += ( bg_cod.adsYaw   + ads->yaw )   * e;
-	angles[ROLL]  += ( bg_cod.adsRoll  + ads->roll )  * e;
 }
 
 /*
