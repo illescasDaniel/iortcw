@@ -355,6 +355,11 @@ typedef char bg_cod_statIndexRangeCheck_t[ ( STAT_COD_STANCE < MAX_STATS ) ? 1 :
 // codmod: ps->stats[STAT_COD_FLAGS] bits (phase 2+)
 #define COD_SF_SPRINTING 1
 
+// codmod: ADS input (phase 3.1). WBUTTON_EXTRA6 (q_shared.h) has no other users at
+// ioRTCW 438e7d4 (verified with grep) -- bound to "+wbutton6" (client/cl_input.c) and
+// aliased to "+ads"/"-ads" in mod/codmod/codmod.cfg, bound to MOUSE2 in codmod_binds.cfg.
+#define WBUTTON_COD_ADS WBUTTON_EXTRA6
+
 
 // player_state->persistant[] indexes
 // these fields are the only part of player_state that isn't
