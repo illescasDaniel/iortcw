@@ -12,18 +12,20 @@
 //   fwd/right/up/pitch/yaw/roll           -- fine bias after auto-align (tune these live)
 // Not const: cod_adsTune overwrites the fine-bias fields while tuning.
 codAdsView_t cg_codAdsView[WP_NUM_WEAPONS] = {
+	// Geometry biases are 0 -- live defaults live in cod_adsSightHeight / BarrelBack /
+	// SightDist cvars so console tuning works. Nonzero here = extra per-weapon bias.
 	//                          sightH  barrelB  sightD   fwd   right  up   pitch yaw roll
-	[WP_LUGER]          = { 4.5f,  10.0f, 18.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_SILENCER]       = { 4.5f,  12.0f, 18.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_COLT]           = { 4.5f,  10.0f, 18.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_LUGER]          = { 0, 0, 0,   0, 0, 0,  0, 0, 0 },
+	[WP_SILENCER]       = { 0, 2, 0,   0, 0, 0,  0, 0, 0 },
+	[WP_COLT]           = { 0, 0, 0,   0, 0, 0,  0, 0, 0 },
 
-	[WP_MP40]           = { 5.0f,  14.0f, 20.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_THOMPSON]       = { 5.0f,  14.0f, 20.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_STEN]           = { 4.8f,  13.0f, 20.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_MP40]           = { 0.5f, 4, 2,   0, 0, 0,  0, 0, 0 },
+	[WP_THOMPSON]       = { 0.5f, 4, 2,   0, 0, 0,  0, 0, 0 },
+	[WP_STEN]           = { 0.3f, 3, 2,   0, 0, 0,  0, 0, 0 },
 
-	[WP_MAUSER]         = { 5.5f,  22.0f, 22.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_GARAND]         = { 5.5f,  22.0f, 22.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_FG42]           = { 5.0f,  18.0f, 21.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_MAUSER]         = { 1.0f, 12, 4,   0, 0, 0,  0, 0, 0 },
+	[WP_GARAND]         = { 1.0f, 12, 4,   0, 0, 0,  0, 0, 0 },
+	[WP_FG42]           = { 0.5f,  8, 3,   0, 0, 0,  0, 0, 0 },
 };
 
 /*
@@ -82,9 +84,12 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	weapon = &cg_weapons[weaponNum];
 	ads = &cg_codAdsView[weaponNum];
 
-	sightHeight = ( ads->sightHeight != 0.0f ) ? ads->sightHeight : bg_cod.adsSightHeight;
-	barrelBack  = ( ads->barrelBack  != 0.0f ) ? ads->barrelBack  : bg_cod.adsBarrelBack;
-	sightDist   = ( ads->sightDist   != 0.0f ) ? ads->sightDist   : bg_cod.adsSightDist;
+	// codmod: live cvars are the knobs (set/seta in console). Per-weapon table values are
+	// ADDED as a bias on top -- previously a nonzero table entry replaced the cvar entirely,
+	// so `seta cod_adsSightHeight` looked like a no-op on the Luger.
+	sightHeight = bg_cod.adsSightHeight + ads->sightHeight;
+	barrelBack  = bg_cod.adsBarrelBack  + ads->barrelBack;
+	sightDist   = bg_cod.adsSightDist   + ads->sightDist;
 
 	// codmod: keep the rear sight far enough ahead of the eye that we never clip into the
 	// mesh ("looking inside the gun"). Zoomed FOV makes close geometry feel even closer.

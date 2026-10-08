@@ -69,7 +69,7 @@ const codCvarDef_t bg_codCvars[] = {
 	// codmod: CoD-style iron-sight auto-align defaults (cgame). Per-weapon table can override.
 	// sightHeight must clear the slide (too low = looking down the bore / "inside the gun").
 	// sightDist is eye relief (too small = near-clip into the rear of the weapon).
-	{ "cod_adsSightHeight",     "4.5",  0,            CODOFS( adsSightHeight ),     0 },
+	{ "cod_adsSightHeight",     "6",    0,            CODOFS( adsSightHeight ),     0 },
 	{ "cod_adsBarrelBack",      "10",   0,            CODOFS( adsBarrelBack ),      0 },
 	{ "cod_adsSightDist",       "18",   0,            CODOFS( adsSightDist ),       0 },
 	{ "cod_scopeSwitchTime",    "0",    0,            CODOFS( scopeSwitchTime ),    0 },
