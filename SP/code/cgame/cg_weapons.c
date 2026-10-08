@@ -1713,9 +1713,18 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 	float scale;
 	int delta;
 	float fracsin, leanscale;
+	float bobScale;    // codmod: phase 3.5, see below -- 1 outside ADS, down to 1-adsBobScale at full ADS
 
 	VectorCopy( cg.refdef.vieworg, origin );
 	VectorCopy( cg.refdefViewAngles, angles );
+
+	// codmod: ADS steadies the viewmodel (phase 3.5) -- bob, land-dip and idle drift below
+	// are all scaled by this. Lean handling (just above) is intentionally left untouched.
+	bobScale = 1.0f;
+	if ( bg_cod.enable && bg_cod.adsEnable ) {
+		float e = BG_CodSmoothstep( CG_CodAdsFrac() );
+		bobScale = 1.0f - e * bg_cod.adsBobScale;
+	}
 
 	// adjust 'lean' into weapon
 	if ( cg.predictedPlayerState.leanf != 0 ) {
@@ -1780,17 +1789,19 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 	}
 
 	// gun angles from bobbing
+	// codmod: scaled by bobScale (phase 3.5) -- steadies the gun while ADS
 
-	angles[ROLL] += scale * cg.bobfracsin * 0.005;
-	angles[YAW] += scale * cg.bobfracsin * 0.01;
-	angles[PITCH] += cg.xyspeed * cg.bobfracsin * 0.005;
+	angles[ROLL] += bobScale * scale * cg.bobfracsin * 0.005;
+	angles[YAW] += bobScale * scale * cg.bobfracsin * 0.01;
+	angles[PITCH] += bobScale * cg.xyspeed * cg.bobfracsin * 0.005;
 
 	// drop the weapon when landing
+	// codmod: scaled by bobScale (phase 3.5)
 	delta = cg.time - cg.landTime;
 	if ( delta < LAND_DEFLECT_TIME ) {
-		origin[2] += cg.landChange * 0.25 * delta / LAND_DEFLECT_TIME;
+		origin[2] += bobScale * cg.landChange * 0.25 * delta / LAND_DEFLECT_TIME;
 	} else if ( delta < LAND_DEFLECT_TIME + LAND_RETURN_TIME ) {
-		origin[2] += cg.landChange * 0.25 *
+		origin[2] += bobScale * cg.landChange * 0.25 *
 					 ( LAND_DEFLECT_TIME + LAND_RETURN_TIME - delta ) / LAND_RETURN_TIME;
 	}
 
@@ -1823,10 +1834,11 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 //	scale = cg.xyspeed + 40;
 	scale = 80;
 //----(SA)	end
+	// codmod: scaled by bobScale (phase 3.5)
 	fracsin = sin( cg.time * 0.001 );
-	angles[ROLL] += scale * fracsin * 0.01;
-	angles[YAW] += scale * fracsin * 0.01;
-	angles[PITCH] += scale * fracsin * 0.01;
+	angles[ROLL] += bobScale * scale * fracsin * 0.01;
+	angles[YAW] += bobScale * scale * fracsin * 0.01;
+	angles[PITCH] += bobScale * scale * fracsin * 0.01;
 
 	// RF, subtract the kickAngles
 	VectorMA( angles, -1.0, cg.kickAngles, angles );
@@ -3055,6 +3067,31 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		VectorMA( hand.origin, ( gunoff[0] + fovOffset[0] ), cg.refdef.viewaxis[0], hand.origin );
 		VectorMA( hand.origin, ( gunoff[1] + fovOffset[1] ), cg.refdef.viewaxis[1], hand.origin );
 		VectorMA( hand.origin, ( gunoff[2] + fovOffset[2] ), cg.refdef.viewaxis[2], hand.origin );
+
+		// codmod: ADS viewmodel offset (phase 3.5). e ramps 0..1 with STAT_COD_ADS,
+		// smoothstepped so the raise/lower doesn't feel linear; cod_adsLock pins e to 1 for
+		// the alignment tooling (CG_CodAdsFrac, cg_cod.c). Added after the fov offset so
+		// FOV-induced gun drop/push and ADS centering stack cleanly. cod_adsGunFovComp
+		// pushes the gun forward in proportion to the FOV zoom, since the viewmodel is
+		// drawn in the main scene (RF_DEPTHHACK) and gets magnified by it too.
+		if ( bg_cod.enable && bg_cod.adsEnable && ps->weapon > WP_NONE && ps->weapon < WP_NUM_WEAPONS ) {
+			float e = BG_CodSmoothstep( CG_CodAdsFrac() );
+
+			if ( e > 0.0f ) {
+				codAdsView_t *ads = &cg_codAdsView[ps->weapon];
+				float fovScale = ( bg_cod.adsTune && ps->weapon == cg.weaponSelect )
+								  ? bg_cod.adsTuneFov : BG_CodAdsFovScale( ps->weapon );
+				float fovComp = bg_cod.adsGunFovComp * ( 1.0f - fovScale ) * e;
+
+				VectorMA( hand.origin, ( ads->fwd + fovComp ) * e, cg.refdef.viewaxis[0], hand.origin );
+				VectorMA( hand.origin, ads->right * e, cg.refdef.viewaxis[1], hand.origin );
+				VectorMA( hand.origin, ads->up * e, cg.refdef.viewaxis[2], hand.origin );
+
+				angles[PITCH] += ads->pitch * e;
+				angles[YAW]   += ads->yaw * e;
+				angles[ROLL]  += ads->roll * e;
+			}
+		}
 
 		AnglesToAxis( angles, hand.axis );
 

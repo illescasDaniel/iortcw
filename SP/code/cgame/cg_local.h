@@ -43,6 +43,16 @@ If you have questions concerning this license or the applicable additional terms
 #include "../game/bg_cod.h"    // codmod: phase 2 tuning (bg_cod.c is built into cgame too)
 #include "cg_public.h"
 
+// codmod: per-weapon viewmodel "sight" offset while ADS (phase 3.5). Cgame-only (unlike
+// bg_cod.h's codWeaponTuning_t, this never needs to match qagame) and NOT const -- the
+// alignment tooling (cod_adsTune, cg_cod.c) overwrites entries live while tuning.
+typedef struct {
+	float fwd, right, up;      // u, along cg.refdef.viewaxis[0..2]
+	float pitch, yaw, roll;    // degrees, added to the viewmodel angles
+} codAdsView_t;
+
+extern codAdsView_t cg_codAdsView[WP_NUM_WEAPONS];
+
 
 #define POWERUP_BLINKS      5
 
@@ -784,6 +794,11 @@ typedef struct {
 	int codDuckDuration;                 // codmod: ms for the current duck transition (phase 2.2);
 										  // kept separate from cod_duckTime so phase 4b (prone) can
 										  // set a different duration without touching this code again
+
+	qboolean codScopeByAds;              // codmod: phase 3.8 -- true while the current scope
+										  // weapon (Sniperrifle/Snooperscope/FG42scope) was entered
+										  // by holding ADS, not by the `weapalt` key. Only ADS
+										  // (CG_CodUpdateScopeHold, cg_cod.c) un-scopes in that case.
 
 	float landChange;                   // for landing hard
 	int landTime;
@@ -1986,6 +2001,8 @@ void CG_LastWeaponUsed_f( void );     //----(SA)	added
 void CG_NextWeaponInBank_f( void );   //----(SA)	added
 void CG_PrevWeaponInBank_f( void );   //----(SA)	added
 void CG_AltWeapon_f( void );
+void CG_CodAltWeapon( qboolean force );    // codmod: phase 3.8, CG_AltWeapon_f factored out
+qboolean CG_CodHasSelectableAlt( int weapon );     // codmod: phase 3.8
 void CG_NextWeapon_f( void );
 void CG_PrevWeapon_f( void );
 void CG_Weapon_f( void );
@@ -2200,6 +2217,11 @@ void CG_DrawTourneyScoreboard( void );
 //
 void CG_CodDrawDebugHud( void );
 void CG_CodDump_f( void );
+float CG_CodAdsFrac( void );           // codmod: phase 3.5, raw 0..1, forced to 1 by cod_adsLock
+void CG_CodUpdateAdsTune( void );      // codmod: phase 3.5 alignment tooling
+void CG_CodAdsTuneLoad_f( void );      // codmod: phase 3.5 alignment tooling
+void CG_CodAdsTuneDump_f( void );      // codmod: phase 3.5 alignment tooling
+void CG_CodUpdateScopeHold( void );    // codmod: phase 3.8
 
 //
 // cg_consolecmds.c

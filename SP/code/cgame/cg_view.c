@@ -1504,6 +1504,10 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 
 	// update cvars
 	CG_UpdateCvars();
+
+	// codmod: cod_adsTune alignment tooling (phase 3.5), see cg_cod.c. Cheap no-op unless
+	// cod_adsTune is set.
+	CG_CodUpdateAdsTune();
 /*
 	// RF, if we should force a weapon, then do so
 	if( !cg.weaponSelect ) {
