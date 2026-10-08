@@ -526,57 +526,53 @@ static void CG_DrawCursorhint( rectDef_t *rect ) {
 
 	trap_R_SetColor( NULL );
 
-	// codmod: "Press <key> to interact" beside usable/door hints (phase 5b).
-	// Key comes from the current +activate binding via trap_Key_GetKey.
+	// codmod: label above the cursor-hint icon (phase 5b). CoD-style "F" for use prompts
+	// (vanilla also binds ENTER; trap_Key_GetKey returns the first bind — always show F).
+	// Breakable props are look-only (shoot to destroy) — short status, not a use prompt.
 	if ( bg_cod.enable && bg_cod.vitalsEnable && bg_cod.interactHint ) {
-		qboolean showInteract = qfalse;
+		const char *hintText = NULL;
+		int hint = cg.cursorHintIcon;
 
-		switch ( cg.cursorHintIcon ) {
-		case HINT_ACTIVATE:
-		case HINT_DOOR:
-		case HINT_DOOR_ROTATING:
-		case HINT_BUTTON:
-		case HINT_BREAKABLE:
-		case HINT_CHAIR:
-			showInteract = qtrue;
-			break;
-		default:
-			break;
-		}
-		if ( showInteract && cg.cursorHintIcon == HINT_CHAIR
+		// Chair while armed with a two-hander draws NOACTIVATE — no prompt.
+		if ( hint == HINT_CHAIR
 			 && cg.predictedPlayerState.weapon
 			 && !( WEAPS_ONE_HANDED & ( 1 << ( cg.predictedPlayerState.weapon ) ) ) ) {
-			showInteract = qfalse; // armed two-hand: chair shows NOACTIVATE
+			hint = HINT_NOACTIVATE;
 		}
-		if ( showInteract ) {
-			char keyName[16];
-			char hintText[64];
-			int key;
+
+		switch ( hint ) {
+		case HINT_NONE:
+		case HINT_FORCENONE:
+		case HINT_NOACTIVATE:
+		case HINT_PLAYER:       // draws as NOACTIVATE
+		case HINT_PLYR_FRIEND:
+		case HINT_PLYR_NEUTRAL:
+		case HINT_PLYR_ENEMY:
+		case HINT_PLYR_UNKNOWN:
+		case HINT_EXIT:
+		case HINT_NOEXIT:
+		case HINT_EXIT_FAR:
+		case HINT_NOEXIT_FAR:
+			break;
+		case HINT_BREAKABLE:
+		case HINT_BREAKABLE_DYNAMITE:
+			hintText = "Breakable";
+			break;
+		default:
+			// Doors, buttons, MG42, pickups, ladders, etc.
+			hintText = "Press F to interact";
+			break;
+		}
+
+		if ( hintText ) {
+			int textW, textX, textY;
 			vec4_t textColor;
 
-			key = trap_Key_GetKey( "+activate" );
-			if ( key <= 0 ) {
-				Q_strncpyz( keyName, "F", sizeof( keyName ) );
-			} else if ( key > 32 && key < 127 && key != '"' ) {
-				if ( key >= 'a' && key <= 'z' ) {
-					keyName[0] = (char)( key - 32 );
-				} else {
-					keyName[0] = (char)key;
-				}
-				keyName[1] = 0;
-			} else if ( key == 13 ) { // K_ENTER
-				Q_strncpyz( keyName, "ENTER", sizeof( keyName ) );
-			} else if ( key == 32 ) { // K_SPACE
-				Q_strncpyz( keyName, "SPACE", sizeof( keyName ) );
-			} else {
-				Q_strncpyz( keyName, "F", sizeof( keyName ) );
-			}
-
-			Com_sprintf( hintText, sizeof( hintText ), "Press %s to interact", keyName );
 			Vector4Copy( color, textColor );
-			CG_DrawSmallStringColor( (int)( rect->x + rect->w + 6 ),
-									(int)( rect->y + rect->h * 0.35f ),
-									hintText, textColor );
+			textW = CG_DrawStrlen( hintText ) * SMALLCHAR_WIDTH;
+			textX = (int)( rect->x + rect->w * 0.5f ) - textW / 2;
+			textY = (int)( rect->y - halfscale ) - SMALLCHAR_HEIGHT - 2;
+			CG_DrawSmallStringColor( textX, textY, hintText, textColor );
 		}
 	}
 
