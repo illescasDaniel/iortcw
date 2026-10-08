@@ -8,11 +8,13 @@
 #include "../client/keycodes.h"
 
 #define COD_MENU_LOG_FILE   "codmod_tune.log"
-#define COD_MENU_VISIBLE    22
-#define COD_MENU_X          340
 #define COD_MENU_Y          8
-#define COD_MENU_W          292
 #define COD_MENU_PAD        4
+#define COD_MENU_MARGIN     8
+#define COD_MENU_MAX_H      400   // virtual-pixel cap so the overlay never eats the whole screen
+#define COD_MENU_BASE_W     292   // width at scale 1.0 (SMALLCHAR)
+#define COD_MENU_SCALE_MIN  0.5f
+#define COD_MENU_SCALE_MAX  1.0f
 
 typedef enum {
 	COD_MI_SECTION,
@@ -114,6 +116,14 @@ static void CG_CodMenu_Adjust( const codMenuItem_t *item, float dir, qboolean fa
 
 	// float
 	v = atof( cur ) + dir * step;
+	// codmod: keep menu scale in a usable range (also clamped when drawing)
+	if ( item->cvar && !Q_stricmp( item->cvar, "cod_menuScale" ) ) {
+		if ( v < COD_MENU_SCALE_MIN ) {
+			v = COD_MENU_SCALE_MIN;
+		} else if ( v > COD_MENU_SCALE_MAX ) {
+			v = COD_MENU_SCALE_MAX;
+		}
+	}
 	Com_sprintf( out, sizeof( out ), "%g", v );
 	CG_CodMenu_SetValue( item->cvar, out );
 }
@@ -152,6 +162,9 @@ static void CG_CodMenu_ActionToggleHud( void ) {
 
 // codmod: every tunable, grouped for the overlay. Keep in sync with bg_codCvars.
 static const codMenuItem_t cg_codMenuItems[] = {
+	{ COD_MI_SECTION, "MENU UI", NULL, 0, 0, NULL },
+	{ COD_MI_FLOAT, "cod_menuScale",          "cod_menuScale",          0.05f, 0.1f, NULL },
+
 	{ COD_MI_SECTION, "MASTER", NULL, 0, 0, NULL },
 	{ COD_MI_BOOL,  "cod_enable",             "cod_enable",             1, 1, NULL },
 	{ COD_MI_BOOL,  "cod_moveEnable",         "cod_moveEnable",         1, 1, NULL },
@@ -230,6 +243,66 @@ static const codMenuItem_t cg_codMenuItems[] = {
 };
 
 static const int cg_codMenuItemCount = sizeof( cg_codMenuItems ) / sizeof( cg_codMenuItems[0] );
+
+/*
+================
+CG_CodMenu_Scale / CG_CodMenu_Metrics
+
+codmod: resolve cod_menuScale (live cvar read so LEFT/RIGHT updates the same frame) and
+derive char size, panel width/x, and how many rows fit under COD_MENU_MAX_H.
+================
+*/
+static float CG_CodMenu_Scale( void ) {
+	char cur[MAX_CVAR_VALUE_STRING];
+	float s;
+
+	CG_CodMenu_GetValue( "cod_menuScale", cur, sizeof( cur ) );
+	s = (float)atof( cur );
+	if ( s < COD_MENU_SCALE_MIN ) {
+		s = COD_MENU_SCALE_MIN;
+	} else if ( s > COD_MENU_SCALE_MAX ) {
+		s = COD_MENU_SCALE_MAX;
+	}
+	return s;
+}
+
+static void CG_CodMenu_Metrics( int *charW, int *charH, int *rowH, int *menuW, int *menuX, int *visible ) {
+	float s;
+	int headerRows;
+	int avail;
+
+	s = CG_CodMenu_Scale();
+	*charW = (int)( SMALLCHAR_WIDTH * s + 0.5f );
+	*charH = (int)( SMALLCHAR_HEIGHT * s + 0.5f );
+	if ( *charW < 4 ) {
+		*charW = 4;
+	}
+	if ( *charH < 8 ) {
+		*charH = 8;
+	}
+	*rowH = *charH + 1;
+
+	*menuW = (int)( COD_MENU_BASE_W * s + 0.5f );
+	if ( *menuW < 180 ) {
+		*menuW = 180;
+	}
+	*menuX = SCREEN_WIDTH - *menuW - COD_MENU_MARGIN;
+
+	// title + runtime + 2 hint lines
+	headerRows = 4;
+	avail = COD_MENU_MAX_H - COD_MENU_PAD * 2 - headerRows * ( *rowH );
+	*visible = avail / ( *rowH );
+	if ( *visible < 8 ) {
+		*visible = 8;
+	}
+	if ( *visible > cg_codMenuItemCount ) {
+		*visible = cg_codMenuItemCount;
+	}
+}
+
+static void CG_CodMenu_DrawText( int x, int y, int charW, int charH, const char *s, const float *color ) {
+	CG_DrawStringExt( x, y, s, color, qtrue, qfalse, charW, charH, 0 );
+}
 
 static void CG_CodMenu_DumpRuntime( void ) {
 	playerState_t *ps;
@@ -319,11 +392,15 @@ static int CG_CodMenu_NextSection( int from, int dir ) {
 }
 
 static void CG_CodMenu_EnsureCursorVisible( void ) {
+	int charW, charH, rowH, menuW, menuX, visible;
+
+	CG_CodMenu_Metrics( &charW, &charH, &rowH, &menuW, &menuX, &visible );
+
 	if ( cg_codMenuCursor < cg_codMenuScroll ) {
 		cg_codMenuScroll = cg_codMenuCursor;
 	}
-	if ( cg_codMenuCursor >= cg_codMenuScroll + COD_MENU_VISIBLE ) {
-		cg_codMenuScroll = cg_codMenuCursor - COD_MENU_VISIBLE + 1;
+	if ( cg_codMenuCursor >= cg_codMenuScroll + visible ) {
+		cg_codMenuScroll = cg_codMenuCursor - visible + 1;
 	}
 	if ( cg_codMenuScroll < 0 ) {
 		cg_codMenuScroll = 0;
@@ -465,7 +542,7 @@ void CG_CodDrawDebugMenu( void ) {
 	char line[128];
 	char value[MAX_CVAR_VALUE_STRING];
 	int i, y, drawn;
-	int rowH;
+	int charW, charH, rowH, menuW, menuX, visible;
 	float menuH;
 
 	CG_CodMenu_HandleInput();
@@ -474,37 +551,37 @@ void CG_CodDrawDebugMenu( void ) {
 		return;
 	}
 
-	rowH = SMALLCHAR_HEIGHT + 1;
-	menuH = (float)( COD_MENU_PAD * 2 + ( COD_MENU_VISIBLE + 4 ) * rowH );
-	CG_FillRect( COD_MENU_X, COD_MENU_Y, COD_MENU_W, menuH, bg );
+	CG_CodMenu_Metrics( &charW, &charH, &rowH, &menuW, &menuX, &visible );
+	menuH = (float)( COD_MENU_PAD * 2 + ( visible + 4 ) * rowH );
+	CG_FillRect( (float)menuX, COD_MENU_Y, (float)menuW, menuH, bg );
 
 	y = COD_MENU_Y + COD_MENU_PAD;
-	CG_DrawSmallStringColor( COD_MENU_X + COD_MENU_PAD, y, "CODMOD TUNE MENU", sectionCol );
+	CG_CodMenu_DrawText( menuX + COD_MENU_PAD, y, charW, charH, "CODMOD TUNE MENU", sectionCol );
 	y += rowH;
 	Com_sprintf( line, sizeof( line ), "ads %.2f  fov %.0f  weap %d",
 				 CG_CodAdsFrac(), cg.refdef.fov_x, cg.predictedPlayerState.weapon );
-	CG_DrawSmallStringColor( COD_MENU_X + COD_MENU_PAD, y, line, hintCol );
+	CG_CodMenu_DrawText( menuX + COD_MENU_PAD, y, charW, charH, line, hintCol );
 	y += rowH + 2;
 
 	drawn = 0;
-	for ( i = cg_codMenuScroll; i < cg_codMenuItemCount && drawn < COD_MENU_VISIBLE; i++ ) {
+	for ( i = cg_codMenuScroll; i < cg_codMenuItemCount && drawn < visible; i++ ) {
 		const codMenuItem_t *item = &cg_codMenuItems[i];
-		int x = COD_MENU_X + COD_MENU_PAD;
+		int x = menuX + COD_MENU_PAD;
 
 		if ( i == cg_codMenuCursor && CG_CodMenu_ItemSelectable( item ) ) {
-			CG_FillRect( COD_MENU_X + 2, y - 1, COD_MENU_W - 4, (float)rowH, selBg );
+			CG_FillRect( (float)( menuX + 2 ), y - 1, (float)( menuW - 4 ), (float)rowH, selBg );
 		}
 
 		if ( item->type == COD_MI_SECTION ) {
 			Com_sprintf( line, sizeof( line ), "-- %s --", item->label );
-			CG_DrawSmallStringColor( x, y, line, sectionCol );
+			CG_CodMenu_DrawText( x, y, charW, charH, line, sectionCol );
 		} else if ( item->type == COD_MI_ACTION ) {
 			Com_sprintf( line, sizeof( line ), "[ %s ]", item->label );
-			CG_DrawSmallStringColor( x, y, line, ( i == cg_codMenuCursor ) ? selCol : dimCol );
+			CG_CodMenu_DrawText( x, y, charW, charH, line, ( i == cg_codMenuCursor ) ? selCol : dimCol );
 		} else {
 			CG_CodMenu_GetValue( item->cvar, value, sizeof( value ) );
 			Com_sprintf( line, sizeof( line ), "%-22s %s", item->label, value );
-			CG_DrawSmallStringColor( x, y, line, ( i == cg_codMenuCursor ) ? selCol : textCol );
+			CG_CodMenu_DrawText( x, y, charW, charH, line, ( i == cg_codMenuCursor ) ? selCol : textCol );
 		}
 
 		y += rowH;
@@ -512,11 +589,11 @@ void CG_CodDrawDebugMenu( void ) {
 	}
 
 	y += 2;
-	CG_DrawSmallStringColor( COD_MENU_X + COD_MENU_PAD, y,
-							 "UP/DN move  L/R adjust  Shift=fast", hintCol );
+	CG_CodMenu_DrawText( menuX + COD_MENU_PAD, y, charW, charH,
+						 "UP/DN move  L/R adjust  Shift=fast", hintCol );
 	y += rowH;
-	CG_DrawSmallStringColor( COD_MENU_X + COD_MENU_PAD, y,
-							 "Enter toggle  Bksp reset  F5 dump  Esc close", hintCol );
+	CG_CodMenu_DrawText( menuX + COD_MENU_PAD, y, charW, charH,
+						 "Enter toggle  Bksp reset  F5 dump  Esc close", hintCol );
 }
 
 /*

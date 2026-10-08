@@ -71,6 +71,7 @@ typedef struct {
 	float adsTuneFov;                               // fovScale preview while tuning, cgame-only
 
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
+	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;
 
 // codmod: generic smoothstep ease, 0..1 in, 0..1 out (phase 3.5+). GCC doesn't warn about

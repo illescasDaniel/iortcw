@@ -95,6 +95,8 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_adsTuneFov",         "0.8",  0,            CODOFS( adsTuneFov ),         0 },
 
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
+	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
+	{ "cod_menuScale",          "0.7",  CVAR_ARCHIVE, CODOFS( menuScale ),          0 },
 };
 
 const int bg_numCodCvars = sizeof( bg_codCvars ) / sizeof( bg_codCvars[0] );
