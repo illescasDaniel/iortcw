@@ -58,8 +58,10 @@ typedef struct {
 extern codAdsView_t cg_codAdsView[WP_NUM_WEAPONS];
 
 // codmod: apply CoD-style iron-sight ADS to the first-person hand origin/angles.
-// e is the smoothstepped ADS fraction 0..1. Uses tag_flash on the viewmodel.
-void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, float e );
+// e is the smoothstepped ADS fraction 0..1. frame/oldframe/backlerp must match the
+// pose that will be drawn (tag_weapon moves with the hands animation).
+void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, float e,
+							  int frame, int oldframe, float backlerp );
 
 
 #define POWERUP_BLINKS      5

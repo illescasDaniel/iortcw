@@ -3068,6 +3068,15 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		VectorMA( hand.origin, ( gunoff[1] + fovOffset[1] ), cg.refdef.viewaxis[1], hand.origin );
 		VectorMA( hand.origin, ( gunoff[2] + fovOffset[2] ), cg.refdef.viewaxis[2], hand.origin );
 
+		// codmod: resolve hands animation BEFORE ADS align -- tag_weapon (bore angle) moves
+		// with the anim. Aligning against frame 0 left a permanent diagonal in ADS.
+		if ( cg_gun_frame.integer ) {
+			hand.frame = hand.oldframe = cg_gun_frame.integer;
+			hand.backlerp = 0;
+		} else {
+			CG_WeaponAnimation( ps, weapon, &hand.oldframe, &hand.frame, &hand.backlerp );   //----(SA)	changed
+		}
+
 		// codmod: CoD-style iron-sight ADS (phase 3.5). Aligns tag_flash-derived rear sight
 		// to the screen center -- see CG_CodApplyIronSightAds in cg_cod.c. Not a simple
 		// "nudge the gun"; this is what makes ADS look like aiming through the sights.
@@ -3075,18 +3084,12 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 			float e = BG_CodSmoothstep( CG_CodAdsFrac() );
 
 			if ( e > 0.0f ) {
-				CG_CodApplyIronSightAds( hand.origin, angles, ps->weapon, e );
+				CG_CodApplyIronSightAds( hand.origin, angles, ps->weapon, e,
+										 hand.frame, hand.oldframe, hand.backlerp );
 			}
 		}
 
 		AnglesToAxis( angles, hand.axis );
-
-		if ( cg_gun_frame.integer ) {
-			hand.frame = hand.oldframe = cg_gun_frame.integer;
-			hand.backlerp = 0;
-		} else {  // get the animation state
-			CG_WeaponAnimation( ps, weapon, &hand.oldframe, &hand.frame, &hand.backlerp );   //----(SA)	changed
-		}
 
 		VectorCopy( hand.origin, hand.lightingOrigin );
 

@@ -108,15 +108,20 @@ CG_CodApplyIronSightAds
 
 codmod: CoD-style iron-sight ADS without new models (phase 3.5).
 
-Two-pass align so the gun points straight (not diagonally) AND the rear sight sits on the
-optical axis:
-  1) straighten hand pitch/yaw so tag_flash forward matches view forward
-  2) re-resolve tags at that orientation, then translate so the rear sight lands at sightDist
+Must be called with the same hands animation frame that will be drawn -- tag_weapon (and
+therefore the bore) moves with the anim; aligning against frame 0 left a permanent diagonal.
+
+Align:
+  1) iteratively straighten pitch/yaw so tag_flash forward matches view forward (tag
+     hierarchy is not a 1:1 euler map, so one shot is not enough)
+  2) level roll to the view (drops idle/bob tilt)
+  3) translate so the rear sight lands on the optical axis at sightDist
 Blend the fully-aligned pose back onto the hip pose by e. Fine bias from cg_codAdsView and
 cod_adsGunFovComp is applied on top. Falls back to bias-only if tags are missing.
 ================
 */
-void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, float e ) {
+void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, float e,
+							  int frame, int oldframe, float backlerp ) {
 	weaponInfo_t *weapon;
 	codAdsView_t *ads;
 	refEntity_t hand;
@@ -131,7 +136,7 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	float sightHeight, barrelBack, sightDist;
 	float fovScale, fovComp;
 	float deltaLen;
-	int i;
+	int i, iter;
 
 	if ( e <= 0.0f || weaponNum <= WP_NONE || weaponNum >= WP_NUM_WEAPONS ) {
 		return;
@@ -165,22 +170,39 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 
 	memset( &hand, 0, sizeof( hand ) );
 	VectorCopy( handOrigin, hand.origin );
-	AnglesToAxis( angles, hand.axis );
 	hand.hModel = weapon->handsModel;
-	hand.frame = hand.oldframe = 0;
-	hand.backlerp = 0;
+	// codmod: MUST match the drawn pose -- see call site in CG_AddViewWeapon.
+	hand.frame = frame;
+	hand.oldframe = oldframe;
+	hand.backlerp = backlerp;
 
 	memset( &gun, 0, sizeof( gun ) );
 	gun.hModel = weapon->weaponModel[W_FP_MODEL];
 	gun.frame = gun.oldframe = 0;
 	gun.backlerp = 0;
 
-	if ( hand.hModel && gun.hModel && CG_CodResolveFlashTag( &hand, &gun, flashOrigin, flashFwd ) ) {
-		// Pass 1: straighten the bore onto the view axis (kills the hip-fire diagonal).
-		vectoangles( flashFwd, flashAngles );
+	if ( hand.hModel && gun.hModel ) {
 		vectoangles( cg.refdef.viewaxis[0], viewAngles );
-		alignedAngles[PITCH] += AngleDelta( viewAngles[PITCH], flashAngles[PITCH] );
-		alignedAngles[YAW]   += AngleDelta( viewAngles[YAW],   flashAngles[YAW] );
+
+		// Pass 1: iterative bore straighten. Hand euler deltas only approximate the tag
+		// chain, so re-measure flashFwd after each correction until it matches the view.
+		for ( iter = 0; iter < 4; iter++ ) {
+			VectorCopy( alignedOrigin, hand.origin );
+			AnglesToAxis( alignedAngles, hand.axis );
+			if ( !CG_CodResolveFlashTag( &hand, &gun, flashOrigin, flashFwd ) ) {
+				break;
+			}
+			vectoangles( flashFwd, flashAngles );
+			alignedAngles[PITCH] += AngleDelta( viewAngles[PITCH], flashAngles[PITCH] );
+			alignedAngles[YAW]   += AngleDelta( viewAngles[YAW],   flashAngles[YAW] );
+			if ( fabs( AngleDelta( viewAngles[PITCH], flashAngles[PITCH] ) ) < 0.05f &&
+				 fabs( AngleDelta( viewAngles[YAW],   flashAngles[YAW] ) )   < 0.05f ) {
+				break;
+			}
+		}
+
+		// Level the gun to the view (kills idle/bob roll that reads as a crooked ADS).
+		alignedAngles[ROLL] += AngleDelta( cg.refdefViewAngles[ROLL], alignedAngles[ROLL] );
 
 		// Pass 2: at the straightened orientation, put the rear sight on the optical axis.
 		VectorCopy( alignedOrigin, hand.origin );
