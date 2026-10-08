@@ -91,13 +91,13 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	barrelBack  = bg_cod.adsBarrelBack  + ads->barrelBack;
 	sightDist   = bg_cod.adsSightDist   + ads->sightDist;
 
-	// codmod: viewmodels sit a few units in front of the eye. A large sightDist parks the
-	// gun in the middle of the world view ("floating arms"). Keep it close like CoD.
-	if ( sightDist < 5.0f ) {
-		sightDist = 5.0f;
+	// codmod: too small = looking inside the mesh; too large = floating mid-screen arms.
+	// Keep a usable console-tuning window (~8-18). Default sits near 12.
+	if ( sightDist < 8.0f ) {
+		sightDist = 8.0f;
 	}
-	if ( sightDist > 12.0f ) {
-		sightDist = 12.0f;
+	if ( sightDist > 18.0f ) {
+		sightDist = 18.0f;
 	}
 
 	fovScale = ( bg_cod.adsTune && weaponNum == cg.weaponSelect )

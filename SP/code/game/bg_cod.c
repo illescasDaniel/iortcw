@@ -68,11 +68,10 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_adsGunFovComp",      "2",    0,            CODOFS( adsGunFovComp ),      0 },
 	// codmod: CoD-style iron-sight auto-align defaults (cgame). Per-weapon table can override.
 	// sightHeight must clear the slide (too low = looking down the bore / "inside the gun").
-	// sightDist is how far ahead of the eye the rear sight sits -- viewmodel scale, ~6-10.
-	// (A previous default of 18 made the gun look like floating arms in mid-screen.)
+	// sightDist is eye relief ahead of the camera; ~12 clears the mesh, >18 floats mid-screen.
 	{ "cod_adsSightHeight",     "6.5",  0,            CODOFS( adsSightHeight ),     0 },
 	{ "cod_adsBarrelBack",      "10",   0,            CODOFS( adsBarrelBack ),      0 },
-	{ "cod_adsSightDist",       "8",    0,            CODOFS( adsSightDist ),       0 },
+	{ "cod_adsSightDist",       "12",   0,            CODOFS( adsSightDist ),       0 },
 	{ "cod_scopeSwitchTime",    "0",    0,            CODOFS( scopeSwitchTime ),    0 },
 
 	// codmod: Phase 3.5 alignment tooling -- see docs/phase-3-ads.md "Alignment tooling".
