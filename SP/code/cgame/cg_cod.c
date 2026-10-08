@@ -273,6 +273,11 @@ void CG_CodDrawDebugHud( void ) {
 	CG_DrawSmallStringColor( 4, y, line, color );
 	y += SMALLCHAR_HEIGHT;
 
+	// codmod: ads frac + current fov (phase 3.7)
+	Com_sprintf( line, sizeof( line ), "ads %.2f  fov %.1f", ps->stats[STAT_COD_ADS] / 1000.0f, cg.refdef.fov_x );
+	CG_DrawSmallStringColor( 4, y, line, color );
+	y += SMALLCHAR_HEIGHT;
+
 	if ( bg_cod.debugHud >= 2 ) {
 		Com_sprintf( line, sizeof( line ), "ai spd %.1f u/s", CG_CodNearestAISpeed() );
 		CG_DrawSmallStringColor( 4, y, line, color );
