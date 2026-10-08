@@ -114,6 +114,22 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_sprintRunRoll",      "1.5",  0,            CODOFS( sprintRunRoll ),      0 },
 	{ "cod_sprintFovScale",     "1.03", 0,            CODOFS( sprintFovScale ),     0 },
 
+	// codmod: Phase 5 feel — pistol click-fire + jump/gravity/inertia/land (docs/phase-5-feel.md)
+	{ "cod_weaponEnable",       "1",    0,            CODOFS( weaponEnable ),       1 },
+	{ "cod_pistolTapFire",      "1",    0,            CODOFS( pistolTapFire ),      1 },
+	{ "cod_pistolTapThreshold", "150",  0,            CODOFS( pistolTapThreshold ), 0 },
+	{ "cod_pistolNextShot",     "120",  0,            CODOFS( pistolNextShot ),     0 },
+	{ "cod_pistolFireDelay",    "0",    0,            CODOFS( pistolFireDelay ),    0 },
+	{ "cod_autoFireScale",      "1",    0,            CODOFS( autoFireScale ),      0 },
+	{ "cod_jumpVelocity",       "250",  0,            CODOFS( jumpVelocity ),       0 },
+	{ "cod_gravity",            "800",  0,            CODOFS( gravity ),            0 },
+	{ "cod_accelerate",         "8",    0,            CODOFS( accelerate ),         0 },
+	{ "cod_friction",           "8",    0,            CODOFS( friction ),           0 },
+	{ "cod_stopspeed",          "100",  0,            CODOFS( stopspeed ),          0 },
+	{ "cod_landSlowEnable",     "1",    0,            CODOFS( landSlowEnable ),     1 },
+	{ "cod_landSlowTime",       "350",  0,            CODOFS( landSlowTime ),       0 },
+	{ "cod_landSlowScale",      "0.55", 0,            CODOFS( landSlowScale ),      0 },
+
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
 	{ "cod_menuScale",          "0.7",  CVAR_ARCHIVE, CODOFS( menuScale ),          0 },
@@ -206,6 +222,17 @@ const codWeaponTuning_t bg_codWeapons[WP_NUM_WEAPONS] = {
 	[WP_SNOOPERSCOPE]   = { qfalse, 0.5f, 0,     0,   0, 0 },
 	[WP_FG42SCOPE]      = { qfalse, 0.5f, 0,     0,   0, 0 },
 };
+
+/*
+================
+BG_CodIsPistol
+
+codmod: weapons that get SP tap-fire / pistol interval overrides (phase 5).
+================
+*/
+qboolean BG_CodIsPistol( int weapon ) {
+	return ( weapon == WP_LUGER || weapon == WP_COLT || weapon == WP_SILENCER ) ? qtrue : qfalse;
+}
 
 /*
 ================

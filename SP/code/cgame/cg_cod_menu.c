@@ -171,6 +171,7 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_BOOL,  "cod_leanEnable",         "cod_leanEnable",         1, 1, NULL },
 	{ COD_MI_BOOL,  "cod_adsEnable",          "cod_adsEnable",          1, 1, NULL },
 	{ COD_MI_BOOL,  "cod_gaitEnable",         "cod_gaitEnable",         1, 1, NULL },
+	{ COD_MI_BOOL,  "cod_weaponEnable",       "cod_weaponEnable",       1, 1, NULL },
 
 	{ COD_MI_SECTION, "MOVEMENT SPEEDS", NULL, 0, 0, NULL },
 	{ COD_MI_FLOAT, "cod_runSpeed",           "cod_runSpeed",           5,    25,   NULL },
@@ -202,6 +203,23 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_FLOAT, "cod_sprintRunPitch",     "cod_sprintRunPitch",     0.05f, 0.25f, NULL },
 	{ COD_MI_FLOAT, "cod_sprintRunRoll",      "cod_sprintRunRoll",      0.05f, 0.25f, NULL },
 	{ COD_MI_FLOAT, "cod_sprintFovScale",     "cod_sprintFovScale",     0.01f, 0.05f, NULL },
+
+	{ COD_MI_SECTION, "FEEL (jump / inertia / land)", NULL, 0, 0, NULL },
+	{ COD_MI_FLOAT, "cod_jumpVelocity",       "cod_jumpVelocity",       5,    25,   NULL },
+	{ COD_MI_FLOAT, "cod_gravity",            "cod_gravity",            10,   50,   NULL },
+	{ COD_MI_FLOAT, "cod_accelerate",         "cod_accelerate",         0.25f, 1,   NULL },
+	{ COD_MI_FLOAT, "cod_friction",           "cod_friction",           0.25f, 1,   NULL },
+	{ COD_MI_FLOAT, "cod_stopspeed",          "cod_stopspeed",          5,    25,   NULL },
+	{ COD_MI_BOOL,  "cod_landSlowEnable",     "cod_landSlowEnable",     1,    1,    NULL },
+	{ COD_MI_FLOAT, "cod_landSlowTime",       "cod_landSlowTime",       25,   100,  NULL },
+	{ COD_MI_FLOAT, "cod_landSlowScale",      "cod_landSlowScale",      0.05f, 0.25f, NULL },
+
+	{ COD_MI_SECTION, "WEAPON FIRE", NULL, 0, 0, NULL },
+	{ COD_MI_BOOL,  "cod_pistolTapFire",      "cod_pistolTapFire",      1,    1,    NULL },
+	{ COD_MI_FLOAT, "cod_pistolTapThreshold", "cod_pistolTapThreshold", 10,   50,   NULL },
+	{ COD_MI_FLOAT, "cod_pistolNextShot",     "cod_pistolNextShot",     10,   50,   NULL },
+	{ COD_MI_FLOAT, "cod_pistolFireDelay",    "cod_pistolFireDelay",    10,   50,   NULL },
+	{ COD_MI_FLOAT, "cod_autoFireScale",      "cod_autoFireScale",      0.05f, 0.25f, NULL },
 
 	{ COD_MI_SECTION, "CROUCH / DUCK", NULL, 0, 0, NULL },
 	{ COD_MI_FLOAT, "cod_duckTime",           "cod_duckTime",           5,    25,   NULL },

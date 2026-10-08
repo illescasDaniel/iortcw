@@ -87,9 +87,28 @@ typedef struct {
 	float sprintRunRoll;       // x cg_runroll contribution while sprinting
 	float sprintFovScale;      // FOV scale at full sprint (1 = none)
 
+	// codmod: Phase 5 movement weight + fire responsiveness (docs/phase-5-feel.md)
+	int weaponEnable;          // master for pistol tap-fire / fire-interval overrides
+	int pistolTapFire;         // SP releasedFire early-clear for Luger/Colt/Silencer
+	float pistolTapThreshold;  // ms: clear weaponTime when <= this after release
+	float pistolNextShot;      // ms min between pistol shots (0 = ammoTable)
+	float pistolFireDelay;     // ms first-shot delay override for pistols
+	float autoFireScale;       // scale nextShotTime for SMGs/FG42 (1 = vanilla)
+	float jumpVelocity;        // u/s vertical jump for player (vanilla JUMP_VELOCITY 270)
+	float gravity;             // player ps.gravity (vanilla 800)
+	float accelerate;          // player ground accelerate (vanilla pm_accelerate 10)
+	float friction;            // player ground friction (vanilla pm_friction 6)
+	float stopspeed;           // player friction control floor (vanilla 100)
+	int landSlowEnable;        // brief wishspeed scale after landing
+	float landSlowTime;        // ms
+	float landSlowScale;       // × wishspeed while land timer active
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;
+
+// codmod: Luger / Colt / Silencer — SP pistol tap-fire set (phase 5).
+qboolean BG_CodIsPistol( int weapon );
 
 // codmod: generic smoothstep ease, 0..1 in, 0..1 out (phase 3.5+). GCC doesn't warn about
 // unused "static inline" functions, so qagame linking this header unused is fine.
@@ -120,8 +139,8 @@ extern const int bg_numCodCvars;
 
 // codmod: g_main.c / cg_main.c each keep a static vmCvar_t[BG_COD_MAX_CVARS] and pass it in.
 // Bump this if bg_codCvars ever grows past it -- BG_CodRegisterCvars() clamps defensively.
-// (phase 3 ADS + phase 4 gait cvars; leave headroom for slide/prone.)
-#define BG_COD_MAX_CVARS 80
+// (phase 3–5 cvars; leave headroom for slide/prone.)
+#define BG_COD_MAX_CVARS 96
 
 void BG_CodRegisterCvars( vmCvar_t *cvars, int maxCvars );
 void BG_CodUpdateCvars( vmCvar_t *cvars, int maxCvars );

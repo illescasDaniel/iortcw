@@ -272,8 +272,17 @@ static void PM_Friction( void ) {
 		if ( pml.walking && !( pml.groundTrace.surfaceFlags & SURF_SLICK ) ) {
 			// if getting knocked back, no friction
 			if ( !( pm->ps->pm_flags & PMF_TIME_KNOCKBACK ) ) {
-				control = speed < pm_stopspeed ? pm_stopspeed : speed;
-				drop += control * pm_friction * pml.frametime;
+				// codmod: player-only ground friction/stopspeed (phase 5 / E17). Do not
+				// mutate file-scope pm_* — AI shares this module in the same process.
+				float friction = pm_friction;
+				float stopspeed = pm_stopspeed;
+
+				if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+					friction = bg_cod.friction;
+					stopspeed = bg_cod.stopspeed;
+				}
+				control = speed < stopspeed ? stopspeed : speed;
+				drop += control * friction * pml.frametime;
 			}
 		}
 	}
@@ -584,7 +593,12 @@ static qboolean PM_CheckJump( void ) {
 	pm->ps->pm_flags |= PMF_JUMP_HELD;
 
 	pm->ps->groundEntityNum = ENTITYNUM_NONE;
-	pm->ps->velocity[2] = JUMP_VELOCITY;
+	// codmod: player jump velocity (phase 5 / E7). AI keeps JUMP_VELOCITY 270.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+		pm->ps->velocity[2] = bg_cod.jumpVelocity;
+	} else {
+		pm->ps->velocity[2] = JUMP_VELOCITY;
+	}
 	PM_AddEvent( EV_JUMP );
 
 	if ( pm->cmd.forwardmove >= 0 ) {
@@ -1077,8 +1091,17 @@ static void PM_WalkMove( void ) {
 		accelerate = pm_airaccelerate;
 	} else if ( ( pm->ps->stats[STAT_HEALTH] <= 0 ) && pm->ps->aiChar && ( pml.groundTrace.surfaceFlags & SURF_MONSTERSLICK ) )    {
 		accelerate = pm_airaccelerate;
+	} else if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+		// codmod: player-only ground accelerate (phase 5 / E17)
+		accelerate = bg_cod.accelerate;
 	} else {
 		accelerate = pm_accelerate;
+	}
+
+	// codmod: landing slowdown (phase 5 / E6) — scale wishspeed while STAT_COD_LAND > 0
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable && bg_cod.landSlowEnable
+		 && pm->ps->stats[STAT_COD_LAND] > 0 ) {
+		wishspeed *= bg_cod.landSlowScale;
 	}
 
 	PM_Accelerate( wishdir, wishspeed, accelerate );
@@ -1388,6 +1411,12 @@ static void PM_CrashLand( void ) {
 	// start footstep cycle over
 	pm->ps->bobCycle = 0;
 	pm->ps->footstepCount = 0;
+
+	// codmod: landing slowdown (phase 5 / E6). Any non-trivial land (delta >= 1 already
+	// required above). Player only; timer is networked in STAT_COD_LAND.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable && bg_cod.landSlowEnable ) {
+		pm->ps->stats[STAT_COD_LAND] = (int)bg_cod.landSlowTime;
+	}
 }
 
 
@@ -3081,6 +3110,21 @@ static void PM_Weapon( void ) {
 	}
 // jpw
 
+	// codmod: SP pistol tap-fire (phase 5). Vanilla SP left the older tap-fire block
+	// commented out; MP-only path above does not run in single player. Player only —
+	// AI keeps the ammoTable 400 ms interval.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.pistolTapFire
+		 && BG_CodIsPistol( pm->ps->weapon ) ) {
+		if ( pm->ps->releasedFire ) {
+			if ( pm->ps->weaponTime <= (int)bg_cod.pistolTapThreshold
+				 && ( pm->cmd.buttons & BUTTON_ATTACK ) ) {
+				pm->ps->weaponTime = 0;
+			}
+		} else if ( !( pm->cmd.buttons & BUTTON_ATTACK ) && ( pm->ps->weaponTime >= 50 ) ) {
+			pm->ps->releasedFire = qtrue;
+		}
+	}
+
 }
 
 	// check for weapon change
@@ -3240,7 +3284,13 @@ static void PM_Weapon( void ) {
 			// NERVE's panzerfaust spinup
 //			if (pm->ps->weapon == WP_PANZERFAUST)
 //				PM_AddEvent( EV_SPINUP );
-			pm->ps->weaponDelay = ammoTable[pm->ps->weapon].fireDelayTime;
+			// codmod: snappy pistol first-shot delay (phase 5)
+			if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable
+				 && BG_CodIsPistol( pm->ps->weapon ) ) {
+				pm->ps->weaponDelay = (int)bg_cod.pistolFireDelay;
+			} else {
+				pm->ps->weaponDelay = ammoTable[pm->ps->weapon].fireDelayTime;
+			}
 		} else {
 			BG_AnimScriptEvent( pm->ps, ANIM_ET_FIREWEAPON, qfalse, qtrue );
 		}
@@ -3443,10 +3493,17 @@ static void PM_Weapon( void ) {
 		break;
 	case WP_LUGER:
 		addTime = ammoTable[pm->ps->weapon].nextShotTime;
+		// codmod: pistol min interval (phase 5); default 120 vs ammoTable 400
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.pistolNextShot > 0 ) {
+			addTime = (int)bg_cod.pistolNextShot;
+		}
 		aimSpreadScaleAdd = 35;
 		break;
 	case WP_COLT:
 		addTime = ammoTable[pm->ps->weapon].nextShotTime;
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.pistolNextShot > 0 ) {
+			addTime = (int)bg_cod.pistolNextShot;
+		}
 		aimSpreadScaleAdd = 20;
 		break;
 //----(SA)	added
@@ -3512,14 +3569,25 @@ static void PM_Weapon( void ) {
 	case WP_MP40:
 	case WP_THOMPSON:
 		addTime = ammoTable[pm->ps->weapon].nextShotTime;
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.autoFireScale > 0
+			 && bg_cod.autoFireScale != 1.0f ) {
+			addTime = (int)( addTime * bg_cod.autoFireScale );
+		}
 		aimSpreadScaleAdd = 15 + rand() % 10;       // (SA) new values for DM
 		break;
 	case WP_STEN:
 		addTime = ammoTable[pm->ps->weapon].nextShotTime;
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.autoFireScale > 0
+			 && bg_cod.autoFireScale != 1.0f ) {
+			addTime = (int)( addTime * bg_cod.autoFireScale );
+		}
 		aimSpreadScaleAdd = 15 + rand() % 10;       // (SA) new values for DM
 		break;
 	case WP_SILENCER:
 		addTime = ammoTable[pm->ps->weapon].nextShotTime;
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.pistolNextShot > 0 ) {
+			addTime = (int)bg_cod.pistolNextShot;
+		}
 		aimSpreadScaleAdd = 35;
 		break;
 	case WP_VENOM:
@@ -4469,6 +4537,14 @@ void PmoveSingle( pmove_t *pmove ) {
 	// codmod: decide sprint state before the move dispatch so PM_CmdScale/PM_WalkMove/
 	// PM_Sprint all agree this frame (phase 2.1.c)
 	PM_CodUpdateSprint();
+
+	// codmod: tick landing slowdown timer (phase 5 / E6)
+	if ( !pm->ps->aiChar && pm->ps->stats[STAT_COD_LAND] > 0 ) {
+		pm->ps->stats[STAT_COD_LAND] -= pml.msec;
+		if ( pm->ps->stats[STAT_COD_LAND] < 0 ) {
+			pm->ps->stats[STAT_COD_LAND] = 0;
+		}
+	}
 
 	if ( pm->ps->powerups[PW_FLIGHT] ) {
 		// flight powerup doesn't allow jump and has different friction

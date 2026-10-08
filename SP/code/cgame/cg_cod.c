@@ -672,6 +672,13 @@ void CG_CodDrawDebugHud( void ) {
 	CG_DrawSmallStringColor( 4, y, line, color );
 	y += SMALLCHAR_HEIGHT;
 
+	// codmod: landing slowdown timer (phase 5)
+	if ( ps->stats[STAT_COD_LAND] > 0 ) {
+		Com_sprintf( line, sizeof( line ), "landSlow %d ms", ps->stats[STAT_COD_LAND] );
+		CG_DrawSmallStringColor( 4, y, line, color );
+		y += SMALLCHAR_HEIGHT;
+	}
+
 	if ( bg_cod.debugHud >= 2 ) {
 		Com_sprintf( line, sizeof( line ), "ai spd %.1f u/s", CG_CodNearestAISpeed() );
 		CG_DrawSmallStringColor( 4, y, line, color );

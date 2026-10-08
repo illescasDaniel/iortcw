@@ -1006,11 +1006,13 @@ void ClientThink_real( gentity_t *ent ) {
 	// see ai_cast_think.c/ai_cast_characters.c for the one deliberate AI exception). Re-applied
 	// every frame (not just in ClientSpawn) so cvar changes and savegame loads take effect at
 	// once -- see docs/architecture.md section 7. Never change g_speed itself. (phase 2.1.a)
+	// Player gravity override is phase 5 (cod_gravity); never change g_gravity itself.
 	if ( !client->ps.aiChar && bg_cod.enable && bg_cod.moveEnable ) {
 		client->ps.speed            = bg_cod.runSpeed;
 		client->ps.runSpeedScale    = 1.0f;
 		client->ps.sprintSpeedScale = bg_cod.sprintScale;
 		client->ps.crouchSpeedScale = bg_cod.crouchScale;
+		client->ps.gravity          = bg_cod.gravity;
 	} else if ( !client->ps.aiChar ) {
 		// restore vanilla values (from ClientSpawn) so cod_enable 0 is a true A/B comparison
 		client->ps.runSpeedScale    = 0.8f;

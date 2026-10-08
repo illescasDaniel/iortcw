@@ -342,15 +342,16 @@ typedef enum {
 	// plain ints here, but msg.c only delta-encodes 16 bits of change per entry, so treat
 	// these as shorts (-32768..32767). See docs/architecture.md section 3.
 	STAT_COD_ADS = 8,        // phase 3: ADS fraction * 1000
-	STAT_COD_SLIDE,          // phase 4: >0 slide ms left, <0 cooldown ms
+	STAT_COD_SLIDE,          // phase 6: >0 slide ms left, <0 cooldown ms
 	STAT_COD_FLAGS,          // bitfield, see COD_SF_*
-	STAT_COD_SLIDE_SPEED,    // phase 4: start speed of the current slide, u/s
-	STAT_COD_STANCE          // phase 4b: >0 prone transition ms left, <0 prone cooldown ms
+	STAT_COD_SLIDE_SPEED,    // phase 6: start speed of the current slide, u/s
+	STAT_COD_STANCE,         // phase 6b: >0 prone transition ms left, <0 prone cooldown ms
+	STAT_COD_LAND            // phase 5: >0 landing slowdown ms left
 } statIndex_t;
 
 // codmod: compile-time check that STAT_COD_* stay inside ps->stats[MAX_STATS] (q_shared.h).
 // A negative array size here is a compile error, which is the point.
-typedef char bg_cod_statIndexRangeCheck_t[ ( STAT_COD_STANCE < MAX_STATS ) ? 1 : -1 ];
+typedef char bg_cod_statIndexRangeCheck_t[ ( STAT_COD_LAND < MAX_STATS ) ? 1 : -1 ];
 
 // codmod: ps->stats[STAT_COD_FLAGS] bits (phase 2+)
 #define COD_SF_SPRINTING 1
