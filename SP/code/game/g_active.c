@@ -28,6 +28,7 @@ If you have questions concerning this license or the applicable additional terms
 
 
 #include "g_local.h"
+#include "bg_cod.h"     // codmod: phase 2 tuning
 
 #include "ai_cast_fight.h"   // need these for avoidance
 
@@ -1000,6 +1001,22 @@ void ClientThink_real( gentity_t *ent ) {
 
 	// set speed
 	client->ps.speed = g_speed.value;
+
+	// codmod: CoD4 speeds for the player only (AI keeps vanilla g_speed and its own scales,
+	// see ai_cast_think.c/ai_cast_characters.c for the one deliberate AI exception). Re-applied
+	// every frame (not just in ClientSpawn) so cvar changes and savegame loads take effect at
+	// once -- see docs/architecture.md section 7. Never change g_speed itself. (phase 2.1.a)
+	if ( !client->ps.aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+		client->ps.speed            = bg_cod.runSpeed;
+		client->ps.runSpeedScale    = 1.0f;
+		client->ps.sprintSpeedScale = bg_cod.sprintScale;
+		client->ps.crouchSpeedScale = bg_cod.crouchScale;
+	} else if ( !client->ps.aiChar ) {
+		// restore vanilla values (from ClientSpawn) so cod_enable 0 is a true A/B comparison
+		client->ps.runSpeedScale    = 0.8f;
+		client->ps.sprintSpeedScale = 1.1f;
+		client->ps.crouchSpeedScale = 0.25f;
+	}
 
 	if ( client->ps.powerups[PW_HASTE] ) {
 		client->ps.speed *= 1.3;

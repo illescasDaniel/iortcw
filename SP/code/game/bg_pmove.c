@@ -34,6 +34,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
 #include "bg_local.h"
+#include "bg_cod.h"     // codmod: phase 2 tuning
 
 // Rafael gameskill
 int bg_pmove_gameskill_integer;
@@ -410,7 +411,16 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 				  + cmd->rightmove * cmd->rightmove + cmd->upmove * cmd->upmove );
 	scale = (float)pm->ps->speed * max / ( 127.0 * total );
 
-	if ( pm->cmd.buttons & BUTTON_SPRINT && pm->ps->sprintTime > 50 ) {
+	// codmod: for the player, drive sprint off the networked COD_SF_SPRINTING flag (set by
+	// PM_CodUpdateSprint) instead of re-deriving it from the raw button + sprintTime here.
+	// AI and cod_enable 0 keep the vanilla check. (phase 2.1.c)
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+		if ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) {
+			scale *= pm->ps->sprintSpeedScale;
+		} else {
+			scale *= pm->ps->runSpeedScale;
+		}
+	} else if ( pm->cmd.buttons & BUTTON_SPRINT && pm->ps->sprintTime > 50 ) {
 		scale *= pm->ps->sprintSpeedScale;
 	} else {
 		scale *= pm->ps->runSpeedScale;
@@ -935,7 +945,13 @@ static void PM_WalkMove( void ) {
 			} else {
 				pm->ps->jumpTime = pm->cmd.serverTime;
 
-				stamtake = 2000;    // amount to take for jump
+				// codmod: player-tunable jump stamina cost (phase 2.1.c, cod_sprintJumpCost,
+				// vanilla default 2000). AI and cod_enable 0 keep the vanilla constant.
+				if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+					stamtake = (int)bg_cod.sprintJumpCost;
+				} else {
+					stamtake = 2000;    // amount to take for jump
+				}
 
 				// take time from powerup before taking it from sprintTime
 				if ( pm->ps->powerups[PW_NOFATIGUE] ) {
@@ -970,6 +986,21 @@ static void PM_WalkMove( void ) {
 
 	cmd = pm->cmd;
 	scale = PM_CmdScale( &cmd );
+
+	// codmod: CoD4 direction & walk scales, player only (phase 2.1.b)
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+		if ( fmove < 0 ) {
+			fmove *= bg_cod.backScale;
+		}
+		smove *= bg_cod.strafeScale;
+
+		if ( pm->cmd.buttons & BUTTON_WALKING ) {
+			// the engine sends half-magnitude input for walk (64/127 ~= 0.504, see
+			// cl_input.c:351); undo that and apply our own walk scale so walk speed
+			// ends up exactly runSpeed * walkScale.
+			scale *= bg_cod.walkScale * 127.0f / 64.0f;
+		}
+	}
 
 // Ridah, moved this down, so we use the actual movement direction
 	// set the movementDir so clients can rotate the legs for strafing
@@ -3561,6 +3592,51 @@ static void PM_DropTimers( void ) {
 	}
 }
 
+/*
+================
+PM_CodUpdateSprint
+
+codmod: decides whether the player is sprinting *this command* and writes the result to
+the networked ps->stats[STAT_COD_FLAGS] COD_SF_SPRINTING bit (phase 2.1.c). Called from
+PmoveSingle right after PM_DropTimers(), before the move-type dispatch, so PM_CmdScale and
+PM_WalkMove/PM_Sprint all see the same decision this frame.
+
+Vanilla's "BUTTON_SPRINT && sprintTime > 50" is frame-rate dependent and lets you sprint
+backwards/sideways/crouched/underwater. This fixes that for the player only; AI never
+reads COD_SF_SPRINTING (ai_cast_think.c sets its own speeds).
+================
+*/
+static void PM_CodUpdateSprint( void ) {
+	qboolean moving;
+	qboolean wantSprint;
+	qboolean wasSprinting;
+	float minSprintTime;
+
+	if ( pm->ps->aiChar || !( bg_cod.enable && bg_cod.moveEnable ) ) {
+		// vanilla: leave the flag clear, PM_CmdScale/PM_Sprint fall back to the old check
+		pm->ps->stats[STAT_COD_FLAGS] &= ~COD_SF_SPRINTING;
+		return;
+	}
+
+	moving = ( pm->cmd.forwardmove || pm->cmd.rightmove ) ? qtrue : qfalse;
+
+	wantSprint = ( pm->cmd.buttons & BUTTON_SPRINT )
+				 && ( bg_cod.sprintForwardOnly ? ( pm->cmd.forwardmove > 0 ) : moving )
+				 && !( pm->ps->pm_flags & PMF_DUCKED )
+				 && pm->waterlevel < 2
+				 && !( pm->cmd.buttons & BUTTON_WALKING );
+
+	wasSprinting = ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) ? qtrue : qfalse;
+	minSprintTime = bg_cod.sprintMinTime * 1000.0f;    // seconds -> stamina units (0..20000 range)
+
+	if ( wantSprint && ( ( wasSprinting && pm->ps->sprintTime > 0 )
+						 || ( !wasSprinting && pm->ps->sprintTime >= minSprintTime ) ) ) {
+		pm->ps->stats[STAT_COD_FLAGS] |= COD_SF_SPRINTING;
+	} else {
+		pm->ps->stats[STAT_COD_FLAGS] &= ~COD_SF_SPRINTING;
+	}
+}
+
 
 
 #define LEAN_MAX    28.0f
@@ -3946,6 +4022,63 @@ PM_Sprint
 */
 //----(SA)	cleaned up for SP (10/22/01)
 void PM_Sprint( void ) {
+	// codmod: time-based drain/recharge for the player, driven by COD_SF_SPRINTING
+	// (set by PM_CodUpdateSprint) instead of re-checking the raw button here. Vanilla
+	// drains/recharges a fixed amount *per call*, which is frame-rate dependent; this
+	// uses pml.frametime so a full bar lasts cod_sprintTime seconds at any frame rate.
+	// AI and cod_enable 0 fall through to the unmodified vanilla path below. (phase 2.1.c)
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+		float sprintRate;
+
+		if ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) {
+			if ( pm->ps->powerups[PW_NOFATIGUE] ) {    // take time from powerup before taking it from sprintTime
+				pm->ps->powerups[PW_NOFATIGUE] -= 50;
+
+				pm->ps->sprintTime += 10;           // (SA) go ahead and continue to recharge stamina at double rate with stamina powerup even when exerting
+				if ( pm->ps->sprintTime > 20000 ) {
+					pm->ps->sprintTime = 20000;
+				}
+
+				if ( pm->ps->powerups[PW_NOFATIGUE] < 0 ) {
+					pm->ps->powerups[PW_NOFATIGUE] = 0;
+				}
+			} else if ( VectorLength( pm->ps->velocity ) > 128 ) { // (SA) check for a bit more movement
+				sprintRate = bg_cod.sprintTime > 0 ? bg_cod.sprintTime : 1.0f;
+				pm->ps->sprintTime -= ( 20000.0f / sprintRate ) * pml.frametime;
+			}
+
+			if ( pm->ps->sprintTime < 0 ) {
+				pm->ps->sprintTime = 0;
+			}
+
+			if ( !pm->ps->sprintExertTime ) {
+				pm->ps->sprintExertTime = 1;
+			}
+		} else {
+			sprintRate = bg_cod.sprintRechargeTime > 0 ? bg_cod.sprintRechargeTime : 1.0f;
+
+			// regular recharge
+			pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
+
+			// additional (2x) recharge if in top 75% of sprint bar, or with stamina powerup
+			if ( pm->ps->sprintTime > 5000 || pm->ps->powerups[PW_NOFATIGUE] ) {
+				pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
+			}
+
+			// additional recharge if standing still
+			if ( !( pm->cmd.forwardmove || pm->cmd.rightmove ) ) {
+				pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
+			}
+
+			if ( pm->ps->sprintTime > 20000 ) {
+				pm->ps->sprintTime = 20000;
+			}
+
+			pm->ps->sprintExertTime = 0;
+		}
+		return;
+	}
+
 	if (    ( pm->cmd.buttons & BUTTON_SPRINT ) &&
 			( pm->cmd.forwardmove || pm->cmd.rightmove ) &&
 			!( pm->ps->pm_flags & PMF_DUCKED ) &&
@@ -4199,6 +4332,10 @@ void PmoveSingle( pmove_t *pmove ) {
 	if ( !isDummy ) {
 		PM_DropTimers();
 	}
+
+	// codmod: decide sprint state before the move dispatch so PM_CmdScale/PM_WalkMove/
+	// PM_Sprint all agree this frame (phase 2.1.c)
+	PM_CodUpdateSprint();
 
 	if ( pm->ps->powerups[PW_FLIGHT] ) {
 		// flight powerup doesn't allow jump and has different friction
