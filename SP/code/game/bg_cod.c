@@ -22,7 +22,7 @@ codTuning_t bg_cod;
 // for tunables (not archived, so code defaults always apply -- user overrides live in
 // mod/codmod/codmod.cfg) except cod_debugHud, which is a user preference.
 const codCvarDef_t bg_codCvars[] = {
-	{ "cod_enable",             "0",    0,            CODOFS( enable ),             1 },
+	{ "cod_enable",             "1",    0,            CODOFS( enable ),             1 },
 	{ "cod_moveEnable",         "1",    0,            CODOFS( moveEnable ),         1 },
 	{ "cod_leanEnable",         "1",    0,            CODOFS( leanEnable ),         1 },
 
