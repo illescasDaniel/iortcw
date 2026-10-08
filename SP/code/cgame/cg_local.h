@@ -2217,6 +2217,7 @@ void CG_DrawTourneyScoreboard( void );
 //
 void CG_CodDrawDebugHud( void );
 void CG_CodDump_f( void );
+void CG_ToggleAds_f( void );           // codmod: phase 3.1 sticky ADS toggle
 float CG_CodAdsFrac( void );           // codmod: phase 3.5, raw 0..1, forced to 1 by cod_adsLock
 void CG_CodUpdateAdsTune( void );      // codmod: phase 3.5 alignment tooling
 void CG_CodAdsTuneLoad_f( void );      // codmod: phase 3.5 alignment tooling

@@ -405,3 +405,23 @@ void CG_CodDump_f( void ) {
 		CG_Printf( "seta %s \"%s\"\n", bg_codCvars[i].name, value );
 	}
 }
+
+/*
+================
+CG_ToggleAds_f
+
+codmod: sticky ADS toggle (phase 3.1). ioRTCW SP has no console `alias`/`vstr` toggle
+trick, so this command alternates +ads / -ads via the console. Bind with
+`bind MOUSE2 toggleads` instead of the default hold bind.
+================
+*/
+void CG_ToggleAds_f( void ) {
+	static qboolean held;
+
+	held = !held;
+	if ( held ) {
+		trap_SendConsoleCommand( "+ads\n" );
+	} else {
+		trap_SendConsoleCommand( "-ads\n" );
+	}
+}

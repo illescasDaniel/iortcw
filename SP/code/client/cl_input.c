@@ -1074,6 +1074,10 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand( "-wbutton6", IN_Wbutton6Up );
 	Cmd_AddCommand( "+wbutton7", IN_Wbutton7Down );   //
 	Cmd_AddCommand( "-wbutton7", IN_Wbutton7Up );
+	// codmod: +ads is a named alias for +wbutton6 (WBUTTON_COD_ADS). ioRTCW SP has no
+	// console `alias` command, so we register these here instead of using cfg aliases.
+	Cmd_AddCommand( "+ads", IN_Wbutton6Down );
+	Cmd_AddCommand( "-ads", IN_Wbutton6Up );
 //----(SA) end
 
 	Cmd_AddCommand( "+mlook", IN_MLookDown );
@@ -1164,6 +1168,8 @@ void CL_ShutdownInput(void)
 	Cmd_RemoveCommand("-wbutton6");
 	Cmd_RemoveCommand("+wbutton7");
 	Cmd_RemoveCommand("-wbutton7");
+	Cmd_RemoveCommand("+ads");   // codmod
+	Cmd_RemoveCommand("-ads");   // codmod
 
 	Cmd_RemoveCommand("+mlook");
 	Cmd_RemoveCommand("-mlook");

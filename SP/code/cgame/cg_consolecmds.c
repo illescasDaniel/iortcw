@@ -424,6 +424,7 @@ static consoleCommand_t commands[] = {
 	// -NERVE - SMF
 
 	{ "cod_dump", CG_CodDump_f },   // codmod: phase 2.0, see cg_cod.c
+	{ "toggleads", CG_ToggleAds_f }, // codmod: phase 3.1 sticky ADS toggle
 	{ "cod_adsTuneLoad", CG_CodAdsTuneLoad_f }, // codmod: phase 3.5 alignment tooling
 	{ "cod_adsTuneDump", CG_CodAdsTuneDump_f }, // codmod: phase 3.5 alignment tooling
 };
