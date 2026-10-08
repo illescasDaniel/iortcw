@@ -153,7 +153,7 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	sightDist   = bg_cod.adsSightDist   + ads->sightDist;
 
 	// codmod: too small = looking inside the mesh; too large = floating mid-screen arms.
-	// Pistol sweet spot from in-game tuning is Dist 18 / Height 3 / Yaw -5 / Roll 11.
+	// Pistol defaults from codmod_tune.log (Dist 18.5 / Height 3 / Yaw -6.5 / Roll 6.5).
 	if ( sightDist < 8.0f ) {
 		sightDist = 8.0f;
 	}
@@ -233,9 +233,10 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 		angles[i] += AngleDelta( alignedAngles[i], angles[i] ) * e;
 	}
 
-	// Position-only fine bias (table / live tune). Angle bias is already in alignedAngles.
+	// Position-only fine bias. Angle bias is already in alignedAngles.
+	// cod_adsRight shifts the whole gun horizontally (plus per-weapon ads->right).
 	VectorMA( handOrigin, ads->fwd   * e, cg.refdef.viewaxis[0], handOrigin );
-	VectorMA( handOrigin, ads->right * e, cg.refdef.viewaxis[1], handOrigin );
+	VectorMA( handOrigin, ( bg_cod.adsRight + ads->right ) * e, cg.refdef.viewaxis[1], handOrigin );
 	VectorMA( handOrigin, ads->up    * e, cg.refdef.viewaxis[2], handOrigin );
 }
 
