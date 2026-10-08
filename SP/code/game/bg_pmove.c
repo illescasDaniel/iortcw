@@ -426,6 +426,22 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 		scale *= pm->ps->runSpeedScale;
 	}
 
+	// codmod: ADS move scale (phase 3.3), player only. Scoped rifles (3.8.8) use the full
+	// move penalty for as long as they're equipped -- the real scope owns their raise/lower,
+	// this is gameplay-only and doesn't ramp with STAT_COD_ADS (which stays 0 for them,
+	// BG_CodCanADS excludes the scope weapons from iron-sight ADS). Everything else ramps
+	// with the networked STAT_COD_ADS fraction set by PM_CodUpdateADS.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.adsEnable ) {
+		if ( BG_CodIsScopeWeapon( pm->ps->weapon ) ) {
+			scale *= BG_CodAdsMoveScale( pm->ps->weapon );
+		} else {
+			float adsFrac = pm->ps->stats[STAT_COD_ADS] / 1000.0f;
+			if ( adsFrac > 0.0f ) {
+				scale *= 1.0f + ( BG_CodAdsMoveScale( pm->ps->weapon ) - 1.0f ) * adsFrac;
+			}
+		}
+	}
+
 	if ( pm->ps->pm_type == PM_NOCLIP ) {
 		scale *= 3;
 	}
@@ -3596,6 +3612,61 @@ static void PM_DropTimers( void ) {
 
 /*
 ================
+PM_CodUpdateADS
+
+codmod: advances the player's networked ADS fraction (ps->stats[STAT_COD_ADS], 0..1000)
+toward 1000 while the ADS button is held and eligible, else back toward 0 (phase 3.3).
+Called from PmoveSingle before PM_CodUpdateSprint (ADS has priority: PM_CodUpdateSprint
+below reads WBUTTON_COD_ADS off pm->cmd directly to block sprint while ADS is held).
+
+BG_CodCanADS (bg_cod.c) covers everything derivable from playerState_t alone; this adds
+the waterlevel/ladder checks from docs/phase-3-ads.md section 3.2, which live in
+pmove_t/pml_t and aren't networked. AI never ADS -- their fraction is forced to 0 so the
+rest of the ADS code (spread in g_weapon.c, cgame visuals) is a no-op for them.
+================
+*/
+static void PM_CodUpdateADS( void ) {
+	qboolean want;
+	int frac;
+	int rate;
+
+	if ( pm->ps->aiChar ) {
+		pm->ps->stats[STAT_COD_ADS] = 0;
+		return;
+	}
+
+	want = ( ( pm->cmd.wbuttons & WBUTTON_COD_ADS ) && BG_CodCanADS( pm->ps )
+			 && pm->waterlevel < 3 && !pml.ladder ) ? qtrue : qfalse;
+
+	frac = pm->ps->stats[STAT_COD_ADS];
+
+	if ( want ) {
+		rate = BG_CodAdsTimeIn( pm->ps->weapon );
+		if ( rate < 1 ) {
+			rate = 1;
+		}
+		frac += (int)( 1000.0f * pml.msec / rate );
+		if ( frac > 1000 ) {
+			frac = 1000;
+		}
+	} else {
+		// codmod: still the *old* weapon here while WEAPON_DROPPING (ps->weapon only
+		// changes in PM_FinishWeaponChange), so a mid-switch ease-out uses the right rate.
+		rate = BG_CodAdsTimeOut( pm->ps->weapon );
+		if ( rate < 1 ) {
+			rate = 1;
+		}
+		frac -= (int)( 1000.0f * pml.msec / rate );
+		if ( frac < 0 ) {
+			frac = 0;
+		}
+	}
+
+	pm->ps->stats[STAT_COD_ADS] = frac;
+}
+
+/*
+================
 PM_CodUpdateSprint
 
 codmod: decides whether the player is sprinting *this command* and writes the result to
@@ -3626,7 +3697,8 @@ static void PM_CodUpdateSprint( void ) {
 				 && ( bg_cod.sprintForwardOnly ? ( pm->cmd.forwardmove > 0 ) : moving )
 				 && !( pm->ps->pm_flags & PMF_DUCKED )
 				 && pm->waterlevel < 2
-				 && !( pm->cmd.buttons & BUTTON_WALKING );
+				 && !( pm->cmd.buttons & BUTTON_WALKING )
+				 && !( pm->cmd.wbuttons & WBUTTON_COD_ADS ); // codmod: ADS blocks/cancels sprint (phase 3.3)
 
 	wasSprinting = ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) ? qtrue : qfalse;
 	minSprintTime = bg_cod.sprintMinTime * 1000.0f;    // seconds -> stamina units (0..20000 range)
@@ -4347,6 +4419,10 @@ void PmoveSingle( pmove_t *pmove ) {
 	if ( !isDummy ) {
 		PM_DropTimers();
 	}
+
+	// codmod: ADS has priority over sprint (phase 3.3), so update it first; PM_CodUpdateSprint
+	// reads WBUTTON_COD_ADS off pm->cmd directly to block/cancel sprint while ADS is held.
+	PM_CodUpdateADS();
 
 	// codmod: decide sprint state before the move dispatch so PM_CmdScale/PM_WalkMove/
 	// PM_Sprint all agree this frame (phase 2.1.c)
