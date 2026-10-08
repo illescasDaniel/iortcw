@@ -4240,6 +4240,10 @@ void PM_Sprint( void ) {
 	// AI and cod_enable 0 fall through to the unmodified vanilla path below. (phase 2.1.c)
 	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
 		float sprintRate;
+		qboolean codLinear;
+
+		// codmod: CoD-like single-rate recharge + post-sprint delay (phase 5b)
+		codLinear = ( bg_cod.vitalsEnable && bg_cod.sprintLinear ) ? qtrue : qfalse;
 
 		if ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) {
 			if ( pm->ps->powerups[PW_NOFATIGUE] ) {    // take time from powerup before taking it from sprintTime
@@ -4265,20 +4269,34 @@ void PM_Sprint( void ) {
 			if ( !pm->ps->sprintExertTime ) {
 				pm->ps->sprintExertTime = 1;
 			}
+
+			// Arm recharge delay so it starts counting only after sprint ends.
+			if ( codLinear && bg_cod.sprintRechargeDelay > 0 ) {
+				pm->ps->stats[STAT_COD_STAM_DELAY] = (int)bg_cod.sprintRechargeDelay;
+			}
 		} else {
 			sprintRate = bg_cod.sprintRechargeTime > 0 ? bg_cod.sprintRechargeTime : 1.0f;
 
-			// regular recharge
-			pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
-
-			// additional (2x) recharge if in top 75% of sprint bar, or with stamina powerup
-			if ( pm->ps->sprintTime > 5000 || pm->ps->powerups[PW_NOFATIGUE] ) {
+			if ( codLinear ) {
+				if ( pm->ps->stats[STAT_COD_STAM_DELAY] > 0 ) {
+					pm->ps->stats[STAT_COD_STAM_DELAY] -= (int)( pml.frametime * 1000.0f );
+					if ( pm->ps->stats[STAT_COD_STAM_DELAY] < 0 ) {
+						pm->ps->stats[STAT_COD_STAM_DELAY] = 0;
+					}
+				} else {
+					pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
+				}
+			} else {
+				// Phase 2 multi-tier recharge (vanilla-shaped bonuses)
 				pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
-			}
 
-			// additional recharge if standing still
-			if ( !( pm->cmd.forwardmove || pm->cmd.rightmove ) ) {
-				pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
+				if ( pm->ps->sprintTime > 5000 || pm->ps->powerups[PW_NOFATIGUE] ) {
+					pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
+				}
+
+				if ( !( pm->cmd.forwardmove || pm->cmd.rightmove ) ) {
+					pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
+				}
 			}
 
 			if ( pm->ps->sprintTime > 20000 ) {

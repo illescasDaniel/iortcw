@@ -34,6 +34,7 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 #include "g_local.h"
+#include "bg_cod.h"     // codmod: phase 5b health regen pause on hurt
 
 /*
 ============
@@ -1302,6 +1303,13 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 				if ( targ->aiCharacter != AICHAR_ZOMBIE ) { // zombie needs to be able to gib so we can kill him (although he doesn't actually GIB, he just dies)
 					targ->health = GIB_HEALTH + 1;
 				}
+			}
+			// codmod: pause CoD health regen on real damage (player only). (phase 5b)
+			if ( !targ->client->ps.aiChar && !targ->aiCharacter
+				 && bg_cod.enable && bg_cod.vitalsEnable
+				 && bg_cod.healthRegenEnable && bg_cod.healthRegenPauseHurt ) {
+				targ->client->codLastDamageTime = level.time;
+				targ->client->codHealthRegenFrac = 0;
 			}
 		}
 

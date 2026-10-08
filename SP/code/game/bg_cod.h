@@ -107,6 +107,17 @@ typedef struct {
 	float quickKnifeTimeout;   // ms failsafe to return to previous weapon
 	float knifeSwitchTime;     // ms drop/raise when switching to/from knife (0 = vanilla 250)
 
+	// codmod: Phase 5b vitals — health regen, stamina finish, HUD bars
+	int vitalsEnable;          // master for regen + linear stamina + bar HUD draw
+	int healthRegenEnable;     // auto regen after delay
+	float healthRegenDelay;    // ms after last damage before regen
+	float healthRegenRate;     // HP per second while regenerating
+	int healthRegenPauseHurt;  // damage resets the delay timer
+	int healthBarNumber;       // 1 = also paint HP number on the health bar
+	float maxHealth;           // player STAT_MAX_HEALTH when > 0 (vanilla 100; CoD-ish 50)
+	int sprintLinear;          // single-rate recharge (no 25%/idle bonuses)
+	float sprintRechargeDelay; // ms after sprint ends before recharge starts
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;
@@ -143,8 +154,8 @@ extern const int bg_numCodCvars;
 
 // codmod: g_main.c / cg_main.c each keep a static vmCvar_t[BG_COD_MAX_CVARS] and pass it in.
 // Bump this if bg_codCvars ever grows past it -- BG_CodRegisterCvars() clamps defensively.
-// (phase 3–5 cvars; leave headroom for slide/prone.)
-#define BG_COD_MAX_CVARS 96
+// (phase 3–5b cvars; leave headroom for slide/prone.)
+#define BG_COD_MAX_CVARS 112
 
 void BG_CodRegisterCvars( vmCvar_t *cvars, int maxCvars );
 void BG_CodUpdateCvars( vmCvar_t *cvars, int maxCvars );

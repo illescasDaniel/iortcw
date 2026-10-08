@@ -1020,6 +1020,24 @@ void ClientThink_real( gentity_t *ent ) {
 		client->ps.crouchSpeedScale = 0.25f;
 	}
 
+	// codmod: player max health (phase 5b). Re-applied every frame like speeds.
+	if ( !client->ps.aiChar && !ent->aiCharacter
+		 && bg_cod.enable && bg_cod.vitalsEnable && bg_cod.maxHealth > 0 ) {
+		int maxH = (int)bg_cod.maxHealth;
+
+		if ( maxH < 1 ) {
+			maxH = 1;
+		}
+		client->pers.maxHealth = maxH;
+		client->ps.stats[STAT_MAX_HEALTH] = maxH;
+		if ( ent->health > maxH ) {
+			ent->health = maxH;
+		}
+		if ( client->ps.stats[STAT_HEALTH] > maxH ) {
+			client->ps.stats[STAT_HEALTH] = maxH;
+		}
+	}
+
 	if ( client->ps.powerups[PW_HASTE] ) {
 		client->ps.speed *= 1.3;
 	}
@@ -1422,6 +1440,41 @@ void ClientThink_real( gentity_t *ent ) {
 
 	// perform once-a-second actions
 	ClientTimerActions( ent, msec );
+
+	// codmod: CoD-style health regen (player only). Delay after last damage, then
+	// linear refill to max. Does not create overheal; PW_REGEN / pickups unchanged. (phase 5b)
+	if ( !client->ps.aiChar && !ent->aiCharacter
+		 && bg_cod.enable && bg_cod.vitalsEnable && bg_cod.healthRegenEnable
+		 && ent->health > 0 && client->ps.pm_type != PM_DEAD
+		 && !level.intermissiontime ) {
+		int maxHealth = client->ps.stats[STAT_MAX_HEALTH];
+
+		if ( ent->health < maxHealth ) {
+			int delay = (int)bg_cod.healthRegenDelay;
+			int elapsed;
+
+			if ( client->codLastDamageTime <= 0 ) {
+				client->codLastDamageTime = level.time - delay;
+			}
+			elapsed = level.time - client->codLastDamageTime;
+			if ( elapsed >= delay && bg_cod.healthRegenRate > 0 ) {
+				client->codHealthRegenFrac += bg_cod.healthRegenRate * ( (float)msec / 1000.0f );
+				if ( client->codHealthRegenFrac >= 1.0f ) {
+					int add = (int)client->codHealthRegenFrac;
+
+					client->codHealthRegenFrac -= (float)add;
+					ent->health += add;
+					if ( ent->health > maxHealth ) {
+						ent->health = maxHealth;
+						client->codHealthRegenFrac = 0;
+					}
+					client->ps.stats[STAT_HEALTH] = ent->health;
+				}
+			}
+		} else {
+			client->codHealthRegenFrac = 0;
+		}
+	}
 }
 
 /*

@@ -346,12 +346,13 @@ typedef enum {
 	STAT_COD_FLAGS,          // bitfield, see COD_SF_*
 	STAT_COD_SLIDE_SPEED,    // phase 6: start speed of the current slide, u/s
 	STAT_COD_STANCE,         // phase 6b: >0 prone transition ms left, <0 prone cooldown ms
-	STAT_COD_LAND            // phase 5: >0 landing slowdown ms left
+	STAT_COD_LAND,           // phase 5: >0 landing slowdown ms left
+	STAT_COD_STAM_DELAY      // phase 5b: ms left before stamina recharge starts
 } statIndex_t;
 
 // codmod: compile-time check that STAT_COD_* stay inside ps->stats[MAX_STATS] (q_shared.h).
 // A negative array size here is a compile error, which is the point.
-typedef char bg_cod_statIndexRangeCheck_t[ ( STAT_COD_LAND < MAX_STATS ) ? 1 : -1 ];
+typedef char bg_cod_statIndexRangeCheck_t[ ( STAT_COD_STAM_DELAY < MAX_STATS ) ? 1 : -1 ];
 
 // codmod: ps->stats[STAT_COD_FLAGS] bits (phase 2+)
 #define COD_SF_SPRINTING 1

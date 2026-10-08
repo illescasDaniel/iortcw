@@ -172,6 +172,7 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_BOOL,  "cod_adsEnable",          "cod_adsEnable",          1, 1, NULL },
 	{ COD_MI_BOOL,  "cod_gaitEnable",         "cod_gaitEnable",         1, 1, NULL },
 	{ COD_MI_BOOL,  "cod_weaponEnable",       "cod_weaponEnable",       1, 1, NULL },
+	{ COD_MI_BOOL,  "cod_vitalsEnable",       "cod_vitalsEnable",       1, 1, NULL },
 
 	{ COD_MI_SECTION, "MOVEMENT SPEEDS", NULL, 0, 0, NULL },
 	{ COD_MI_FLOAT, "cod_runSpeed",           "cod_runSpeed",           5,    25,   NULL },
@@ -187,6 +188,16 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_FLOAT, "cod_sprintMinTime",      "cod_sprintMinTime",      0.25f, 1,    NULL },
 	{ COD_MI_BOOL,  "cod_sprintForwardOnly",  "cod_sprintForwardOnly",  1,     1,    NULL },
 	{ COD_MI_FLOAT, "cod_sprintJumpCost",     "cod_sprintJumpCost",     100,   500,  NULL },
+	{ COD_MI_BOOL,  "cod_sprintLinear",       "cod_sprintLinear",       1,     1,    NULL },
+	{ COD_MI_FLOAT, "cod_sprintRechargeDelay","cod_sprintRechargeDelay",50,    200,  NULL },
+
+	{ COD_MI_SECTION, "VITALS (health / HUD)", NULL, 0, 0, NULL },
+	{ COD_MI_FLOAT, "cod_maxHealth",          "cod_maxHealth",          5,     25,   NULL },
+	{ COD_MI_BOOL,  "cod_healthRegenEnable",  "cod_healthRegenEnable",  1,     1,    NULL },
+	{ COD_MI_FLOAT, "cod_healthRegenDelay",   "cod_healthRegenDelay",   250,   1000, NULL },
+	{ COD_MI_FLOAT, "cod_healthRegenRate",    "cod_healthRegenRate",    1,     5,    NULL },
+	{ COD_MI_BOOL,  "cod_healthRegenPauseHurt","cod_healthRegenPauseHurt", 1,  1,    NULL },
+	{ COD_MI_BOOL,  "cod_healthBarNumber",    "cod_healthBarNumber",    1,     1,    NULL },
 
 	{ COD_MI_SECTION, "GAIT / SPRINT GUN", NULL, 0, 0, NULL },
 	{ COD_MI_FLOAT, "cod_sprintRaiseTime",    "cod_sprintRaiseTime",    10,   50,   NULL },

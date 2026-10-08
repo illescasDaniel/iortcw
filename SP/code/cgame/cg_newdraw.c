@@ -1060,6 +1060,9 @@ static void CG_DrawPlayerHealth( rectDef_t *rect, int font, float scale, vec4_t 
 	playerState_t   *ps;
 	int value;
 	char num[16];
+	int flags;
+	float frac;
+	int maxHealth;
 
 	ps = &cg.snap->ps;
 
@@ -1067,6 +1070,31 @@ static void CG_DrawPlayerHealth( rectDef_t *rect, int font, float scale, vec4_t 
 
 	if ( cg_fixedAspect.integer == 2 ) {
 		CG_SetScreenPlacement(PLACE_LEFT, PLACE_BOTTOM);
+	}
+
+	// codmod: CoD-style health bar when vitals HUD is on and the menu gave us a bar-shaped
+	// rect (wider than tall). Forced red fill. Number-only fallback otherwise. (phase 5b)
+	if ( bg_cod.enable && bg_cod.vitalsEnable && !shader && rect->w >= rect->h && rect->h > 0 ) {
+		vec4_t barRed = { 0.9f, 0.12f, 0.12f, 0.9f };
+
+		maxHealth = ps->stats[STAT_MAX_HEALTH];
+		if ( maxHealth < 1 ) {
+			maxHealth = 100;
+		}
+		frac = (float)value / (float)maxHealth;
+		if ( frac < 0 ) {
+			frac = 0;
+		}
+		if ( frac > 1 ) {
+			frac = 1;
+		}
+		flags = 16; // BAR_BG — draw contrast box (cg_drawtools.c)
+		CG_FilledBar( rect->x, rect->y, rect->w, rect->h, barRed, NULL, NULL, frac, flags );
+		if ( bg_cod.healthBarNumber ) {
+			Com_sprintf( num, sizeof( num ), "%i", value );
+			CG_Text_Paint( rect->x + 2, rect->y + rect->h - 1, font, scale * 0.7f, barRed, num, 0, 0, textStyle );
+		}
+		return;
 	}
 
 	if ( shader ) {
@@ -2194,6 +2222,11 @@ static void CG_DrawFatigue( rectDef_t *rect, vec4_t color, int align ) {
 
 	if ( cg_fixedAspect.integer == 2 ) {
 		CG_SetScreenPlacement(PLACE_LEFT, PLACE_BOTTOM);
+	}
+
+	// codmod: vitals HUD is always horizontal (phase 5b), even if an old menu omitted align.
+	if ( bg_cod.enable && bg_cod.vitalsEnable ) {
+		align = HUD_HORIZONTAL;
 	}
 
 	if ( align != HUD_HORIZONTAL ) {

@@ -33,7 +33,8 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_backScale",          "0.7",  0,            CODOFS( backScale ),          0 },
 	{ "cod_strafeScale",        "0.85", 0,            CODOFS( strafeScale ),        0 },
 
-	{ "cod_sprintTime",         "4",    0,            CODOFS( sprintTime ),         0 },
+	// codmod: Phase 5b tune — double stamina pool vs initial 4s CoD default (8s full bar).
+	{ "cod_sprintTime",         "8",    0,            CODOFS( sprintTime ),         0 },
 	{ "cod_sprintRechargeTime", "5",    0,            CODOFS( sprintRechargeTime ), 0 },
 	{ "cod_sprintMinTime",      "1",    0,            CODOFS( sprintMinTime ),      0 },
 	{ "cod_sprintForwardOnly",  "1",    0,            CODOFS( sprintForwardOnly ),  1 },
@@ -134,6 +135,18 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_quickKnifeTimeout",  "900",  0,            CODOFS( quickKnifeTimeout ),  0 },
 	// codmod: snappy knife pull (was 250+250). 75 keeps anim readable but CoD-connected.
 	{ "cod_knifeSwitchTime",    "75",   0,            CODOFS( knifeSwitchTime ),    0 },
+
+	// codmod: Phase 5b vitals (docs/phase-5b-vitals.md)
+	{ "cod_vitalsEnable",       "1",    0,            CODOFS( vitalsEnable ),       1 },
+	{ "cod_healthRegenEnable",  "1",    0,            CODOFS( healthRegenEnable ),  1 },
+	{ "cod_healthRegenDelay",   "5000", 0,            CODOFS( healthRegenDelay ),   0 },
+	{ "cod_healthRegenRate",    "20",   0,            CODOFS( healthRegenRate ),    0 },
+	{ "cod_healthRegenPauseHurt","1",   0,            CODOFS( healthRegenPauseHurt ), 1 },
+	{ "cod_healthBarNumber",    "0",    0,            CODOFS( healthBarNumber ),    1 },
+	// codmod: half of vanilla/CoD 100 — glass-cannon SP with regen. (phase 5b)
+	{ "cod_maxHealth",          "50",   0,            CODOFS( maxHealth ),          0 },
+	{ "cod_sprintLinear",       "1",    0,            CODOFS( sprintLinear ),       1 },
+	{ "cod_sprintRechargeDelay","600",  0,            CODOFS( sprintRechargeDelay ), 0 },
 
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
