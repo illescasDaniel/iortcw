@@ -30,8 +30,12 @@ If you have questions concerning this license or the applicable additional terms
 
 
 #include "g_local.h"
+#include "bg_cod.h"     // codmod: phase 2 tuning cvars
 
 level_locals_t level;
+
+// codmod: qagame's copy of the cod_* cvars; filled in by BG_CodRegisterCvars/BG_CodUpdateCvars
+static vmCvar_t codCvars[BG_COD_MAX_CVARS];
 
 typedef struct {
 	vmCvar_t    *vmCvar;
@@ -1007,6 +1011,9 @@ void G_RegisterCvars( void ) {
 	bg_pmove_gameskill_integer = g_gameskill.integer;
 	// done
 
+	// codmod: register the cod_* tuning cvars (bg_cod.c is the single source of truth)
+	BG_CodRegisterCvars( codCvars, BG_COD_MAX_CVARS );
+
 	level.warmupModificationCount = g_warmup.modificationCount;
 }
 
@@ -1080,6 +1087,10 @@ void G_UpdateCvars( void ) {
 	if ( remapped ) {
 		G_RemapTeamShaders();
 	}
+
+	// codmod: re-apply every frame so cvar changes and savegame loads take effect at once
+	// (docs/architecture.md section 7)
+	BG_CodUpdateCvars( codCvars, BG_COD_MAX_CVARS );
 }
 
 

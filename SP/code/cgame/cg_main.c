@@ -44,6 +44,9 @@ int forceModelModificationCount = -1;
 void CG_Init( int serverMessageNum, int serverCommandSequence );
 void CG_Shutdown( void );
 
+// codmod: cgame's copy of the cod_* cvars; filled in by BG_CodRegisterCvars/BG_CodUpdateCvars
+static vmCvar_t codCvars[BG_COD_MAX_CVARS];
+
 
 /*
 ================
@@ -505,7 +508,8 @@ void CG_RegisterCvars( void ) {
 	trap_Cvar_Register( NULL, "model", DEFAULT_MODEL, CVAR_USERINFO | CVAR_ARCHIVE );
 	trap_Cvar_Register( NULL, "head", DEFAULT_HEAD, CVAR_USERINFO | CVAR_ARCHIVE );
 
-
+	// codmod: register the cod_* tuning cvars (bg_cod.c is the single source of truth)
+	BG_CodRegisterCvars( codCvars, BG_COD_MAX_CVARS );
 }
 
 /*
@@ -541,6 +545,9 @@ void CG_UpdateCvars( void ) {
 	for ( i = 0, cv = cvarTable ; i < cvarTableSize ; i++, cv++ ) {
 		trap_Cvar_Update( cv->vmCvar );
 	}
+
+	// codmod: re-apply every frame so cvar changes take effect at once
+	BG_CodUpdateCvars( codCvars, BG_COD_MAX_CVARS );
 
 /* RF, disabled this, not needed anymore
 	// if force model changed

@@ -420,8 +420,10 @@ static consoleCommand_t commands[] = {
 	{ "mp_QuickMessage", CG_QuickMessage_f },
 	{ "OpenLimboMenu", CG_OpenLimbo_f },
 	{ "CloseLimboMenu", CG_CloseLimbo_f },
-	{ "LimboMessage", CG_LimboMessage_f }
+	{ "LimboMessage", CG_LimboMessage_f },
 	// -NERVE - SMF
+
+	{ "cod_dump", CG_CodDump_f }    // codmod: phase 2.0, see cg_cod.c
 };
 
 

@@ -3817,6 +3817,9 @@ static void CG_Draw2D(stereoFrame_t stereoFrame) {
 		CG_DrawUpperRight(stereoFrame);
 	}
 
+	// codmod: phase 2.0 debug overlay ("cod_debugHud 1"), see cg_cod.c
+	CG_CodDrawDebugHud();
+
 	if ( cg_oldWolfUI.integer ) {
 		CG_DrawLowerRight();
 	}

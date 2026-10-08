@@ -336,8 +336,24 @@ typedef enum {
 	STAT_DEAD_YAW,                  // look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,             // bit mask of clients wishing to exit the intermission (FIXME: configstring?)
 	STAT_MAX_HEALTH,                // health / armor limit, changable by handicap
-	STAT_PLAYER_CLASS               // DHM - Nerve :: player class in multiplayer
+	STAT_PLAYER_CLASS,              // DHM - Nerve :: player class in multiplayer
+
+	// codmod: networked state for CoD-style movement (phase 2+). stats[] entries are
+	// plain ints here, but msg.c only delta-encodes 16 bits of change per entry, so treat
+	// these as shorts (-32768..32767). See docs/architecture.md section 3.
+	STAT_COD_ADS = 8,        // phase 3: ADS fraction * 1000
+	STAT_COD_SLIDE,          // phase 4: >0 slide ms left, <0 cooldown ms
+	STAT_COD_FLAGS,          // bitfield, see COD_SF_*
+	STAT_COD_SLIDE_SPEED,    // phase 4: start speed of the current slide, u/s
+	STAT_COD_STANCE          // phase 4b: >0 prone transition ms left, <0 prone cooldown ms
 } statIndex_t;
+
+// codmod: compile-time check that STAT_COD_* stay inside ps->stats[MAX_STATS] (q_shared.h).
+// A negative array size here is a compile error, which is the point.
+typedef char bg_cod_statIndexRangeCheck_t[ ( STAT_COD_STANCE < MAX_STATS ) ? 1 : -1 ];
+
+// codmod: ps->stats[STAT_COD_FLAGS] bits (phase 2+)
+#define COD_SF_SPRINTING 1
 
 
 // player_state->persistant[] indexes

@@ -40,6 +40,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "../qcommon/q_shared.h"
 #include "../renderer/tr_types.h"
 #include "../game/bg_public.h"
+#include "../game/bg_cod.h"    // codmod: phase 2 tuning (bg_cod.c is built into cgame too)
 #include "cg_public.h"
 
 
@@ -780,6 +781,9 @@ typedef struct {
 
 	float duckChange;                   // for duck viewheight smoothing
 	int duckTime;
+	int codDuckDuration;                 // codmod: ms for the current duck transition (phase 2.2);
+										  // kept separate from cod_duckTime so phase 4b (prone) can
+										  // set a different duration without touching this code again
 
 	float landChange;                   // for landing hard
 	int landTime;
@@ -2190,6 +2194,12 @@ const char *CG_translateString( const char *str );
 //
 qboolean CG_DrawScoreboard( void );
 void CG_DrawTourneyScoreboard( void );
+
+//
+// cg_cod.c
+//
+void CG_CodDrawDebugHud( void );
+void CG_CodDump_f( void );
 
 //
 // cg_consolecmds.c
