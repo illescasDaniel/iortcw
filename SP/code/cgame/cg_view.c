@@ -1610,6 +1610,9 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// reflects this frame's ADS hold. See cg_cod.c.
 	CG_CodUpdateScopeHold();
 
+	// codmod: CoD-style quick knife state machine (phase 5.5)
+	CG_CodUpdateQuickKnife();
+
 	if ( cg.weaponSelect == WP_FG42SCOPE || cg.weaponSelect == WP_SNOOPERSCOPE || cg.weaponSelect == WP_SNIPERRIFLE ) {
 		float spd;
 		spd = VectorLength( cg.snap->ps.velocity );

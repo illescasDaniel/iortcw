@@ -725,3 +725,189 @@ void CG_ToggleAds_f( void ) {
 		trap_SendConsoleCommand( "-ads\n" );
 	}
 }
+
+// codmod: quickknife state machine (phase 5.5). Values match cg.codQkState.
+#define COD_QK_IDLE       0
+#define COD_QK_SWITCHING  1
+#define COD_QK_SWINGING   2
+#define COD_QK_RETURNING  3
+
+static void CG_CodQuickKnifeClear( void ) {
+	cg.codQkState = COD_QK_IDLE;
+	cg.codQkPrev = WP_NONE;
+	cg.codQkStartTime = 0;
+	cg.codQkAttackHeld = qfalse;
+	cg.codQkSawFire = qfalse;
+	cg.codQkStayOnKnife = qfalse;
+}
+
+static qboolean CG_CodHasKnife( void ) {
+	if ( !cg.snap ) {
+		return qfalse;
+	}
+	return COM_BitCheck( cg.snap->ps.weapons, WP_KNIFE ) ? qtrue : qfalse;
+}
+
+/*
+================
+CG_QuickKnife_f
+
+codmod: CoD-style quick knife (phase 5.5). Bind: `bind v quickknife`. Switches to
+WP_KNIFE, auto-swings once when READY, then returns to the previous weapon. Not +kick.
+================
+*/
+void CG_QuickKnife_f( void ) {
+	int cur;
+
+	if ( !cg.snap ) {
+		return;
+	}
+	if ( !( bg_cod.enable && bg_cod.quickKnifeEnable ) ) {
+		return;
+	}
+	if ( cg.codQkState != COD_QK_IDLE ) {
+		return;
+	}
+	if ( cg.snap->ps.pm_type == PM_DEAD || cg.snap->ps.stats[STAT_HEALTH] <= 0 ) {
+		return;
+	}
+	if ( !CG_CodHasKnife() ) {
+		return;
+	}
+
+	trap_SendConsoleCommand( "-ads\n" );
+
+	cur = cg.weaponSelect;
+	if ( cur == WP_KNIFE || cg.snap->ps.weapon == WP_KNIFE ) {
+		cg.codQkStayOnKnife = qtrue;
+		cg.codQkPrev = WP_NONE;
+		cg.codQkState = COD_QK_SWINGING;
+		cg.codQkStartTime = cg.time;
+		cg.codQkAttackHeld = qfalse;
+		cg.codQkSawFire = qfalse;
+		return;
+	}
+
+	cg.codQkStayOnKnife = qfalse;
+	cg.codQkPrev = cur;
+	cg.codQkStartTime = cg.time;
+	cg.codQkAttackHeld = qfalse;
+	cg.codQkSawFire = qfalse;
+	cg.codQkState = COD_QK_SWITCHING;
+	CG_FinishWeaponChange( cur, WP_KNIFE );
+}
+
+/*
+================
+CG_CodUpdateQuickKnife
+
+codmod: advance quickknife each real frame (phase 5.5). Called from CG_DrawActiveFrame.
+================
+*/
+void CG_CodUpdateQuickKnife( void ) {
+	playerState_t *ps;
+	int timeout;
+
+	if ( cg.codQkState == COD_QK_IDLE ) {
+		return;
+	}
+	if ( !cg.snap ) {
+		CG_CodQuickKnifeClear();
+		return;
+	}
+	if ( !( bg_cod.enable && bg_cod.quickKnifeEnable ) ) {
+		if ( cg.codQkAttackHeld ) {
+			trap_SendConsoleCommand( "-attack\n" );
+		}
+		CG_CodQuickKnifeClear();
+		return;
+	}
+
+	ps = &cg.snap->ps;
+	if ( ps->pm_type == PM_DEAD || ps->stats[STAT_HEALTH] <= 0 ) {
+		if ( cg.codQkAttackHeld ) {
+			trap_SendConsoleCommand( "-attack\n" );
+		}
+		CG_CodQuickKnifeClear();
+		return;
+	}
+
+	timeout = (int)bg_cod.quickKnifeTimeout;
+	if ( timeout < 400 ) {
+		timeout = 400;
+	}
+	if ( cg.time - cg.codQkStartTime > timeout ) {
+		if ( cg.codQkAttackHeld ) {
+			trap_SendConsoleCommand( "-attack\n" );
+			cg.codQkAttackHeld = qfalse;
+		}
+		if ( !cg.codQkStayOnKnife && cg.codQkPrev > WP_NONE && cg.codQkPrev < WP_NUM_WEAPONS
+			 && COM_BitCheck( ps->weapons, cg.codQkPrev ) ) {
+			CG_FinishWeaponChange( cg.weaponSelect, cg.codQkPrev );
+		}
+		CG_CodQuickKnifeClear();
+		return;
+	}
+
+	// manual weapon change mid-sequence — abort, keep their choice
+	if ( cg.codQkState == COD_QK_SWITCHING || cg.codQkState == COD_QK_SWINGING ) {
+		if ( cg.weaponSelect != WP_KNIFE ) {
+			if ( cg.codQkAttackHeld ) {
+				trap_SendConsoleCommand( "-attack\n" );
+			}
+			CG_CodQuickKnifeClear();
+			return;
+		}
+	}
+
+	if ( cg.codQkState == COD_QK_SWITCHING ) {
+		if ( ps->weapon == WP_KNIFE && ps->weaponstate == WEAPON_READY ) {
+			cg.codQkState = COD_QK_SWINGING;
+		}
+		return;
+	}
+
+	if ( cg.codQkState == COD_QK_SWINGING ) {
+		if ( ps->weapon != WP_KNIFE ) {
+			if ( cg.codQkAttackHeld ) {
+				trap_SendConsoleCommand( "-attack\n" );
+			}
+			CG_CodQuickKnifeClear();
+			return;
+		}
+
+		if ( !cg.codQkAttackHeld && !cg.codQkSawFire && ps->weaponstate == WEAPON_READY ) {
+			trap_SendConsoleCommand( "+attack\n" );
+			cg.codQkAttackHeld = qtrue;
+			return;
+		}
+
+		if ( cg.codQkAttackHeld ) {
+			if ( ps->weaponstate == WEAPON_FIRING || ps->weaponTime > 0 ) {
+				cg.codQkSawFire = qtrue;
+				trap_SendConsoleCommand( "-attack\n" );
+				cg.codQkAttackHeld = qfalse;
+			}
+			return;
+		}
+
+		if ( cg.codQkSawFire && ps->weaponstate == WEAPON_READY && ps->weaponTime <= 0 ) {
+			if ( cg.codQkStayOnKnife || cg.codQkPrev <= WP_NONE ) {
+				CG_CodQuickKnifeClear();
+				return;
+			}
+			cg.codQkState = COD_QK_RETURNING;
+			CG_FinishWeaponChange( WP_KNIFE, cg.codQkPrev );
+			return;
+		}
+		return;
+	}
+
+	if ( cg.codQkState == COD_QK_RETURNING ) {
+		if ( ps->weapon == cg.codQkPrev && ps->weaponstate == WEAPON_READY ) {
+			CG_CodQuickKnifeClear();
+		} else if ( cg.weaponSelect != WP_KNIFE && ps->weapon != WP_KNIFE ) {
+			CG_CodQuickKnifeClear();
+		}
+	}
+}

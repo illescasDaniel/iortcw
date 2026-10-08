@@ -103,6 +103,9 @@ typedef struct {
 	float landSlowTime;        // ms
 	float landSlowScale;       // × wishspeed while land timer active
 
+	int quickKnifeEnable;      // cgame quickknife command (phase 5.5)
+	float quickKnifeTimeout;   // ms failsafe to return to previous weapon
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;

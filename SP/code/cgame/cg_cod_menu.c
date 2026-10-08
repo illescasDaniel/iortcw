@@ -220,6 +220,8 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_FLOAT, "cod_pistolNextShot",     "cod_pistolNextShot",     10,   50,   NULL },
 	{ COD_MI_FLOAT, "cod_pistolFireDelay",    "cod_pistolFireDelay",    10,   50,   NULL },
 	{ COD_MI_FLOAT, "cod_autoFireScale",      "cod_autoFireScale",      0.05f, 0.25f, NULL },
+	{ COD_MI_BOOL,  "cod_quickKnifeEnable",   "cod_quickKnifeEnable",   1,    1,    NULL },
+	{ COD_MI_FLOAT, "cod_quickKnifeTimeout",  "cod_quickKnifeTimeout",  50,   200,  NULL },
 
 	{ COD_MI_SECTION, "CROUCH / DUCK", NULL, 0, 0, NULL },
 	{ COD_MI_FLOAT, "cod_duckTime",           "cod_duckTime",           5,    25,   NULL },

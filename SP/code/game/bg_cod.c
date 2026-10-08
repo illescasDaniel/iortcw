@@ -130,6 +130,9 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_landSlowTime",       "350",  0,            CODOFS( landSlowTime ),       0 },
 	{ "cod_landSlowScale",      "0.55", 0,            CODOFS( landSlowScale ),      0 },
 
+	{ "cod_quickKnifeEnable",   "1",    0,            CODOFS( quickKnifeEnable ),   1 },
+	{ "cod_quickKnifeTimeout",  "1200", 0,            CODOFS( quickKnifeTimeout ),  0 },
+
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
 	{ "cod_menuScale",          "0.7",  CVAR_ARCHIVE, CODOFS( menuScale ),          0 },

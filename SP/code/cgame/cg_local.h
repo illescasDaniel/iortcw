@@ -813,6 +813,13 @@ typedef struct {
 	float codSprintFrac;                 // codmod: phase 4 — 0..1 visual sprint gun-lower fraction
 	int codSprintFracTime;               // codmod: cg.time of last CG_CodSprintFrac update
 
+	int codQkPrev;                       // codmod: phase 5.5 — weapon to restore after quickknife
+	int codQkState;                      // codmod: 0 idle, 1 switching, 2 swinging, 3 returning
+	int codQkStartTime;                  // codmod: cg.time when quickknife started
+	qboolean codQkAttackHeld;            // codmod: +attack pulsed and not yet released
+	qboolean codQkSawFire;               // codmod: saw WEAPON_FIRING / weaponTime during swing
+	qboolean codQkStayOnKnife;           // codmod: started already on knife — no switchback
+
 	float landChange;                   // for landing hard
 	int landTime;
 
@@ -2234,6 +2241,7 @@ void CG_CodDrawDebugMenu( void );   // codmod: sectioned tune menu (cg_cod_menu.
 void CG_CodMenu_f( void );
 void CG_CodMenuDump_f( void );
 void CG_ToggleAds_f( void );           // codmod: phase 3.1 sticky ADS toggle
+void CG_QuickKnife_f( void );          // codmod: phase 5.5 CoD-style quick knife
 float CG_CodAdsFrac( void );           // codmod: phase 3.5, raw 0..1, forced to 1 by cod_adsLock
 float CG_CodSprintFrac( void );        // codmod: phase 4, 0..1 visual sprint lower (eased)
 float CG_CodGaitBobAmp( void );        // codmod: phase 4, walk/jog/sprint bob amplitude scale
@@ -2241,6 +2249,7 @@ void CG_CodUpdateAdsTune( void );      // codmod: phase 3.5 alignment tooling
 void CG_CodAdsTuneLoad_f( void );      // codmod: phase 3.5 alignment tooling
 void CG_CodAdsTuneDump_f( void );      // codmod: phase 3.5 alignment tooling
 void CG_CodUpdateScopeHold( void );    // codmod: phase 3.8
+void CG_CodUpdateQuickKnife( void );   // codmod: phase 5.5
 
 //
 // cg_consolecmds.c
