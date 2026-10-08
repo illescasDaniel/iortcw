@@ -3126,7 +3126,9 @@ static void PM_Weapon( void ) {
 	}
 
 	// player is leaning - no fire
-	if ( pm->ps->leanf != 0 && pm->ps->weapon != WP_GRENADE_LAUNCHER && pm->ps->weapon != WP_GRENADE_PINEAPPLE && pm->ps->weapon != WP_DYNAMITE ) {
+	// codmod: cod_leanAllowFire lets the player (not AI) fire while leaned (phase 2.3.2)
+	if ( pm->ps->leanf != 0 && pm->ps->weapon != WP_GRENADE_LAUNCHER && pm->ps->weapon != WP_GRENADE_PINEAPPLE && pm->ps->weapon != WP_DYNAMITE
+		 && !( !pm->ps->aiChar && bg_cod.enable && bg_cod.leanEnable && bg_cod.leanAllowFire ) ) {
 		return;
 	}
 
@@ -3655,10 +3657,20 @@ void PM_UpdateLean( playerState_t *ps, usercmd_t *cmd, pmove_t *tpm ) {
 	float leanofs = 0;
 	vec3_t viewangles;
 	trace_t trace;
+	qboolean codLean;
+	float leanMax, leanTimeTo, leanTimeFr;
 
 	if ( ps->aiChar ) {
 		return;
 	}
+
+	// codmod: cod_leanMax/leanTimeIn/leanTimeOut when enabled (phase 2.3.1). Reads only
+	// bg_cod, not pm, because this also runs from PM_UpdateViewAngles with pm == NULL
+	// (the tpm path below).
+	codLean = ( bg_cod.enable && bg_cod.leanEnable ) ? qtrue : qfalse;
+	leanMax    = codLean ? bg_cod.leanMax    : LEAN_MAX;
+	leanTimeTo = codLean ? bg_cod.leanTimeIn  : LEAN_TIME_TO;
+	leanTimeFr = codLean ? bg_cod.leanTimeOut : LEAN_TIME_FR;
 
 	if ( ( cmd->wbuttons & ( WBUTTON_LEANLEFT | WBUTTON_LEANRIGHT ) )  && !cmd->forwardmove && cmd->upmove <= 0 ) {
 		// if both are pressed, result is no lean
@@ -3672,8 +3684,11 @@ void PM_UpdateLean( playerState_t *ps, usercmd_t *cmd, pmove_t *tpm ) {
 
 	// not allowed when...
 	if ( ( ps->eFlags & ( EF_MELEE_ACTIVE |   // ...holding a chair
-						  EF_MG42_ACTIVE  | // ...on mg42
-						  EF_FIRING ) ) ) { // ...firing
+						  EF_MG42_ACTIVE ) ) ) { // ...on mg42
+		leaning = 0;
+	}
+	// codmod: cod_leanAllowFire lets the player keep leaning while firing (phase 2.3.2)
+	if ( ( ps->eFlags & EF_FIRING ) && !( codLean && bg_cod.leanAllowFire ) ) { // ...firing
 		leaning = 0;
 	}
 
@@ -3682,13 +3697,13 @@ void PM_UpdateLean( playerState_t *ps, usercmd_t *cmd, pmove_t *tpm ) {
 	if ( !leaning ) {  // go back to center position
 		if ( leanofs > 0 ) {        // right
 			//FIXME: play lean anim backwards?
-			leanofs -= ( ( (float)pml.msec / LEAN_TIME_FR ) * LEAN_MAX );
+			leanofs -= ( ( (float)pml.msec / leanTimeFr ) * leanMax );
 			if ( leanofs < 0 ) {
 				leanofs = 0;
 			}
 		} else if ( leanofs < 0 )   { // left
 			//FIXME: play lean anim backwards?
-			leanofs += ( ( (float)pml.msec / LEAN_TIME_FR ) * LEAN_MAX );
+			leanofs += ( ( (float)pml.msec / leanTimeFr ) * leanMax );
 			if ( leanofs > 0 ) {
 				leanofs = 0;
 			}
@@ -3697,21 +3712,21 @@ void PM_UpdateLean( playerState_t *ps, usercmd_t *cmd, pmove_t *tpm ) {
 
 	if ( leaning ) {
 		if ( leaning > 0 ) {   // right
-			if ( leanofs < LEAN_MAX ) {
-				leanofs += ( ( (float)pml.msec / LEAN_TIME_TO ) * LEAN_MAX );
+			if ( leanofs < leanMax ) {
+				leanofs += ( ( (float)pml.msec / leanTimeTo ) * leanMax );
 			}
 
-			if ( leanofs > LEAN_MAX ) {
-				leanofs = LEAN_MAX;
+			if ( leanofs > leanMax ) {
+				leanofs = leanMax;
 			}
 
 		} else {              // left
-			if ( leanofs > -LEAN_MAX ) {
-				leanofs -= ( ( (float)pml.msec / LEAN_TIME_TO ) * LEAN_MAX );
+			if ( leanofs > -leanMax ) {
+				leanofs -= ( ( (float)pml.msec / leanTimeTo ) * leanMax );
 			}
 
-			if ( leanofs < -LEAN_MAX ) {
-				leanofs = -LEAN_MAX;
+			if ( leanofs < -leanMax ) {
+				leanofs = -leanMax;
 			}
 
 		}

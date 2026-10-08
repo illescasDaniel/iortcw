@@ -689,9 +689,31 @@ static void CG_OffsetFirstPersonView( void ) {
 	if ( cg.predictedPlayerState.leanf != 0 ) {
 		//add leaning offset
 		vec3_t right;
-		cg.refdefViewAngles[2] += cg.predictedPlayerState.leanf / 2.0f;
-		AngleVectors( cg.refdefViewAngles, NULL, right, NULL );
-		VectorMA( cg.refdef.vieworg, cg.predictedPlayerState.leanf, right, cg.refdef.vieworg );
+
+		// codmod: cod_leanRollScale camera tilt, with optional smoothstep ease on the
+		// *displayed* fraction so peeking accelerates and settles (phase 2.3.3). cgame-only,
+		// so it can't affect prediction.
+		if ( bg_cod.enable && bg_cod.leanEnable ) {
+			float leanf = cg.predictedPlayerState.leanf;
+			float leanMax = ( bg_cod.leanMax > 0 ) ? bg_cod.leanMax : 1.0f;
+
+			if ( bg_cod.leanEase ) {
+				float s = fabs( leanf ) / leanMax;
+				if ( s > 1.0f ) {
+					s = 1.0f;
+				}
+				s = s * s * ( 3.0f - 2.0f * s );   // smoothstep
+				leanf = ( leanf < 0 ) ? -leanMax * s : leanMax * s;
+			}
+
+			cg.refdefViewAngles[2] += leanf * bg_cod.leanRollScale;
+			AngleVectors( cg.refdefViewAngles, NULL, right, NULL );
+			VectorMA( cg.refdef.vieworg, leanf, right, cg.refdef.vieworg );
+		} else {
+			cg.refdefViewAngles[2] += cg.predictedPlayerState.leanf / 2.0f;
+			AngleVectors( cg.refdefViewAngles, NULL, right, NULL );
+			VectorMA( cg.refdef.vieworg, cg.predictedPlayerState.leanf, right, cg.refdef.vieworg );
+		}
 	}
 
 	// pivot the eye based on a neck length

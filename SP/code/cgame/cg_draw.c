@@ -2352,10 +2352,13 @@ static void CG_DrawCrosshair( void ) {
 	int weapnum;                // DHM - Nerve
 	vec4_t hcolor = {1, 1, 1, 1};
 	qboolean friendInSights = qfalse;
+	qboolean codLeanFire;    // codmod: cod_leanAllowFire keeps the crosshair up while leaning (2.3.2)
 
 	if ( cg.renderingThirdPerson ) {
 		return;
 	}
+
+	codLeanFire = ( bg_cod.enable && bg_cod.leanEnable && bg_cod.leanAllowFire ) ? qtrue : qfalse;
 
 	hcolor[3] = cg_crosshairAlpha.value;    //----(SA)	added
 
@@ -2412,7 +2415,7 @@ static void CG_DrawCrosshair( void ) {
 		}
 
 		if ( !friendInSights ) {
-			if ( !cg.snap->ps.leanf ) {     // no crosshair while leaning
+			if ( !cg.snap->ps.leanf || codLeanFire ) {     // no crosshair while leaning
 				CG_FillRect( 319, 239, 2, 2, hcolor );      // dot
 			}
 			return;
@@ -2463,7 +2466,7 @@ static void CG_DrawCrosshair( void ) {
 	}
 
 	// no crosshair while leaning
-	if ( cg.snap->ps.leanf ) {
+	if ( cg.snap->ps.leanf && !codLeanFire ) {
 		return;
 	}
 
@@ -2532,6 +2535,7 @@ static void CG_DrawCrosshair3D( void ) {
 	int weapnum;                // DHM - Nerve
 	vec4_t hcolor = {1, 1, 1, 1};
 	qboolean friendInSights = qfalse;
+	qboolean codLeanFire;    // codmod: cod_leanAllowFire keeps the crosshair up while leaning (2.3.2)
 
 	trace_t trace;
 	vec3_t endpos;
@@ -2542,6 +2546,8 @@ static void CG_DrawCrosshair3D( void ) {
 	if ( cg.renderingThirdPerson ) {
 		return;
 	}
+
+	codLeanFire = ( bg_cod.enable && bg_cod.leanEnable && bg_cod.leanAllowFire ) ? qtrue : qfalse;
 
 	hcolor[3] = cg_crosshairAlpha.value;    //----(SA)	added
 
@@ -2595,7 +2601,7 @@ static void CG_DrawCrosshair3D( void ) {
 		}
 
 		if ( !friendInSights ) {
-			if ( !cg.snap->ps.leanf ) {     // no crosshair while leaning
+			if ( !cg.snap->ps.leanf || codLeanFire ) {     // no crosshair while leaning
 				CG_FillRect( 319, 239, 2, 2, hcolor );      // dot
 			}
 			return;
@@ -2647,7 +2653,7 @@ static void CG_DrawCrosshair3D( void ) {
 	}
 
 	// no crosshair while leaning
-	if ( cg.snap->ps.leanf ) {
+	if ( cg.snap->ps.leanf && !codLeanFire ) {
 		return;
 	}
 
