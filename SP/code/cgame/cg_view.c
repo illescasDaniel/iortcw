@@ -901,6 +901,19 @@ static int CG_CalcFov( void ) {
 				fov_x = zoomFov + f * ( fov_x - zoomFov );
 			}
 		}
+
+		// codmod: ADS FOV zoom (phase 3.6), only when no binocular or scope zoom is active --
+		// those already own fov_x above. e ramps 0..1 with STAT_COD_ADS, smoothstepped to
+		// match the viewmodel/sensitivity easing (CG_CodAdsFrac, cg_cod.c).
+		if ( !cg.zoomedBinoc && !cg.zoomval && bg_cod.enable && bg_cod.adsEnable ) {
+			float e = BG_CodSmoothstep( CG_CodAdsFrac() );
+			if ( e > 0.0f ) {
+				int weapon = cg.predictedPlayerState.weapon;
+				float fovScale = ( bg_cod.adsTune && weapon == cg.weaponSelect )
+								  ? bg_cod.adsTuneFov : BG_CodAdsFovScale( weapon );
+				fov_x *= 1.0f + ( fovScale - 1.0f ) * e;
+			}
+		}
 	}
 
 	// DHM - Nerve :: zoom in for Limbo or Spectator
@@ -972,7 +985,19 @@ static int CG_CalcFov( void ) {
 			}
 //				cg.zoomSensitivity = 0.1;
 		} else {
+			// codmod: ADS sensitivity scale (phase 3.6), player only, non-zoom branch.
+			// Tracks the FOV zoom (fovScale) times cod_adsSensScale so aim speed matches
+			// the apparent zoom, with the same ease (e) as the FOV change above.
 			cg.zoomSensitivity = 1;
+			if ( bg_cod.enable && bg_cod.adsEnable ) {
+				float e = BG_CodSmoothstep( CG_CodAdsFrac() );
+				if ( e > 0.0f ) {
+					int weapon = cg.predictedPlayerState.weapon;
+					float fovScale = ( bg_cod.adsTune && weapon == cg.weaponSelect )
+									  ? bg_cod.adsTuneFov : BG_CodAdsFovScale( weapon );
+					cg.zoomSensitivity = 1.0f + ( fovScale * bg_cod.adsSensScale - 1.0f ) * e;
+				}
+			}
 		}
 		// -NERVE - SMF
 	} else {
