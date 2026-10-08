@@ -91,10 +91,13 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	barrelBack  = bg_cod.adsBarrelBack  + ads->barrelBack;
 	sightDist   = bg_cod.adsSightDist   + ads->sightDist;
 
-	// codmod: keep the rear sight far enough ahead of the eye that we never clip into the
-	// mesh ("looking inside the gun"). Zoomed FOV makes close geometry feel even closer.
-	if ( sightDist < 14.0f ) {
-		sightDist = 14.0f;
+	// codmod: viewmodels sit a few units in front of the eye. A large sightDist parks the
+	// gun in the middle of the world view ("floating arms"). Keep it close like CoD.
+	if ( sightDist < 5.0f ) {
+		sightDist = 5.0f;
+	}
+	if ( sightDist > 12.0f ) {
+		sightDist = 12.0f;
 	}
 
 	fovScale = ( bg_cod.adsTune && weaponNum == cg.weaponSelect )
@@ -153,6 +156,16 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 			VectorMA( cg.refdef.vieworg, sightDist + fovComp, cg.refdef.viewaxis[0], desired );
 
 			VectorSubtract( desired, sightPos, delta );
+
+			// codmod: if tag resolution is wrong, delta can be huge and fling the gun into
+			// the middle of the scene. Cap the correction to a viewmodel-sized move.
+			{
+				float deltaLen = VectorLength( delta );
+				if ( deltaLen > 40.0f ) {
+					VectorScale( delta, 40.0f / deltaLen, delta );
+				}
+			}
+
 			VectorMA( handOrigin, e, delta, handOrigin );
 
 			// No bore-to-view rotation pass: the hand already inherits viewangles, and
