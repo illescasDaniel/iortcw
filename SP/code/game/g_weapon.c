@@ -35,6 +35,7 @@ If you have questions concerning this license or the applicable additional terms
 
 
 #include "g_local.h"
+#include "bg_cod.h"     // codmod: phase 3.4 ADS spread scale
 
 static float s_quadFactor;
 static vec3_t forward, right, up;
@@ -1721,6 +1722,18 @@ void FireWeapon( gentity_t *ent ) {
 		}
 	} else {
 		aimSpreadScale = 1.0;
+	}
+
+	// codmod: ADS tightens spread for the player only (phase 3.4). Scales the already
+	// computed aimSpreadScale toward cod_adsSpreadScale as STAT_COD_ADS ramps in. This is
+	// the single place aimSpreadScale feeds every Bullet_Fire()/weapon_venom_fire()/
+	// Weapon_RocketLauncher_Fire() call below, so one multiply covers all of them. AI
+	// (and any weapon that can't ADS) keep frac at 0, so this is a no-op for them.
+	if ( !ent->aiCharacter && bg_cod.enable && bg_cod.adsEnable ) {
+		float adsFrac = ent->client->ps.stats[STAT_COD_ADS] / 1000.0f;
+		if ( adsFrac > 0.0f ) {
+			aimSpreadScale *= 1.0f + ( BG_CodAdsSpreadScale( ent->s.weapon ) - 1.0f ) * adsFrac;
+		}
 	}
 
 	// fire the specific weapon
