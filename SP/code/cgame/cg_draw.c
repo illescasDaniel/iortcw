@@ -2487,7 +2487,12 @@ static void CG_DrawCrosshair( void ) {
 			return;
 		}
 		if ( cg_crosshairHealth.integer ) {
-			CG_ColorForHealth( hcolor );
+			// codmod: phase 5c — tint by health/maxHealth (white→red), not vanilla ~100HP ramp
+			if ( bg_cod.hudEnable && bg_cod.hudHealthCrosshair ) {
+				CG_CodColorForHealth( hcolor );
+			} else {
+				CG_ColorForHealth( hcolor );
+			}
 		}
 		hcolor[3] = cg_crosshairAlpha.value;
 		CG_FillRect( 319, 239, 2, 2, hcolor );
@@ -2496,7 +2501,11 @@ static void CG_DrawCrosshair( void ) {
 
 	// set color based on health
 	if ( cg_crosshairHealth.integer ) {
-		CG_ColorForHealth( hcolor );
+		if ( bg_cod.enable && bg_cod.hudEnable && bg_cod.hudHealthCrosshair ) {
+			CG_CodColorForHealth( hcolor );
+		} else {
+			CG_ColorForHealth( hcolor );
+		}
 		trap_R_SetColor( hcolor );
 	} else {
 		trap_R_SetColor( NULL );
@@ -3482,6 +3491,8 @@ CG_DrawFlashBlendBehindHUD
 */
 static void CG_DrawFlashBlendBehindHUD( void ) {
 	CG_DrawFlashZoomTransition();
+	// codmod: phase 5c — persistent low-HP blood behind chrome
+	CG_CodDrawLowHealthBlood();
 }
 
 

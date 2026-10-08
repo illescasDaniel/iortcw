@@ -120,6 +120,15 @@ typedef struct {
 	float ammoScale;           // × pickup/start ammo + max carry (player only; 2 = double)
 	int interactHint;          // cgame: "Press <key> to interact" next to cursor hint
 
+	// codmod: Phase 5c CoD on-screen HUD (docs/phase-5c-hud.md)
+	int hudEnable;             // master: clip/reserve ammo, no bars, low-HP blood/crosshair
+	int hudAmmoStyle;          // 1 = clip/reserve string; 0 = vanilla split
+	int hudHeatColor;          // ammo text white→red by curWeapHeat
+	int hudHealthCrosshair;    // crosshair white→red by missing health/max
+	int hudLowHealthBlood;     // persistent low-HP blood/vignette
+	float hudLowHealthStart;   // health/max at which blood starts
+	float hudLowHealthMaxAlpha;// blood overlay alpha near death
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;

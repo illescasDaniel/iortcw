@@ -2250,6 +2250,9 @@ void CG_CodAdsTuneLoad_f( void );      // codmod: phase 3.5 alignment tooling
 void CG_CodAdsTuneDump_f( void );      // codmod: phase 3.5 alignment tooling
 void CG_CodUpdateScopeHold( void );    // codmod: phase 3.8
 void CG_CodUpdateQuickKnife( void );   // codmod: phase 5.5
+void CG_CodThreatColor( float t, vec4_t out ); // codmod: phase 5c white→red ramp
+void CG_CodColorForHealth( vec4_t hcolor );    // codmod: phase 5c by health/maxHealth
+void CG_CodDrawLowHealthBlood( void );         // codmod: phase 5c persistent vignette
 
 //
 // cg_consolecmds.c

@@ -150,6 +150,15 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_ammoScale",          "2",    0,            CODOFS( ammoScale ),          0 },
 	{ "cod_interactHint",       "1",    0,            CODOFS( interactHint ),       1 },
 
+	// codmod: Phase 5c CoD HUD (docs/phase-5c-hud.md)
+	{ "cod_hudEnable",          "1",    0,            CODOFS( hudEnable ),          1 },
+	{ "cod_hudAmmoStyle",       "1",    0,            CODOFS( hudAmmoStyle ),       1 },
+	{ "cod_hudHeatColor",       "1",    0,            CODOFS( hudHeatColor ),       1 },
+	{ "cod_hudHealthCrosshair", "1",    0,            CODOFS( hudHealthCrosshair ), 1 },
+	{ "cod_hudLowHealthBlood",  "1",    0,            CODOFS( hudLowHealthBlood ),  1 },
+	{ "cod_hudLowHealthStart",  "0.4",  0,            CODOFS( hudLowHealthStart ),  0 },
+	{ "cod_hudLowHealthMaxAlpha","0.55",0,            CODOFS( hudLowHealthMaxAlpha ), 0 },
+
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
 	{ "cod_menuScale",          "0.7",  CVAR_ARCHIVE, CODOFS( menuScale ),          0 },

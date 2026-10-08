@@ -909,3 +909,158 @@ void CG_CodUpdateQuickKnife( void ) {
 		}
 	}
 }
+
+/*
+================
+CG_CodThreatColor
+
+codmod: shared white → yellow → orange → red ramp for heat / low health (phase 5c).
+t in [0,1]: 0 = fine (white), 1 = critical (red).
+================
+*/
+void CG_CodThreatColor( float t, vec4_t out ) {
+	float u;
+
+	if ( t < 0.0f ) {
+		t = 0.0f;
+	} else if ( t > 1.0f ) {
+		t = 1.0f;
+	}
+
+	if ( t < 0.33f ) {
+		u = t / 0.33f;
+		out[0] = 1.0f;
+		out[1] = 1.0f;
+		out[2] = 1.0f - u;
+	} else if ( t < 0.66f ) {
+		u = ( t - 0.33f ) / 0.33f;
+		out[0] = 1.0f;
+		out[1] = 1.0f - 0.45f * u;
+		out[2] = 0.0f;
+	} else {
+		u = ( t - 0.66f ) / 0.34f;
+		out[0] = 1.0f;
+		out[1] = 0.55f * ( 1.0f - u );
+		out[2] = 0.0f;
+	}
+	out[3] = 1.0f;
+}
+
+/*
+================
+CG_CodColorForHealth
+
+codmod: crosshair tint from health / STAT_MAX_HEALTH (phase 5c). Uses cod_maxHealth as
+fallback when max is unset. Ignores armor — missing HP only.
+================
+*/
+void CG_CodColorForHealth( vec4_t hcolor ) {
+	int health;
+	int maxH;
+	float t;
+
+	if ( !cg.snap ) {
+		CG_CodThreatColor( 0.0f, hcolor );
+		return;
+	}
+
+	health = cg.snap->ps.stats[STAT_HEALTH];
+	if ( health <= 0 ) {
+		VectorClear( hcolor );
+		hcolor[3] = 1.0f;
+		return;
+	}
+
+	maxH = cg.snap->ps.stats[STAT_MAX_HEALTH];
+	if ( maxH < 1 ) {
+		maxH = ( bg_cod.maxHealth > 0.0f ) ? (int)( bg_cod.maxHealth + 0.5f ) : 100;
+	}
+	if ( maxH < 1 ) {
+		maxH = 1;
+	}
+
+	t = 1.0f - (float)health / (float)maxH;
+	if ( t < 0.0f ) {
+		t = 0.0f;
+	} else if ( t > 1.0f ) {
+		t = 1.0f;
+	}
+	CG_CodThreatColor( t, hcolor );
+}
+
+/*
+================
+CG_CodDrawLowHealthBlood
+
+codmod: persistent dark-red vignette while health/max is below cod_hudLowHealthStart
+(phase 5c). Drawn behind HUD. Respects cg_blood.
+================
+*/
+void CG_CodDrawLowHealthBlood( void ) {
+	int health;
+	int maxH;
+	float ratio;
+	float start;
+	float alpha;
+	vec4_t col;
+
+	if ( !cg.snap ) {
+		return;
+	}
+	if ( !( bg_cod.enable && bg_cod.hudEnable && bg_cod.hudLowHealthBlood ) ) {
+		return;
+	}
+	if ( !cg_blood.integer ) {
+		return;
+	}
+	if ( cg.cameraMode ) {
+		return;
+	}
+
+	health = cg.snap->ps.stats[STAT_HEALTH];
+	if ( health <= 0 ) {
+		return;
+	}
+
+	maxH = cg.snap->ps.stats[STAT_MAX_HEALTH];
+	if ( maxH < 1 ) {
+		maxH = ( bg_cod.maxHealth > 0.0f ) ? (int)( bg_cod.maxHealth + 0.5f ) : 100;
+	}
+	if ( maxH < 1 ) {
+		maxH = 1;
+	}
+
+	ratio = (float)health / (float)maxH;
+	start = bg_cod.hudLowHealthStart;
+	if ( start <= 0.0f || start > 1.0f ) {
+		start = 0.4f;
+	}
+	if ( ratio > start ) {
+		return;
+	}
+
+	alpha = ( start - ratio ) / start;
+	if ( alpha > 1.0f ) {
+		alpha = 1.0f;
+	}
+	alpha *= bg_cod.hudLowHealthMaxAlpha;
+	if ( alpha < 0.0f ) {
+		return;
+	}
+
+	// gentle pulse when critically low so regen is visible
+	if ( ratio < 0.2f ) {
+		alpha *= 0.85f + 0.15f * (float)sin( (float)cg.time * 0.008f );
+	}
+
+	VectorSet( col, 0.35f, 0.0f, 0.0f );
+	col[3] = alpha;
+
+	if ( cg_fixedAspect.integer ) {
+		CG_SetScreenPlacement( PLACE_STRETCH, PLACE_STRETCH );
+		CG_FillRect( -10, -10, 650, 490, col );
+		CG_SetScreenPlacement( PLACE_CENTER, PLACE_CENTER );
+	} else {
+		CG_FillRect( -10, -10, 650, 490, col );
+	}
+}
