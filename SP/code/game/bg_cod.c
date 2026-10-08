@@ -67,11 +67,10 @@ const codCvarDef_t bg_codCvars[] = {
 	// it doesn't fill the screen from the hip. Used as a fine bias on top of tag_flash align.
 	{ "cod_adsGunFovComp",      "2",    0,            CODOFS( adsGunFovComp ),      0 },
 	// codmod: CoD-style iron-sight auto-align defaults (cgame). Per-weapon table can override.
-	// sightHeight must clear the slide (too low = looking down the bore / "inside the gun").
-	// sightDist is eye relief ahead of the camera; ~12 clears the mesh, >18 floats mid-screen.
-	{ "cod_adsSightHeight",     "6.5",  0,            CODOFS( adsSightHeight ),     0 },
+	// Tuned in-game on the starting pistol (Luger): Dist 18 / Height 4.
+	{ "cod_adsSightHeight",     "4",    0,            CODOFS( adsSightHeight ),     0 },
 	{ "cod_adsBarrelBack",      "10",   0,            CODOFS( adsBarrelBack ),      0 },
-	{ "cod_adsSightDist",       "12",   0,            CODOFS( adsSightDist ),       0 },
+	{ "cod_adsSightDist",       "18",   0,            CODOFS( adsSightDist ),       0 },
 	{ "cod_scopeSwitchTime",    "0",    0,            CODOFS( scopeSwitchTime ),    0 },
 
 	// codmod: Phase 3.5 alignment tooling -- see docs/phase-3-ads.md "Alignment tooling".

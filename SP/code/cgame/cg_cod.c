@@ -47,16 +47,73 @@ float CG_CodAdsFrac( void ) {
 
 /*
 ================
+CG_CodResolveFlashTag
+
+codmod: helper for iron-sight ADS. Fills world-space muzzle origin and bore forward from
+the hand+gun pose. Returns qfalse if tag_flash is missing.
+================
+*/
+static qboolean CG_CodResolveFlashTag( refEntity_t *hand, refEntity_t *gun, vec3_t flashOrigin, vec3_t flashFwd ) {
+	orientation_t flash;
+	vec3_t flashAxis[3];
+	int i;
+
+	CG_PositionEntityOnTag( gun, hand, "tag_weapon", 0, NULL );
+	if ( trap_R_LerpTag( &flash, gun, "tag_flash", 0 ) < 0 ) {
+		return qfalse;
+	}
+
+	VectorCopy( gun->origin, flashOrigin );
+	for ( i = 0; i < 3; i++ ) {
+		VectorMA( flashOrigin, flash.origin[i], gun->axis[i], flashOrigin );
+	}
+	MatrixMultiply( flash.axis, gun->axis, flashAxis );
+	VectorCopy( flashAxis[0], flashFwd );
+	VectorNormalize( flashFwd );
+	return qtrue;
+}
+
+/*
+================
+CG_CodSightPoint
+
+codmod: rear-sight estimate = back along the bore from the muzzle, then up toward view-up
+(projected off the bore). View-up is used instead of flaky tag Z so the sight line clears
+the slide instead of diving into the mesh.
+================
+*/
+static void CG_CodSightPoint( const vec3_t flashOrigin, const vec3_t flashFwd,
+							  float barrelBack, float sightHeight, vec3_t sightPos ) {
+	vec3_t boreUp;
+	float d;
+
+	VectorCopy( cg.refdef.viewaxis[2], boreUp );
+	d = DotProduct( boreUp, flashFwd );
+	VectorMA( boreUp, -d, flashFwd, boreUp );
+	if ( VectorNormalize( boreUp ) < 0.001f ) {
+		CrossProduct( cg.refdef.viewaxis[1], flashFwd, boreUp );
+		VectorNormalize( boreUp );
+	}
+	if ( DotProduct( boreUp, cg.refdef.viewaxis[2] ) < 0.0f ) {
+		VectorInverse( boreUp );
+	}
+
+	VectorMA( flashOrigin, -barrelBack, flashFwd, sightPos );
+	VectorMA( sightPos, sightHeight, boreUp, sightPos );
+}
+
+/*
+================
 CG_CodApplyIronSightAds
 
 codmod: CoD-style iron-sight ADS without new models (phase 3.5).
 
-Builds the current first-person hand+gun transform, reads tag_flash (muzzle), estimates the
-rear-sight point (back along the bore by barrelBack, up by sightHeight), then translates
-(and lightly rotates) the hand so that rear sight lands on the view axis at sightDist --
-exactly the "eye behind the sights, front post in the notch" picture. Fine bias from
-cg_codAdsView and cod_adsGunFovComp is applied on top. Falls back to bias-only if tags
-are missing.
+Two-pass align so the gun points straight (not diagonally) AND the rear sight sits on the
+optical axis:
+  1) straighten hand pitch/yaw so tag_flash forward matches view forward
+  2) re-resolve tags at that orientation, then translate so the rear sight lands at sightDist
+Blend the fully-aligned pose back onto the hip pose by e. Fine bias from cg_codAdsView and
+cod_adsGunFovComp is applied on top. Falls back to bias-only if tags are missing.
 ================
 */
 void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, float e ) {
@@ -64,17 +121,16 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	codAdsView_t *ads;
 	refEntity_t hand;
 	refEntity_t gun;
-	orientation_t flash;
-	vec3_t flashAxis[3];
 	vec3_t flashOrigin;
+	vec3_t flashFwd;
 	vec3_t sightPos;
 	vec3_t desired;
 	vec3_t delta;
-	vec3_t flashFwd;
-	vec3_t boreUp;
+	vec3_t flashAngles, viewAngles;
+	vec3_t alignedOrigin, alignedAngles;
 	float sightHeight, barrelBack, sightDist;
 	float fovScale, fovComp;
-	float d;
+	float deltaLen;
 	int i;
 
 	if ( e <= 0.0f || weaponNum <= WP_NONE || weaponNum >= WP_NUM_WEAPONS ) {
@@ -92,19 +148,21 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	sightDist   = bg_cod.adsSightDist   + ads->sightDist;
 
 	// codmod: too small = looking inside the mesh; too large = floating mid-screen arms.
-	// Keep a usable console-tuning window (~8-18). Default sits near 12.
+	// Pistol sweet spot from in-game tuning is Dist 18 / Height 4.
 	if ( sightDist < 8.0f ) {
 		sightDist = 8.0f;
 	}
-	if ( sightDist > 18.0f ) {
-		sightDist = 18.0f;
+	if ( sightDist > 22.0f ) {
+		sightDist = 22.0f;
 	}
 
 	fovScale = ( bg_cod.adsTune && weaponNum == cg.weaponSelect )
 			   ? bg_cod.adsTuneFov : BG_CodAdsFovScale( weaponNum );
 	fovComp = bg_cod.adsGunFovComp * ( 1.0f - fovScale );
 
-	// Build a throwaway hand entity at the current hip-fire pose so we can resolve tags.
+	VectorCopy( handOrigin, alignedOrigin );
+	VectorCopy( angles, alignedAngles );
+
 	memset( &hand, 0, sizeof( hand ) );
 	VectorCopy( handOrigin, hand.origin );
 	AnglesToAxis( angles, hand.axis );
@@ -117,61 +175,34 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	gun.frame = gun.oldframe = 0;
 	gun.backlerp = 0;
 
-	if ( !hand.hModel || !gun.hModel ) {
-		// no models yet -- fall through to bias-only
-	} else {
-		CG_PositionEntityOnTag( &gun, &hand, "tag_weapon", 0, NULL );
+	if ( hand.hModel && gun.hModel && CG_CodResolveFlashTag( &hand, &gun, flashOrigin, flashFwd ) ) {
+		// Pass 1: straighten the bore onto the view axis (kills the hip-fire diagonal).
+		vectoangles( flashFwd, flashAngles );
+		vectoangles( cg.refdef.viewaxis[0], viewAngles );
+		alignedAngles[PITCH] += AngleDelta( viewAngles[PITCH], flashAngles[PITCH] );
+		alignedAngles[YAW]   += AngleDelta( viewAngles[YAW],   flashAngles[YAW] );
 
-		if ( trap_R_LerpTag( &flash, &gun, "tag_flash", 0 ) >= 0 ) {
-			VectorCopy( gun.origin, flashOrigin );
-			for ( i = 0; i < 3; i++ ) {
-				VectorMA( flashOrigin, flash.origin[i], gun.axis[i], flashOrigin );
-			}
-			MatrixMultiply( flash.axis, gun.axis, flashAxis );
-
-			// Bore forward = tag X. Do NOT use tag Z as "up" blindly -- on several RTCW
-			// viewmodels it points into the mesh, which put the aim point inside the gun.
-			VectorCopy( flashAxis[0], flashFwd );
-			VectorNormalize( flashFwd );
-
-			// Bore-up = view-up projected onto the plane perpendicular to the bore, so the
-			// sight line always rises toward the top of the screen / slide, never into it.
-			VectorCopy( cg.refdef.viewaxis[2], boreUp );
-			d = DotProduct( boreUp, flashFwd );
-			VectorMA( boreUp, -d, flashFwd, boreUp );
-			if ( VectorNormalize( boreUp ) < 0.001f ) {
-				// view-up parallel to bore (rare) -- fall back to view right × bore
-				CrossProduct( cg.refdef.viewaxis[1], flashFwd, boreUp );
-				VectorNormalize( boreUp );
-			}
-			if ( DotProduct( boreUp, cg.refdef.viewaxis[2] ) < 0.0f ) {
-				VectorInverse( boreUp );
-			}
-
-			// Rear sight sits above the bore, back from the muzzle -- outside the mesh.
-			VectorMA( flashOrigin, -barrelBack, flashFwd, sightPos );
-			VectorMA( sightPos, sightHeight, boreUp, sightPos );
-
-			// Place that rear sight on the optical axis with real eye relief.
+		// Pass 2: at the straightened orientation, put the rear sight on the optical axis.
+		VectorCopy( alignedOrigin, hand.origin );
+		AnglesToAxis( alignedAngles, hand.axis );
+		if ( CG_CodResolveFlashTag( &hand, &gun, flashOrigin, flashFwd ) ) {
+			CG_CodSightPoint( flashOrigin, flashFwd, barrelBack, sightHeight, sightPos );
 			VectorMA( cg.refdef.vieworg, sightDist + fovComp, cg.refdef.viewaxis[0], desired );
-
 			VectorSubtract( desired, sightPos, delta );
 
-			// codmod: if tag resolution is wrong, delta can be huge and fling the gun into
-			// the middle of the scene. Cap the correction to a viewmodel-sized move.
-			{
-				float deltaLen = VectorLength( delta );
-				if ( deltaLen > 40.0f ) {
-					VectorScale( delta, 40.0f / deltaLen, delta );
-				}
+			// Cap wild tag deltas so a bad resolve can't fling the gun mid-scene.
+			deltaLen = VectorLength( delta );
+			if ( deltaLen > 40.0f ) {
+				VectorScale( delta, 40.0f / deltaLen, delta );
 			}
-
-			VectorMA( handOrigin, e, delta, handOrigin );
-
-			// No bore-to-view rotation pass: the hand already inherits viewangles, and
-			// forcing flashFwd onto the view axis was aiming down the barrel (inside the
-			// gun) whenever sightHeight was a bit short.
+			VectorAdd( alignedOrigin, delta, alignedOrigin );
 		}
+	}
+
+	// Blend hip pose -> fully aligned pose by ADS fraction.
+	for ( i = 0; i < 3; i++ ) {
+		handOrigin[i] += ( alignedOrigin[i] - handOrigin[i] ) * e;
+		angles[i] += AngleDelta( alignedAngles[i], angles[i] ) * e;
 	}
 
 	// Fine bias (table / live tune) -- small corrections after auto-align.
