@@ -625,13 +625,36 @@ static void CG_OffsetFirstPersonView( void ) {
 	origin[2] += cg.predictedPlayerState.viewheight;
 
 	// smooth out duck height changes
-	timeDelta = cg.time - cg.duckTime;
-	if ( timeDelta < 0 ) { // Ridah
-		cg.duckTime = cg.time - DUCK_TIME;
-	}
-	if ( timeDelta < DUCK_TIME ) {
-		cg.refdef.vieworg[2] -= cg.duckChange
-								* ( DUCK_TIME - timeDelta ) / DUCK_TIME;
+	// codmod: cod_duckTime/cod_duckEase (phase 2.2), ~30% faster than vanilla by default,
+	// with an optional ease-out curve. cg.codDuckDuration is stashed so phase 4b (prone)
+	// can reuse this same curve with a different duration.
+	if ( bg_cod.enable ) {
+		cg.codDuckDuration = (int)bg_cod.duckTime;
+		if ( cg.codDuckDuration < 1 ) {
+			cg.codDuckDuration = 1;
+		}
+
+		timeDelta = cg.time - cg.duckTime;
+		if ( timeDelta < 0 ) { // Ridah
+			cg.duckTime = cg.time - cg.codDuckDuration;
+			timeDelta = cg.codDuckDuration;
+		}
+		if ( timeDelta < cg.codDuckDuration ) {
+			f = (float)timeDelta / (float)cg.codDuckDuration;      // 0..1
+			if ( bg_cod.duckEase ) {
+				f = 1.0f - ( 1.0f - f ) * ( 1.0f - f );    // ease-out quad
+			}
+			cg.refdef.vieworg[2] -= cg.duckChange * ( 1.0f - f );
+		}
+	} else {
+		timeDelta = cg.time - cg.duckTime;
+		if ( timeDelta < 0 ) { // Ridah
+			cg.duckTime = cg.time - DUCK_TIME;
+		}
+		if ( timeDelta < DUCK_TIME ) {
+			cg.refdef.vieworg[2] -= cg.duckChange
+									* ( DUCK_TIME - timeDelta ) / DUCK_TIME;
+		}
 	}
 
 	// add bob height

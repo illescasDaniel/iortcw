@@ -1784,6 +1784,20 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 					 ( LAND_DEFLECT_TIME + LAND_RETURN_TIME - delta ) / LAND_RETURN_TIME;
 	}
 
+	// codmod: small viewmodel dip on crouch transitions, same curve as the camera duck
+	// smoothing in cg_view.c (phase 2.2, optional, cod_duckGunDip). cg.codDuckDuration is
+	// set by CG_OffsetFirstPersonView earlier this frame.
+	if ( bg_cod.enable && bg_cod.duckGunDip && cg.codDuckDuration > 0 ) {
+		int duckDelta = cg.time - cg.duckTime;
+		if ( duckDelta >= 0 && duckDelta < cg.codDuckDuration ) {
+			float duckF = (float)duckDelta / (float)cg.codDuckDuration;
+			if ( bg_cod.duckEase ) {
+				duckF = 1.0f - ( 1.0f - duckF ) * ( 1.0f - duckF );
+			}
+			origin[2] -= cg.duckChange * 0.1f * ( 1.0f - duckF );
+		}
+	}
+
 #if 0
 	// drop the weapon when stair climbing
 	delta = cg.time - cg.stepTime;
