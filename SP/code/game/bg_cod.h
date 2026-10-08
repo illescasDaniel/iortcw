@@ -117,6 +117,8 @@ typedef struct {
 	float maxHealth;           // player STAT_MAX_HEALTH when > 0 (vanilla 100; CoD-ish 50)
 	int sprintLinear;          // single-rate recharge (no 25%/idle bonuses)
 	float sprintRechargeDelay; // ms after sprint ends before recharge starts
+	float ammoScale;           // × pickup/start ammo + max carry (player only; 2 = double)
+	int interactHint;          // cgame: "Press <key> to interact" next to cursor hint
 
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
@@ -189,5 +191,8 @@ int BG_CodAdsTimeOut( int weapon );
 // codmod: true for the three "secondary fire" scoped weapons (phase 3.8). They use the
 // real RTCW scope instead of iron-sight ADS, but still get the ADS move-speed penalty.
 qboolean BG_CodIsScopeWeapon( int weapon );
+
+// codmod: player max reserve ammo after cod_ammoScale (phase 5b). AI / scale≤1 → table maxammo.
+int BG_CodMaxAmmo( int weapon );
 
 #endif // __BG_COD_H__

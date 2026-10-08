@@ -39,6 +39,7 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 #include "g_local.h"
+#include "bg_cod.h"     // codmod: phase 5b ammoScale
 
 
 
@@ -317,6 +318,18 @@ Add_Ammo
 void Add_Ammo( gentity_t *ent, int weapon, int count, qboolean fillClip ) {
 	int ammoweap = BG_FindAmmoForWeapon( weapon );
 	qboolean noPack = qfalse;       // no extra ammo in your 'pack'
+	int maxAmmo;
+
+	// codmod: double (or scale) ammo given to the player — pickups, weapon grants, scripts.
+	// Skip the "give all" path (count >= 999) and AI. (phase 5b)
+	if ( ent->client && !ent->aiCharacter && !ent->client->ps.aiChar
+		 && bg_cod.enable && bg_cod.vitalsEnable && bg_cod.ammoScale > 1.0f
+		 && count > 0 && count < 999 ) {
+		count = (int)( count * bg_cod.ammoScale + 0.5f );
+		if ( count < 1 ) {
+			count = 1;
+		}
+	}
 
 	ent->client->ps.ammo[ammoweap] += count;
 
@@ -348,8 +361,14 @@ void Add_Ammo( gentity_t *ent, int weapon, int count, qboolean fillClip ) {
 	if ( noPack ) {
 		ent->client->ps.ammo[ammoweap] = 0;
 	} else {
-		if ( ent->client->ps.ammo[ammoweap] > ammoTable[ammoweap].maxammo ) {
-			ent->client->ps.ammo[ammoweap] = ammoTable[ammoweap].maxammo;
+		// codmod: player uses scaled max carry when ammoScale > 1 (phase 5b)
+		if ( ent->client && !ent->aiCharacter && !ent->client->ps.aiChar ) {
+			maxAmmo = BG_CodMaxAmmo( ammoweap );
+		} else {
+			maxAmmo = ammoTable[ammoweap].maxammo;
+		}
+		if ( ent->client->ps.ammo[ammoweap] > maxAmmo ) {
+			ent->client->ps.ammo[ammoweap] = maxAmmo;
 		}
 
 		if ( count >= 999 ) { // 'really, give /all/'

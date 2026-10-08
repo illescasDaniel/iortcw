@@ -147,6 +147,8 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_maxHealth",          "50",   0,            CODOFS( maxHealth ),          0 },
 	{ "cod_sprintLinear",       "1",    0,            CODOFS( sprintLinear ),       1 },
 	{ "cod_sprintRechargeDelay","600",  0,            CODOFS( sprintRechargeDelay ), 0 },
+	{ "cod_ammoScale",          "2",    0,            CODOFS( ammoScale ),          0 },
+	{ "cod_interactHint",       "1",    0,            CODOFS( interactHint ),       1 },
 
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
@@ -250,6 +252,27 @@ codmod: weapons that get SP tap-fire / pistol interval overrides (phase 5).
 */
 qboolean BG_CodIsPistol( int weapon ) {
 	return ( weapon == WP_LUGER || weapon == WP_COLT || weapon == WP_SILENCER ) ? qtrue : qfalse;
+}
+
+/*
+================
+BG_CodMaxAmmo
+
+codmod: scaled max reserve for the player when cod_ammoScale > 1 (phase 5b).
+Does not mutate ammoTable (shared with AI).
+================
+*/
+int BG_CodMaxAmmo( int weapon ) {
+	int maxa;
+
+	if ( weapon < 0 || weapon >= WP_NUM_WEAPONS ) {
+		return 0;
+	}
+	maxa = ammoTable[weapon].maxammo;
+	if ( bg_cod.enable && bg_cod.vitalsEnable && bg_cod.ammoScale > 1.0f ) {
+		maxa = (int)( maxa * bg_cod.ammoScale + 0.5f );
+	}
+	return maxa;
 }
 
 /*

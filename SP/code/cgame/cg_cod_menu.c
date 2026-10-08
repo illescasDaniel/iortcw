@@ -198,6 +198,8 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_FLOAT, "cod_healthRegenRate",    "cod_healthRegenRate",    1,     5,    NULL },
 	{ COD_MI_BOOL,  "cod_healthRegenPauseHurt","cod_healthRegenPauseHurt", 1,  1,    NULL },
 	{ COD_MI_BOOL,  "cod_healthBarNumber",    "cod_healthBarNumber",    1,     1,    NULL },
+	{ COD_MI_FLOAT, "cod_ammoScale",          "cod_ammoScale",          0.25f, 1,    NULL },
+	{ COD_MI_BOOL,  "cod_interactHint",       "cod_interactHint",       1,     1,    NULL },
 
 	{ COD_MI_SECTION, "GAIT / SPRINT GUN", NULL, 0, 0, NULL },
 	{ COD_MI_FLOAT, "cod_sprintRaiseTime",    "cod_sprintRaiseTime",    10,   50,   NULL },

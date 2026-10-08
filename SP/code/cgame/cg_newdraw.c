@@ -526,6 +526,60 @@ static void CG_DrawCursorhint( rectDef_t *rect ) {
 
 	trap_R_SetColor( NULL );
 
+	// codmod: "Press <key> to interact" beside usable/door hints (phase 5b).
+	// Key comes from the current +activate binding via trap_Key_GetKey.
+	if ( bg_cod.enable && bg_cod.vitalsEnable && bg_cod.interactHint ) {
+		qboolean showInteract = qfalse;
+
+		switch ( cg.cursorHintIcon ) {
+		case HINT_ACTIVATE:
+		case HINT_DOOR:
+		case HINT_DOOR_ROTATING:
+		case HINT_BUTTON:
+		case HINT_BREAKABLE:
+		case HINT_CHAIR:
+			showInteract = qtrue;
+			break;
+		default:
+			break;
+		}
+		if ( showInteract && cg.cursorHintIcon == HINT_CHAIR
+			 && cg.predictedPlayerState.weapon
+			 && !( WEAPS_ONE_HANDED & ( 1 << ( cg.predictedPlayerState.weapon ) ) ) ) {
+			showInteract = qfalse; // armed two-hand: chair shows NOACTIVATE
+		}
+		if ( showInteract ) {
+			char keyName[16];
+			char hintText[64];
+			int key;
+			vec4_t textColor;
+
+			key = trap_Key_GetKey( "+activate" );
+			if ( key <= 0 ) {
+				Q_strncpyz( keyName, "F", sizeof( keyName ) );
+			} else if ( key > 32 && key < 127 && key != '"' ) {
+				if ( key >= 'a' && key <= 'z' ) {
+					keyName[0] = (char)( key - 32 );
+				} else {
+					keyName[0] = (char)key;
+				}
+				keyName[1] = 0;
+			} else if ( key == 13 ) { // K_ENTER
+				Q_strncpyz( keyName, "ENTER", sizeof( keyName ) );
+			} else if ( key == 32 ) { // K_SPACE
+				Q_strncpyz( keyName, "SPACE", sizeof( keyName ) );
+			} else {
+				Q_strncpyz( keyName, "F", sizeof( keyName ) );
+			}
+
+			Com_sprintf( hintText, sizeof( hintText ), "Press %s to interact", keyName );
+			Vector4Copy( color, textColor );
+			CG_DrawSmallStringColor( (int)( rect->x + rect->w + 6 ),
+									(int)( rect->y + rect->h * 0.35f ),
+									hintText, textColor );
+		}
+	}
+
 	// draw status bar under the cursor hint
 	if ( cg.cursorHintValue && ( !( cg.time - cg.cursorHintTime ) ) ) {    // don't fade bar out w/ hint icon
 		if ( redbar ) {
