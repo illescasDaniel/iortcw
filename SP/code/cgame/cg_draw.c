@@ -2362,18 +2362,6 @@ static void CG_DrawCrosshair( void ) {
 
 	hcolor[3] = cg_crosshairAlpha.value;    //----(SA)	added
 
-	// codmod: fade the crosshair out as ADS comes in, fully hidden past frac 0.6 (phase 3.7).
-	// Uses the raw (non-smoothstepped) fraction -- the gun/FOV easing already hides most of
-	// the pop, and this just needs to clear the dot before it's covered by iron sights.
-	if ( bg_cod.enable && bg_cod.adsEnable ) {
-		float adsFrac = CG_CodAdsFrac();
-		if ( adsFrac > 0.6f ) {
-			hcolor[3] = 0.0f;
-		} else if ( adsFrac > 0.0f ) {
-			hcolor[3] *= ( 1.0f - adsFrac );
-		}
-	}
-
 	if ( cg_fixedAspect.integer ) {
 		CG_SetScreenPlacement(PLACE_CENTER, PLACE_CENTER);
 	}
@@ -2489,6 +2477,20 @@ static void CG_DrawCrosshair( void ) {
 
 	if ( cg_paused.integer ) {
 		// no draw if any menu's are up	 (or otherwise paused)
+		return;
+	}
+
+	// codmod: while ADS, replace the hip crosshair with a center dot (phase 3.7 interim).
+	// cod_adsCrosshair 1 = dot (default until all weapons are tuned); 2 = hide completely.
+	if ( bg_cod.enable && bg_cod.adsEnable && bg_cod.adsCrosshair > 0 && CG_CodAdsFrac() > 0.5f ) {
+		if ( bg_cod.adsCrosshair >= 2 ) {
+			return;
+		}
+		if ( cg_crosshairHealth.integer ) {
+			CG_ColorForHealth( hcolor );
+		}
+		hcolor[3] = cg_crosshairAlpha.value;
+		CG_FillRect( 319, 239, 2, 2, hcolor );
 		return;
 	}
 

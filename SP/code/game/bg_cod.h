@@ -61,6 +61,7 @@ typedef struct {
 	float adsYaw;           // degrees, global ADS angle bias (neg = clockwise from above)
 	float adsRoll;          // degrees, global ADS angle bias (pos ≈ clockwise looking forward)
 	float adsRight;         // u, whole-weapon horizontal shift along view right/left (cgame)
+	int adsCrosshair;       // 0=keep hip crosshair, 1=ADS center dot (default), 2=hide while ADS
 	float scopeSwitchTime;  // ms, rifle<->scope weapon-change time when >0 (phase 3.8); 0 = vanilla 250ms
 
 	int adsLock;      // debug: cgame treats ADS as fully in, visual only (alignment tooling)

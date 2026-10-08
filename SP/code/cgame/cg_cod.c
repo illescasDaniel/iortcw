@@ -153,7 +153,7 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	sightDist   = bg_cod.adsSightDist   + ads->sightDist;
 
 	// codmod: too small = looking inside the mesh; too large = floating mid-screen arms.
-	// Pistol defaults from codmod_tune.log (Dist 18.5 / Height 3 / Yaw -6.5 / Roll 6.5).
+	// Pistol defaults from codmod_tune.log (Dist 20 / Height 2.5 / Yaw -3.5 / Roll 6.5).
 	if ( sightDist < 8.0f ) {
 		sightDist = 8.0f;
 	}

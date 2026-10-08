@@ -209,6 +209,7 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_FLOAT, "cod_adsYaw",             "cod_adsYaw",             0.5f, 2,    NULL },
 	{ COD_MI_FLOAT, "cod_adsRoll",            "cod_adsRoll",            0.5f, 2,    NULL },
 	{ COD_MI_FLOAT, "cod_adsRight",           "cod_adsRight",           0.25f, 1,   NULL },
+	{ COD_MI_INT,   "cod_adsCrosshair",       "cod_adsCrosshair",       1,    1,    NULL },
 
 	{ COD_MI_SECTION, "ADS TUNE (per-weapon live)", NULL, 0, 0, NULL },
 	{ COD_MI_BOOL,  "cod_adsLock",            "cod_adsLock",            1,    1,    NULL },
