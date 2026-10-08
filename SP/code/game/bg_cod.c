@@ -98,10 +98,12 @@ const codCvarDef_t bg_codCvars[] = {
 	// frame (pmove); gun-lower raise time is visual-only and must not gate firing.
 	{ "cod_gaitEnable",         "1",    0,            CODOFS( gaitEnable ),         1 },
 	{ "cod_sprintRaiseTime",    "180",  0,            CODOFS( sprintRaiseTime ),    0 },
-	{ "cod_sprintGunPitch",     "14",   0,            CODOFS( sprintGunPitch ),     0 },
+	// codmod: raised after Phase 4 confirm (2026-10-08) so more of the gun stays on-screen
+	// while still reading as "sprint lowered" (was Pitch 14 / Up -3).
+	{ "cod_sprintGunPitch",     "9",    0,            CODOFS( sprintGunPitch ),     0 },
 	{ "cod_sprintGunRoll",      "-8",   0,            CODOFS( sprintGunRoll ),      0 },
-	{ "cod_sprintGunFwd",       "-2",   0,            CODOFS( sprintGunFwd ),       0 },
-	{ "cod_sprintGunUp",        "-3",   0,            CODOFS( sprintGunUp ),        0 },
+	{ "cod_sprintGunFwd",       "-1.5", 0,            CODOFS( sprintGunFwd ),       0 },
+	{ "cod_sprintGunUp",        "-0.5", 0,            CODOFS( sprintGunUp ),        0 },
 	{ "cod_bobWalkRate",        "0.28", 0,            CODOFS( bobWalkRate ),        0 },
 	{ "cod_bobRunRate",         "0.4",  0,            CODOFS( bobRunRate ),         0 },
 	{ "cod_bobSprintRate",      "0.5",  0,            CODOFS( bobSprintRate ),      0 },
