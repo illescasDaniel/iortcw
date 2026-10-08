@@ -427,6 +427,8 @@ static consoleCommand_t commands[] = {
 	{ "toggleads", CG_ToggleAds_f }, // codmod: phase 3.1 sticky ADS toggle
 	{ "cod_adsTuneLoad", CG_CodAdsTuneLoad_f }, // codmod: phase 3.5 alignment tooling
 	{ "cod_adsTuneDump", CG_CodAdsTuneDump_f }, // codmod: phase 3.5 alignment tooling
+	{ "cod_menu", CG_CodMenu_f },           // codmod: sectioned tune menu
+	{ "cod_menu_dump", CG_CodMenuDump_f },  // codmod: dump all tunables + runtime to log
 };
 
 
