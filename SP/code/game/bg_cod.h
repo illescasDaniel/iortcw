@@ -70,6 +70,23 @@ typedef struct {
 	float adsTunePitch, adsTuneYaw, adsTuneRoll;    // degrees, cgame-only fine bias
 	float adsTuneFov;                               // fovScale preview while tuning, cgame-only
 
+	// codmod: Phase 4 gait / FP movement presentation (docs/phase-4-gait.md)
+	int gaitEnable;            // master for gun-lower, gait bob, sprint camera
+	float sprintRaiseTime;     // ms, visual gun raise after sprint ends (does not gate fire)
+	float sprintGunPitch;      // degrees, viewmodel pitch at full sprint lower
+	float sprintGunRoll;       // degrees
+	float sprintGunFwd;        // u along view forward (neg = toward camera)
+	float sprintGunUp;         // u
+	float bobWalkRate;         // pmove bobmove while walking
+	float bobRunRate;          // pmove bobmove while jogging
+	float bobSprintRate;       // pmove bobmove while sprinting
+	float bobWalkAmp;          // cgame weapon/camera bob multiplier while walking
+	float bobRunAmp;           // while jogging
+	float bobSprintAmp;        // while sprinting
+	float sprintRunPitch;      // x cg_runpitch contribution while sprinting
+	float sprintRunRoll;       // x cg_runroll contribution while sprinting
+	float sprintFovScale;      // FOV scale at full sprint (1 = none)
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;
@@ -103,8 +120,8 @@ extern const int bg_numCodCvars;
 
 // codmod: g_main.c / cg_main.c each keep a static vmCvar_t[BG_COD_MAX_CVARS] and pass it in.
 // Bump this if bg_codCvars ever grows past it -- BG_CodRegisterCvars() clamps defensively.
-// (phase 3 ADS + alignment tooling cvars pushed this past 32; rounded up for phases 4/4b too.)
-#define BG_COD_MAX_CVARS 64
+// (phase 3 ADS + phase 4 gait cvars; leave headroom for slide/prone.)
+#define BG_COD_MAX_CVARS 80
 
 void BG_CodRegisterCvars( vmCvar_t *cvars, int maxCvars );
 void BG_CodUpdateCvars( vmCvar_t *cvars, int maxCvars );

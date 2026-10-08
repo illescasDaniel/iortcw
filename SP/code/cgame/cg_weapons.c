@@ -1714,6 +1714,9 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 	int delta;
 	float fracsin, leanscale;
 	float bobScale;    // codmod: phase 3.5, see below -- 1 outside ADS, down to 1-adsBobScale at full ADS
+	float gaitAmp;     // codmod: phase 4.2 walk/jog/sprint bob amp
+	float sprintE;     // codmod: phase 4.1 visual sprint gun-lower 0..1
+	vec3_t forward, up;
 
 	VectorCopy( cg.refdef.vieworg, origin );
 	VectorCopy( cg.refdefViewAngles, angles );
@@ -1725,6 +1728,8 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 		float e = BG_CodSmoothstep( CG_CodAdsFrac() );
 		bobScale = 1.0f - e * bg_cod.adsBobScale;
 	}
+	gaitAmp = CG_CodGaitBobAmp();
+	bobScale *= gaitAmp;
 
 	// adjust 'lean' into weapon
 	if ( cg.predictedPlayerState.leanf != 0 ) {
@@ -1839,6 +1844,16 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 	angles[ROLL] += bobScale * scale * fracsin * 0.01;
 	angles[YAW] += bobScale * scale * fracsin * 0.01;
 	angles[PITCH] += bobScale * scale * fracsin * 0.01;
+
+	// codmod: procedural sprint gun-lower (phase 4.1). Visual only — fire is not gated here.
+	sprintE = BG_CodSmoothstep( CG_CodSprintFrac() );
+	if ( sprintE > 0.0f ) {
+		angles[PITCH] += bg_cod.sprintGunPitch * sprintE;
+		angles[ROLL] += bg_cod.sprintGunRoll * sprintE;
+		AngleVectors( angles, forward, NULL, up );
+		VectorMA( origin, bg_cod.sprintGunFwd * sprintE, forward, origin );
+		VectorMA( origin, bg_cod.sprintGunUp * sprintE, up, origin );
+	}
 
 	// RF, subtract the kickAngles
 	VectorMA( angles, -1.0, cg.kickAngles, angles );

@@ -1882,6 +1882,19 @@ static void PM_Footsteps( void ) {
 	// check for footstep / splash sounds
 	animGap = BG_AnimGetFootstepGap( pm->ps, pm->xyspeed );
 
+	// codmod: gait-scaled bob frequency for the player (phase 4.2). Crouch keeps vanilla
+	// bobmove; walk/jog/sprint use cod_bob*Rate. Sprint is no longer identical to jog.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.gaitEnable
+		 && !( pm->ps->pm_flags & PMF_DUCKED ) ) {
+		if ( pm->cmd.buttons & BUTTON_WALKING ) {
+			bobmove = bg_cod.bobWalkRate;
+		} else if ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) {
+			bobmove = bg_cod.bobSprintRate;
+		} else {
+			bobmove = bg_cod.bobRunRate;
+		}
+	}
+
 	// new method
 	if ( animGap > 0 ) {
 
@@ -3719,12 +3732,15 @@ static void PM_CodUpdateSprint( void ) {
 
 	moving = ( pm->cmd.forwardmove || pm->cmd.rightmove ) ? qtrue : qfalse;
 
+	// codmod: ADS blocks sprint (phase 3.3). Attack cancels sprint the same frame so
+	// PM_Weapon (later in PmoveSingle) still sees BUTTON_ATTACK and fires (phase 4.1).
 	wantSprint = ( pm->cmd.buttons & BUTTON_SPRINT )
 				 && ( bg_cod.sprintForwardOnly ? ( pm->cmd.forwardmove > 0 ) : moving )
 				 && !( pm->ps->pm_flags & PMF_DUCKED )
 				 && pm->waterlevel < 2
 				 && !( pm->cmd.buttons & BUTTON_WALKING )
-				 && !( pm->cmd.wbuttons & WBUTTON_COD_ADS ); // codmod: ADS blocks/cancels sprint (phase 3.3)
+				 && !( pm->cmd.wbuttons & WBUTTON_COD_ADS )
+				 && !( pm->cmd.buttons & BUTTON_ATTACK );
 
 	wasSprinting = ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) ? qtrue : qfalse;
 	minSprintTime = bg_cod.sprintMinTime * 1000.0f;    // seconds -> stamina units (0..20000 range)

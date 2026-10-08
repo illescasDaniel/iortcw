@@ -94,6 +94,24 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_adsTuneRoll",        "0",    0,            CODOFS( adsTuneRoll ),        0 },
 	{ "cod_adsTuneFov",         "0.8",  0,            CODOFS( adsTuneFov ),         0 },
 
+	// codmod: Phase 4 gait presentation (docs/phase-4-gait.md). Fire cancels sprint same
+	// frame (pmove); gun-lower raise time is visual-only and must not gate firing.
+	{ "cod_gaitEnable",         "1",    0,            CODOFS( gaitEnable ),         1 },
+	{ "cod_sprintRaiseTime",    "180",  0,            CODOFS( sprintRaiseTime ),    0 },
+	{ "cod_sprintGunPitch",     "14",   0,            CODOFS( sprintGunPitch ),     0 },
+	{ "cod_sprintGunRoll",      "-8",   0,            CODOFS( sprintGunRoll ),      0 },
+	{ "cod_sprintGunFwd",       "-2",   0,            CODOFS( sprintGunFwd ),       0 },
+	{ "cod_sprintGunUp",        "-3",   0,            CODOFS( sprintGunUp ),        0 },
+	{ "cod_bobWalkRate",        "0.28", 0,            CODOFS( bobWalkRate ),        0 },
+	{ "cod_bobRunRate",         "0.4",  0,            CODOFS( bobRunRate ),         0 },
+	{ "cod_bobSprintRate",      "0.5",  0,            CODOFS( bobSprintRate ),      0 },
+	{ "cod_bobWalkAmp",         "0.65", 0,            CODOFS( bobWalkAmp ),         0 },
+	{ "cod_bobRunAmp",          "1",    0,            CODOFS( bobRunAmp ),          0 },
+	{ "cod_bobSprintAmp",       "1.35", 0,            CODOFS( bobSprintAmp ),       0 },
+	{ "cod_sprintRunPitch",     "1.75", 0,            CODOFS( sprintRunPitch ),     0 },
+	{ "cod_sprintRunRoll",      "1.5",  0,            CODOFS( sprintRunRoll ),      0 },
+	{ "cod_sprintFovScale",     "1.03", 0,            CODOFS( sprintFovScale ),     0 },
+
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
 	{ "cod_menuScale",          "0.7",  CVAR_ARCHIVE, CODOFS( menuScale ),          0 },

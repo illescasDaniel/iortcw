@@ -47,6 +47,95 @@ float CG_CodAdsFrac( void ) {
 
 /*
 ================
+CG_CodSprintFrac
+
+codmod: eased 0..1 sprint gun-lower fraction (phase 4.1). Visual only — firing is gated in
+pmove by clearing COD_SF_SPRINTING on BUTTON_ATTACK, not by this value. Raises/lowers over
+cod_sprintRaiseTime. Suppressed while ADS so iron sights don't fight the sprint pose.
+================
+*/
+float CG_CodSprintFrac( void ) {
+	float target;
+	float raiseMs;
+	float dt;
+	int now;
+
+	if ( !( bg_cod.enable && bg_cod.gaitEnable ) ) {
+		cg.codSprintFrac = 0.0f;
+		cg.codSprintFracTime = cg.time;
+		return 0.0f;
+	}
+
+	if ( CG_CodAdsFrac() > 0.01f ) {
+		target = 0.0f;
+	} else if ( cg.predictedPlayerState.stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) {
+		target = 1.0f;
+	} else {
+		target = 0.0f;
+	}
+
+	raiseMs = bg_cod.sprintRaiseTime;
+	if ( raiseMs < 1.0f ) {
+		raiseMs = 1.0f;
+	}
+
+	now = cg.time;
+	if ( cg.codSprintFracTime <= 0 || now < cg.codSprintFracTime ) {
+		cg.codSprintFracTime = now;
+	}
+	dt = (float)( now - cg.codSprintFracTime ) / raiseMs;
+	cg.codSprintFracTime = now;
+	if ( dt < 0.0f ) {
+		dt = 0.0f;
+	} else if ( dt > 1.0f ) {
+		dt = 1.0f;
+	}
+
+	if ( cg.codSprintFrac < target ) {
+		cg.codSprintFrac += dt;
+		if ( cg.codSprintFrac > target ) {
+			cg.codSprintFrac = target;
+		}
+	} else if ( cg.codSprintFrac > target ) {
+		cg.codSprintFrac -= dt;
+		if ( cg.codSprintFrac < target ) {
+			cg.codSprintFrac = target;
+		}
+	}
+
+	return cg.codSprintFrac;
+}
+
+/*
+================
+CG_CodGaitBobAmp
+
+codmod: walk / jog / sprint bob amplitude multiplier for weapon and camera (phase 4.2).
+================
+*/
+float CG_CodGaitBobAmp( void ) {
+	usercmd_t cmd;
+	int cmdNum;
+
+	if ( !( bg_cod.enable && bg_cod.gaitEnable ) ) {
+		return 1.0f;
+	}
+
+	if ( cg.predictedPlayerState.stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) {
+		return bg_cod.bobSprintAmp;
+	}
+
+	cmdNum = trap_GetCurrentCmdNumber();
+	trap_GetUserCmd( cmdNum, &cmd );
+	if ( cmd.buttons & BUTTON_WALKING ) {
+		return bg_cod.bobWalkAmp;
+	}
+
+	return bg_cod.bobRunAmp;
+}
+
+/*
+================
 CG_CodResolveFlashTag
 
 codmod: helper for iron-sight ADS. Fills world-space muzzle origin and bore forward from
@@ -465,7 +554,7 @@ void CG_CodUpdateScopeHold( void ) {
 CG_CodStateName
 
 codmod: picks the debug HUD state label. Priority matches the order in architecture.md
-section 6 (RUN|WALK|SPRINT|CROUCH|AIR); PRONE/CRAWL/SLIDE are added in phases 4/4b.
+section 6 (RUN|WALK|SPRINT|CROUCH|AIR); PRONE/CRAWL/SLIDE are added in phases 5/5b.
 ================
 */
 static const char *CG_CodStateName( void ) {
@@ -575,6 +664,11 @@ void CG_CodDrawDebugHud( void ) {
 
 	// codmod: ads frac + current fov (phase 3.7)
 	Com_sprintf( line, sizeof( line ), "ads %.2f  fov %.1f", ps->stats[STAT_COD_ADS] / 1000.0f, cg.refdef.fov_x );
+	CG_DrawSmallStringColor( 4, y, line, color );
+	y += SMALLCHAR_HEIGHT;
+
+	// codmod: visual sprint gun-lower fraction + gait bob amp (phase 4)
+	Com_sprintf( line, sizeof( line ), "sprint %.2f  bobAmp %.2f", CG_CodSprintFrac(), CG_CodGaitBobAmp() );
 	CG_DrawSmallStringColor( 4, y, line, color );
 	y += SMALLCHAR_HEIGHT;
 

@@ -594,30 +594,48 @@ static void CG_OffsetFirstPersonView( void ) {
 	// add angles based on velocity
 	VectorCopy( cg.predictedPlayerState.velocity, predictedVelocity );
 
-	delta = DotProduct( predictedVelocity, cg.refdef.viewaxis[0] );
-	angles[PITCH] += delta * cg_runpitch.value;
+	{
+		// codmod: stronger runpitch/runroll while sprinting (phase 4.3), lerped with visual
+		// sprint fraction so the weight eases with the gun raise/lower.
+		float runPitch = cg_runpitch.value;
+		float runRoll = cg_runroll.value;
+		float sprintE = BG_CodSmoothstep( CG_CodSprintFrac() );
 
-	delta = DotProduct( predictedVelocity, cg.refdef.viewaxis[1] );
-	angles[ROLL] -= delta * cg_runroll.value;
+		if ( sprintE > 0.0f && bg_cod.enable && bg_cod.gaitEnable ) {
+			runPitch *= 1.0f + ( bg_cod.sprintRunPitch - 1.0f ) * sprintE;
+			runRoll *= 1.0f + ( bg_cod.sprintRunRoll - 1.0f ) * sprintE;
+		}
+
+		delta = DotProduct( predictedVelocity, cg.refdef.viewaxis[0] );
+		angles[PITCH] += delta * runPitch;
+
+		delta = DotProduct( predictedVelocity, cg.refdef.viewaxis[1] );
+		angles[ROLL] -= delta * runRoll;
+	}
 
 	// add angles based on bob
 
 	// make sure the bob is visible even at low speeds
 	speed = cg.xyspeed > 200 ? cg.xyspeed : 200;
 
-	delta = cg.bobfracsin * cg_bobpitch.value * speed;
-	if ( cg.predictedPlayerState.pm_flags & PMF_DUCKED ) {
-		delta *= 3;     // crouching
+	{
+		// codmod: gait bob amplitude (phase 4.2)
+		float gaitAmp = CG_CodGaitBobAmp();
+
+		delta = cg.bobfracsin * cg_bobpitch.value * speed * gaitAmp;
+		if ( cg.predictedPlayerState.pm_flags & PMF_DUCKED ) {
+			delta *= 3;     // crouching
+		}
+		angles[PITCH] += delta;
+		delta = cg.bobfracsin * cg_bobroll.value * speed * gaitAmp;
+		if ( cg.predictedPlayerState.pm_flags & PMF_DUCKED ) {
+			delta *= 3;     // crouching accentuates roll
+		}
+		if ( cg.bobcycle & 1 ) {
+			delta = -delta;
+		}
+		angles[ROLL] += delta;
 	}
-	angles[PITCH] += delta;
-	delta = cg.bobfracsin * cg_bobroll.value * speed;
-	if ( cg.predictedPlayerState.pm_flags & PMF_DUCKED ) {
-		delta *= 3;     // crouching accentuates roll
-	}
-	if ( cg.bobcycle & 1 ) {
-		delta = -delta;
-	}
-	angles[ROLL] += delta;
 
 //===================================
 
@@ -658,7 +676,8 @@ static void CG_OffsetFirstPersonView( void ) {
 	}
 
 	// add bob height
-	bob = cg.bobfracsin * cg.xyspeed * cg_bobup.value;
+	// codmod: gait amp (phase 4.2)
+	bob = cg.bobfracsin * cg.xyspeed * cg_bobup.value * CG_CodGaitBobAmp();
 	if ( bob > 6 ) {
 		bob = 6;
 	}
@@ -912,6 +931,14 @@ static int CG_CalcFov( void ) {
 				float fovScale = ( bg_cod.adsTune && weapon == cg.weaponSelect )
 								  ? bg_cod.adsTuneFov : BG_CodAdsFovScale( weapon );
 				fov_x *= 1.0f + ( fovScale - 1.0f ) * e;
+			}
+		}
+
+		// codmod: subtle sprint FOV punch (phase 4.3). Skipped while ADS/binoc/scope own fov.
+		if ( !cg.zoomedBinoc && !cg.zoomval && bg_cod.enable && bg_cod.gaitEnable ) {
+			float sprintE = BG_CodSmoothstep( CG_CodSprintFrac() );
+			if ( sprintE > 0.0f && CG_CodAdsFrac() <= 0.01f ) {
+				fov_x *= 1.0f + ( bg_cod.sprintFovScale - 1.0f ) * sprintE;
 			}
 		}
 	}

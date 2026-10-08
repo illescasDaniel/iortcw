@@ -802,13 +802,16 @@ typedef struct {
 	float duckChange;                   // for duck viewheight smoothing
 	int duckTime;
 	int codDuckDuration;                 // codmod: ms for the current duck transition (phase 2.2);
-										  // kept separate from cod_duckTime so phase 4b (prone) can
+										  // kept separate from cod_duckTime so phase 5b (prone) can
 										  // set a different duration without touching this code again
 
 	qboolean codScopeByAds;              // codmod: phase 3.8 -- true while the current scope
 										  // weapon (Sniperrifle/Snooperscope/FG42scope) was entered
 										  // by holding ADS, not by the `weapalt` key. Only ADS
 										  // (CG_CodUpdateScopeHold, cg_cod.c) un-scopes in that case.
+
+	float codSprintFrac;                 // codmod: phase 4 — 0..1 visual sprint gun-lower fraction
+	int codSprintFracTime;               // codmod: cg.time of last CG_CodSprintFrac update
 
 	float landChange;                   // for landing hard
 	int landTime;
@@ -2232,6 +2235,8 @@ void CG_CodMenu_f( void );
 void CG_CodMenuDump_f( void );
 void CG_ToggleAds_f( void );           // codmod: phase 3.1 sticky ADS toggle
 float CG_CodAdsFrac( void );           // codmod: phase 3.5, raw 0..1, forced to 1 by cod_adsLock
+float CG_CodSprintFrac( void );        // codmod: phase 4, 0..1 visual sprint lower (eased)
+float CG_CodGaitBobAmp( void );        // codmod: phase 4, walk/jog/sprint bob amplitude scale
 void CG_CodUpdateAdsTune( void );      // codmod: phase 3.5 alignment tooling
 void CG_CodAdsTuneLoad_f( void );      // codmod: phase 3.5 alignment tooling
 void CG_CodAdsTuneDump_f( void );      // codmod: phase 3.5 alignment tooling
