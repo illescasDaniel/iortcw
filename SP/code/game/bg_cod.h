@@ -45,8 +45,37 @@ typedef struct {
 	int aiSpeedMode;     // 0 = vanilla, 1 = match player speeds, 2 = scale anim-derived speeds
 	float aiSpeedScale;  // multiplier used by aiSpeedMode 2
 
+	int adsEnable;          // ADS changes (phase 3)
+	float adsMoveScale;     // x runSpeed while fully in ADS; default when a weapon's own moveScale is 0
+	float adsFovScale;      // x cg_fov while fully in ADS; default when a weapon's own fovScale is 0
+	float adsTimeIn;        // ms, default raise time when a weapon's own timeIn is 0
+	float adsTimeOut;       // ms, default lower time when a weapon's own timeOut is 0
+	float adsSpreadScale;   // x aimSpreadScale while fully in ADS; default when a weapon's own spreadScale is 0
+	float adsSensScale;     // extra multiplier on top of the FOV-derived sensitivity scale
+	float adsBobScale;      // viewmodel bob/land-dip/idle-drift are scaled by 1 - e*adsBobScale
+	float adsGunFovComp;    // pushes the viewmodel forward in proportion to the FOV zoom (cgame)
+	float scopeSwitchTime;  // ms, rifle<->scope weapon-change time when >0 (phase 3.8); 0 = vanilla 250ms
+
+	int adsLock;      // debug: cgame treats ADS as fully in, visual only (alignment tooling)
+	int adsTune;      // debug: live-overwrite cg_codAdsView[current weapon] from the Tune* cvars below
+	float adsTuneFwd, adsTuneRight, adsTuneUp;      // u, cgame-only
+	float adsTunePitch, adsTuneYaw, adsTuneRoll;    // degrees, cgame-only
+	float adsTuneFov;                               // fovScale preview while tuning, cgame-only
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 } codTuning_t;
+
+// codmod: generic smoothstep ease, 0..1 in, 0..1 out (phase 3.5+). GCC doesn't warn about
+// unused "static inline" functions, so qagame linking this header unused is fine.
+static ID_INLINE float BG_CodSmoothstep( float x ) {
+	if ( x <= 0.0f ) {
+		return 0.0f;
+	}
+	if ( x >= 1.0f ) {
+		return 1.0f;
+	}
+	return x * x * ( 3.0f - 2.0f * x );
+}
 
 // codmod: one instance per module (qagame and cgame each link their own bg_cod.o).
 extern codTuning_t bg_cod;
@@ -65,9 +94,40 @@ extern const int bg_numCodCvars;
 
 // codmod: g_main.c / cg_main.c each keep a static vmCvar_t[BG_COD_MAX_CVARS] and pass it in.
 // Bump this if bg_codCvars ever grows past it -- BG_CodRegisterCvars() clamps defensively.
-#define BG_COD_MAX_CVARS 32
+// (phase 3 ADS + alignment tooling cvars pushed this past 32; rounded up for phases 4/4b too.)
+#define BG_COD_MAX_CVARS 64
 
 void BG_CodRegisterCvars( vmCvar_t *cvars, int maxCvars );
 void BG_CodUpdateCvars( vmCvar_t *cvars, int maxCvars );
+
+// codmod: per-weapon ADS gameplay tuning (phase 3.2). A field of 0 means "use the matching
+// cod_ads* cvar default" -- see BG_CodAdsMoveScale() etc. below. Not const-correct to edit
+// at runtime: this is the gameplay table (shared qagame+cgame), separate from cgame's
+// live-tunable cg_codAdsView (cg_cod.c, phase 3.5).
+typedef struct {
+	qboolean canADS;
+	float moveScale;       // 0 => cod_adsMoveScale
+	float fovScale;         // 0 => cod_adsFovScale
+	int timeIn, timeOut;   // ms; 0 => cod_adsTimeIn / cod_adsTimeOut
+	float spreadScale;      // 0 => cod_adsSpreadScale
+} codWeaponTuning_t;
+
+extern const codWeaponTuning_t bg_codWeapons[WP_NUM_WEAPONS];
+
+// codmod: ADS eligibility from playerState_t alone (phase 3.2). Callers that have a
+// pmove_t (PM_CodUpdateADS) additionally gate on waterlevel/ladder, which aren't part of
+// playerState_t -- see docs/phase-3-ads.md section 3.2.
+qboolean BG_CodCanADS( const playerState_t *ps );
+
+// codmod: resolved per-weapon ADS values (table entry if non-zero, else the cvar default).
+float BG_CodAdsMoveScale( int weapon );
+float BG_CodAdsFovScale( int weapon );
+float BG_CodAdsSpreadScale( int weapon );
+int BG_CodAdsTimeIn( int weapon );
+int BG_CodAdsTimeOut( int weapon );
+
+// codmod: true for the three "secondary fire" scoped weapons (phase 3.8). They use the
+// real RTCW scope instead of iron-sight ADS, but still get the ADS move-speed penalty.
+qboolean BG_CodIsScopeWeapon( int weapon );
 
 #endif // __BG_COD_H__
