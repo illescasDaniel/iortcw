@@ -2256,6 +2256,13 @@ static void PM_BeginWeaponChange( int oldweapon, int newweapon, qboolean reload 
 		}
 	}
 
+	// codmod: snappy knife in/out for quickknife + weaponbank 1 (phase 5.5). Player only.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.quickKnifeEnable
+		 && bg_cod.knifeSwitchTime > 0
+		 && ( oldweapon == WP_KNIFE || newweapon == WP_KNIFE ) ) {
+		switchtime = (int)bg_cod.knifeSwitchTime;
+	}
+
 	pm->ps->weaponTime += switchtime;
 }
 
@@ -2344,6 +2351,13 @@ static void PM_FinishWeaponChange( void ) {
 			switchtime = (int)bg_cod.scopeSwitchTime;
 			break;
 		}
+	}
+
+	// codmod: snappy knife raise (phase 5.5) — mirrors BeginWeaponChange drop override
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.quickKnifeEnable
+		 && bg_cod.knifeSwitchTime > 0
+		 && ( oldweapon == WP_KNIFE || newweapon == WP_KNIFE ) ) {
+		switchtime = (int)bg_cod.knifeSwitchTime;
 	}
 
 	pm->ps->weaponTime += switchtime;

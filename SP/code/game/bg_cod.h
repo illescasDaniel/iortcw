@@ -105,6 +105,7 @@ typedef struct {
 
 	int quickKnifeEnable;      // cgame quickknife command (phase 5.5)
 	float quickKnifeTimeout;   // ms failsafe to return to previous weapon
+	float knifeSwitchTime;     // ms drop/raise when switching to/from knife (0 = vanilla 250)
 
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference

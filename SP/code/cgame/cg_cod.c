@@ -884,20 +884,18 @@ void CG_CodUpdateQuickKnife( void ) {
 
 		if ( cg.codQkAttackHeld ) {
 			if ( ps->weaponstate == WEAPON_FIRING || ps->weaponTime > 0 ) {
+				// Swing registered — release attack and return immediately (don't wait out
+				// knife nextShotTime / READY). Keeps V feeling tied to the press.
 				cg.codQkSawFire = qtrue;
 				trap_SendConsoleCommand( "-attack\n" );
 				cg.codQkAttackHeld = qfalse;
+				if ( cg.codQkStayOnKnife || cg.codQkPrev <= WP_NONE ) {
+					CG_CodQuickKnifeClear();
+					return;
+				}
+				cg.codQkState = COD_QK_RETURNING;
+				CG_FinishWeaponChange( WP_KNIFE, cg.codQkPrev );
 			}
-			return;
-		}
-
-		if ( cg.codQkSawFire && ps->weaponstate == WEAPON_READY && ps->weaponTime <= 0 ) {
-			if ( cg.codQkStayOnKnife || cg.codQkPrev <= WP_NONE ) {
-				CG_CodQuickKnifeClear();
-				return;
-			}
-			cg.codQkState = COD_QK_RETURNING;
-			CG_FinishWeaponChange( WP_KNIFE, cg.codQkPrev );
 			return;
 		}
 		return;

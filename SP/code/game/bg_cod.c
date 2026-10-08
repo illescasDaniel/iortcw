@@ -131,7 +131,9 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_landSlowScale",      "0.55", 0,            CODOFS( landSlowScale ),      0 },
 
 	{ "cod_quickKnifeEnable",   "1",    0,            CODOFS( quickKnifeEnable ),   1 },
-	{ "cod_quickKnifeTimeout",  "1200", 0,            CODOFS( quickKnifeTimeout ),  0 },
+	{ "cod_quickKnifeTimeout",  "900",  0,            CODOFS( quickKnifeTimeout ),  0 },
+	// codmod: snappy knife pull (was 250+250). 75 keeps anim readable but CoD-connected.
+	{ "cod_knifeSwitchTime",    "75",   0,            CODOFS( knifeSwitchTime ),    0 },
 
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
