@@ -63,7 +63,9 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_adsSpreadScale",     "0.35", 0,            CODOFS( adsSpreadScale ),     0 },
 	{ "cod_adsSensScale",       "1",    0,            CODOFS( adsSensScale ),       0 },
 	{ "cod_adsBobScale",        "0.85", 0,            CODOFS( adsBobScale ),        0 },
-	{ "cod_adsGunFovComp",      "0",    0,            CODOFS( adsGunFovComp ),      0 },
+	// codmod: FOV zoom magnifies the RF_DEPTHHACK viewmodel; push it forward while ADS so
+	// it doesn't fill the screen from the hip. 6 u at fovScale 0.8 → +1.2 u of fwd.
+	{ "cod_adsGunFovComp",      "6",    0,            CODOFS( adsGunFovComp ),      0 },
 	{ "cod_scopeSwitchTime",    "0",    0,            CODOFS( scopeSwitchTime ),    0 },
 
 	// codmod: Phase 3.5 alignment tooling -- see docs/phase-3-ads.md "Alignment tooling".
