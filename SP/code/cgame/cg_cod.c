@@ -13,17 +13,17 @@
 // Not const: cod_adsTune overwrites the fine-bias fields while tuning.
 codAdsView_t cg_codAdsView[WP_NUM_WEAPONS] = {
 	//                          sightH  barrelB  sightD   fwd   right  up   pitch yaw roll
-	[WP_LUGER]          = { 1.5f,  10.0f,  9.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_SILENCER]       = { 1.5f,  12.0f,  9.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_COLT]           = { 1.5f,  10.0f,  9.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_LUGER]          = { 4.5f,  10.0f, 18.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_SILENCER]       = { 4.5f,  12.0f, 18.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_COLT]           = { 4.5f,  10.0f, 18.0f,   0, 0, 0,  0, 0, 0 },
 
-	[WP_MP40]           = { 1.8f,  14.0f, 11.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_THOMPSON]       = { 1.8f,  14.0f, 11.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_STEN]           = { 1.6f,  13.0f, 11.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_MP40]           = { 5.0f,  14.0f, 20.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_THOMPSON]       = { 5.0f,  14.0f, 20.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_STEN]           = { 4.8f,  13.0f, 20.0f,   0, 0, 0,  0, 0, 0 },
 
-	[WP_MAUSER]         = { 2.0f,  22.0f, 14.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_GARAND]         = { 2.0f,  22.0f, 14.0f,   0, 0, 0,  0, 0, 0 },
-	[WP_FG42]           = { 1.8f,  18.0f, 13.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_MAUSER]         = { 5.5f,  22.0f, 22.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_GARAND]         = { 5.5f,  22.0f, 22.0f,   0, 0, 0,  0, 0, 0 },
+	[WP_FG42]           = { 5.0f,  18.0f, 21.0f,   0, 0, 0,  0, 0, 0 },
 };
 
 /*
@@ -69,10 +69,10 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	vec3_t desired;
 	vec3_t delta;
 	vec3_t flashFwd;
-	vec3_t viewFwd;
-	vec3_t flashAngles, viewAngles;
+	vec3_t boreUp;
 	float sightHeight, barrelBack, sightDist;
 	float fovScale, fovComp;
+	float d;
 	int i;
 
 	if ( e <= 0.0f || weaponNum <= WP_NONE || weaponNum >= WP_NUM_WEAPONS ) {
@@ -85,6 +85,12 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	sightHeight = ( ads->sightHeight != 0.0f ) ? ads->sightHeight : bg_cod.adsSightHeight;
 	barrelBack  = ( ads->barrelBack  != 0.0f ) ? ads->barrelBack  : bg_cod.adsBarrelBack;
 	sightDist   = ( ads->sightDist   != 0.0f ) ? ads->sightDist   : bg_cod.adsSightDist;
+
+	// codmod: keep the rear sight far enough ahead of the eye that we never clip into the
+	// mesh ("looking inside the gun"). Zoomed FOV makes close geometry feel even closer.
+	if ( sightDist < 14.0f ) {
+		sightDist = 14.0f;
+	}
 
 	fovScale = ( bg_cod.adsTune && weaponNum == cg.weaponSelect )
 			   ? bg_cod.adsTuneFov : BG_CodAdsFovScale( weaponNum );
@@ -109,34 +115,44 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 		CG_PositionEntityOnTag( &gun, &hand, "tag_weapon", 0, NULL );
 
 		if ( trap_R_LerpTag( &flash, &gun, "tag_flash", 0 ) >= 0 ) {
-			// flash origin in world space
 			VectorCopy( gun.origin, flashOrigin );
 			for ( i = 0; i < 3; i++ ) {
 				VectorMA( flashOrigin, flash.origin[i], gun.axis[i], flashOrigin );
 			}
-			// flash axes in world space (tag local * gun)
 			MatrixMultiply( flash.axis, gun.axis, flashAxis );
 
-			// Rear sight: back along the bore from the muzzle, then up off the bore axis.
-			// MD3 tag X (axis[0]) is forward for RTCW weapon flashes; axis[2] is up.
+			// Bore forward = tag X. Do NOT use tag Z as "up" blindly -- on several RTCW
+			// viewmodels it points into the mesh, which put the aim point inside the gun.
 			VectorCopy( flashAxis[0], flashFwd );
-			VectorMA( flashOrigin, -barrelBack, flashAxis[0], sightPos );
-			VectorMA( sightPos, sightHeight, flashAxis[2], sightPos );
+			VectorNormalize( flashFwd );
 
-			// Desired: rear sight on the optical axis, a comfortable distance ahead.
+			// Bore-up = view-up projected onto the plane perpendicular to the bore, so the
+			// sight line always rises toward the top of the screen / slide, never into it.
+			VectorCopy( cg.refdef.viewaxis[2], boreUp );
+			d = DotProduct( boreUp, flashFwd );
+			VectorMA( boreUp, -d, flashFwd, boreUp );
+			if ( VectorNormalize( boreUp ) < 0.001f ) {
+				// view-up parallel to bore (rare) -- fall back to view right × bore
+				CrossProduct( cg.refdef.viewaxis[1], flashFwd, boreUp );
+				VectorNormalize( boreUp );
+			}
+			if ( DotProduct( boreUp, cg.refdef.viewaxis[2] ) < 0.0f ) {
+				VectorInverse( boreUp );
+			}
+
+			// Rear sight sits above the bore, back from the muzzle -- outside the mesh.
+			VectorMA( flashOrigin, -barrelBack, flashFwd, sightPos );
+			VectorMA( sightPos, sightHeight, boreUp, sightPos );
+
+			// Place that rear sight on the optical axis with real eye relief.
 			VectorMA( cg.refdef.vieworg, sightDist + fovComp, cg.refdef.viewaxis[0], desired );
 
 			VectorSubtract( desired, sightPos, delta );
 			VectorMA( handOrigin, e, delta, handOrigin );
 
-			// Lightly rotate so the bore matches the view forward (hip guns often point a
-			// few degrees off). Re-derive flash forward after the translation would be more
-			// accurate, but one pass is enough -- the gun already inherits viewangles.
-			VectorCopy( cg.refdef.viewaxis[0], viewFwd );
-			vectoangles( flashFwd, flashAngles );
-			vectoangles( viewFwd, viewAngles );
-			angles[PITCH] += AngleDelta( viewAngles[PITCH], flashAngles[PITCH] ) * e;
-			angles[YAW]   += AngleDelta( viewAngles[YAW],   flashAngles[YAW] )   * e;
+			// No bore-to-view rotation pass: the hand already inherits viewangles, and
+			// forcing flashFwd onto the view axis was aiming down the barrel (inside the
+			// gun) whenever sightHeight was a bit short.
 		}
 	}
 
