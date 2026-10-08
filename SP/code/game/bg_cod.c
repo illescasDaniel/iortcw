@@ -159,6 +159,19 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_hudLowHealthStart",  "0.4",  0,            CODOFS( hudLowHealthStart ),  0 },
 	{ "cod_hudLowHealthMaxAlpha","0.55",0,            CODOFS( hudLowHealthMaxAlpha ), 0 },
 
+	// codmod: CoD 4-post reticle — gap blooms with fire spread + move speed; ADS fades posts
+	// (center dot kept while cod_adsCrosshair 1 until per-weapon ADS tune).
+	{ "cod_crosshairStyle",     "1",    0,            CODOFS( crosshairStyle ),     1 },
+	{ "cod_crosshairGap",       "4",    0,            CODOFS( crosshairGap ),       0 },
+	{ "cod_crosshairLength",    "8",    0,            CODOFS( crosshairLength ),    0 },
+	{ "cod_crosshairWidth",     "2",    0,            CODOFS( crosshairWidth ),     0 },
+	{ "cod_crosshairDot",       "1",    0,            CODOFS( crosshairDot ),       1 },
+	{ "cod_crosshairBloom",     "16",   0,            CODOFS( crosshairBloom ),     0 },
+	{ "cod_crosshairMoveBloom", "14",   0,            CODOFS( crosshairMoveBloom ), 0 },
+	{ "cod_crosshairCrouchScale","0.55",0,            CODOFS( crosshairCrouchScale ), 0 },
+	{ "cod_crosshairSprintAlpha","0.35",0,            CODOFS( crosshairSprintAlpha ), 0 },
+	{ "cod_crosshairOutline",   "1",    0,            CODOFS( crosshairOutline ),   1 },
+
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
 	{ "cod_menuScale",          "0.7",  CVAR_ARCHIVE, CODOFS( menuScale ),          0 },

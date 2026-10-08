@@ -209,6 +209,18 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_FLOAT, "cod_hudLowHealthStart",  "cod_hudLowHealthStart",  0.05f, 0.1f, NULL },
 	{ COD_MI_FLOAT, "cod_hudLowHealthMaxAlpha","cod_hudLowHealthMaxAlpha",0.05f,0.1f, NULL },
 
+	{ COD_MI_SECTION, "CROSSHAIR", NULL, 0, 0, NULL },
+	{ COD_MI_BOOL,  "cod_crosshairStyle",     "cod_crosshairStyle",     1,     1,    NULL },
+	{ COD_MI_FLOAT, "cod_crosshairGap",       "cod_crosshairGap",       0.5f,  1,    NULL },
+	{ COD_MI_FLOAT, "cod_crosshairLength",    "cod_crosshairLength",    0.5f,  2,    NULL },
+	{ COD_MI_FLOAT, "cod_crosshairWidth",     "cod_crosshairWidth",     0.25f, 1,    NULL },
+	{ COD_MI_BOOL,  "cod_crosshairDot",       "cod_crosshairDot",       1,     1,    NULL },
+	{ COD_MI_FLOAT, "cod_crosshairBloom",     "cod_crosshairBloom",     1,     4,    NULL },
+	{ COD_MI_FLOAT, "cod_crosshairMoveBloom", "cod_crosshairMoveBloom", 1,     4,    NULL },
+	{ COD_MI_FLOAT, "cod_crosshairCrouchScale","cod_crosshairCrouchScale",0.05f,0.1f, NULL },
+	{ COD_MI_FLOAT, "cod_crosshairSprintAlpha","cod_crosshairSprintAlpha",0.05f,0.1f, NULL },
+	{ COD_MI_BOOL,  "cod_crosshairOutline",   "cod_crosshairOutline",   1,     1,    NULL },
+
 	{ COD_MI_SECTION, "GAIT / SPRINT GUN", NULL, 0, 0, NULL },
 	{ COD_MI_FLOAT, "cod_sprintRaiseTime",    "cod_sprintRaiseTime",    10,   50,   NULL },
 	{ COD_MI_FLOAT, "cod_sprintGunPitch",     "cod_sprintGunPitch",     0.5f, 2,    NULL },

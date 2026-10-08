@@ -2253,6 +2253,7 @@ void CG_CodUpdateQuickKnife( void );   // codmod: phase 5.5
 void CG_CodThreatColor( float t, vec4_t out ); // codmod: phase 5c white→red ramp
 void CG_CodColorForHealth( vec4_t hcolor );    // codmod: phase 5c by health/maxHealth
 void CG_CodDrawLowHealthBlood( void );         // codmod: phase 5c persistent vignette
+void CG_CodDrawCrosshair( const vec4_t hcolor ); // codmod: CoD 4-post bloom reticle
 
 //
 // cg_consolecmds.c

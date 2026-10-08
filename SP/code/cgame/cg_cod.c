@@ -1064,3 +1064,173 @@ void CG_CodDrawLowHealthBlood( void ) {
 		CG_FillRect( -10, -10, 650, 490, col );
 	}
 }
+
+/*
+================
+CG_CodDrawCrosshairBar
+
+codmod: one post (or outline) for the CoD 4-post reticle. Coords are 640×480 virtual.
+================
+*/
+static void CG_CodDrawCrosshairBar( float x, float y, float w, float h, const vec4_t color ) {
+	if ( w < 0.5f || h < 0.5f || color[3] <= 0.01f ) {
+		return;
+	}
+	CG_FillRect( x, y, w, h, color );
+}
+
+/*
+================
+CG_CodDrawCrosshair
+
+codmod: CoD-style 4-post hip reticle (phase 5c follow-up).
+- Gap blooms with aimSpreadScale (fire) + horizontal speed (walk/sprint).
+- Crouch tightens the gap; sprint expands and fades the posts.
+- ADS fades the posts out; center dot stays while cod_adsCrosshair 1 (interim until
+  every weapon's iron sights are tuned — then mode 2 hides the dot too).
+================
+*/
+void CG_CodDrawCrosshair( const vec4_t hcolor ) {
+	float cx, cy;
+	float gap, len, th, halfTh;
+	float spreadT, speed, sprintMax, moveT, sprintF, ads, crouchMul;
+	float postAlpha, dotAlpha;
+	vec4_t postColor, outlineColor, dotColor;
+	vec3_t vel;
+	playerState_t *ps;
+	qboolean drawPosts;
+	qboolean drawDot;
+
+	if ( !cg.snap ) {
+		return;
+	}
+
+	ps = &cg.predictedPlayerState;
+	ads = ( bg_cod.enable && bg_cod.adsEnable ) ? CG_CodAdsFrac() : 0.0f;
+	ads = BG_CodSmoothstep( ads );
+
+	// adsCrosshair 2: hide everything once mostly ADS (same gate as the interim path).
+	if ( bg_cod.adsCrosshair >= 2 && ads > 0.5f ) {
+		return;
+	}
+
+	spreadT = (float)cg.snap->ps.aimSpreadScale / 255.0f;
+	if ( spreadT < 0.0f ) {
+		spreadT = 0.0f;
+	} else if ( spreadT > 1.0f ) {
+		spreadT = 1.0f;
+	}
+
+	VectorCopy( ps->velocity, vel );
+	vel[2] = 0.0f;
+	speed = VectorLength( vel );
+	sprintMax = bg_cod.runSpeed * bg_cod.sprintScale;
+	if ( sprintMax < 1.0f ) {
+		sprintMax = 1.0f;
+	}
+	moveT = speed / sprintMax;
+	if ( moveT < 0.0f ) {
+		moveT = 0.0f;
+	} else if ( moveT > 1.0f ) {
+		moveT = 1.0f;
+	}
+
+	sprintF = CG_CodSprintFrac();
+	crouchMul = 1.0f;
+	if ( ps->eFlags & EF_CROUCHING ) {
+		crouchMul = bg_cod.crosshairCrouchScale;
+		if ( crouchMul < 0.1f ) {
+			crouchMul = 0.1f;
+		} else if ( crouchMul > 1.0f ) {
+			crouchMul = 1.0f;
+		}
+	}
+
+	gap = bg_cod.crosshairGap
+		+ bg_cod.crosshairBloom * spreadT
+		+ bg_cod.crosshairMoveBloom * moveT
+		+ bg_cod.crosshairMoveBloom * 0.35f * sprintF;
+	gap *= crouchMul;
+	// ADS contracts the gap as posts fade (reads as accuracy tightening).
+	if ( bg_cod.adsCrosshair > 0 ) {
+		gap *= 1.0f - 0.65f * ads;
+	}
+	if ( gap < 0.0f ) {
+		gap = 0.0f;
+	}
+
+	len = bg_cod.crosshairLength;
+	th = bg_cod.crosshairWidth;
+	if ( len < 1.0f ) {
+		len = 1.0f;
+	}
+	if ( th < 1.0f ) {
+		th = 1.0f;
+	}
+	halfTh = th * 0.5f;
+
+	cx = 320.0f + (float)cg_crosshairX.integer;
+	cy = 240.0f + (float)cg_crosshairY.integer;
+
+	postAlpha = hcolor[3];
+	if ( bg_cod.adsCrosshair > 0 ) {
+		postAlpha *= ( 1.0f - ads );
+	}
+	postAlpha *= 1.0f - ( 1.0f - bg_cod.crosshairSprintAlpha ) * sprintF;
+	if ( postAlpha < 0.0f ) {
+		postAlpha = 0.0f;
+	} else if ( postAlpha > 1.0f ) {
+		postAlpha = 1.0f;
+	}
+
+	dotAlpha = hcolor[3];
+	// Mode 2 fades the dot with ADS; mode 1 keeps it (interim iron-sight aid).
+	if ( bg_cod.adsCrosshair >= 2 ) {
+		dotAlpha *= ( 1.0f - ads );
+	}
+	if ( dotAlpha < 0.0f ) {
+		dotAlpha = 0.0f;
+	} else if ( dotAlpha > 1.0f ) {
+		dotAlpha = 1.0f;
+	}
+
+	drawPosts = ( postAlpha > 0.01f ) ? qtrue : qfalse;
+	drawDot = qfalse;
+	if ( bg_cod.crosshairDot && dotAlpha > 0.01f ) {
+		drawDot = qtrue;
+	}
+	// Even with hip dot off, keep the interim ADS center dot.
+	if ( !drawDot && bg_cod.adsCrosshair == 1 && ads > 0.05f && dotAlpha > 0.01f ) {
+		drawDot = qtrue;
+	}
+
+	VectorCopy( hcolor, postColor );
+	postColor[3] = postAlpha;
+	VectorCopy( hcolor, dotColor );
+	dotColor[3] = dotAlpha;
+
+	if ( drawPosts ) {
+		if ( bg_cod.crosshairOutline ) {
+			VectorSet( outlineColor, 0.0f, 0.0f, 0.0f );
+			outlineColor[3] = postAlpha * 0.85f;
+			// top / bottom / left / right — 1px larger behind
+			CG_CodDrawCrosshairBar( cx - halfTh - 1.0f, cy - gap - len - 1.0f, th + 2.0f, len + 2.0f, outlineColor );
+			CG_CodDrawCrosshairBar( cx - halfTh - 1.0f, cy + gap - 1.0f,       th + 2.0f, len + 2.0f, outlineColor );
+			CG_CodDrawCrosshairBar( cx - gap - len - 1.0f, cy - halfTh - 1.0f, len + 2.0f, th + 2.0f, outlineColor );
+			CG_CodDrawCrosshairBar( cx + gap - 1.0f,       cy - halfTh - 1.0f, len + 2.0f, th + 2.0f, outlineColor );
+		}
+		CG_CodDrawCrosshairBar( cx - halfTh, cy - gap - len, th, len, postColor );
+		CG_CodDrawCrosshairBar( cx - halfTh, cy + gap,       th, len, postColor );
+		CG_CodDrawCrosshairBar( cx - gap - len, cy - halfTh, len, th, postColor );
+		CG_CodDrawCrosshairBar( cx + gap,       cy - halfTh, len, th, postColor );
+	}
+
+	if ( drawDot ) {
+		if ( bg_cod.crosshairOutline ) {
+			VectorSet( outlineColor, 0.0f, 0.0f, 0.0f );
+			outlineColor[3] = dotAlpha * 0.85f;
+			CG_CodDrawCrosshairBar( cx - 2.0f, cy - 2.0f, 4.0f, 4.0f, outlineColor );
+		}
+		CG_CodDrawCrosshairBar( cx - 1.0f, cy - 1.0f, 2.0f, 2.0f, dotColor );
+	}
+}

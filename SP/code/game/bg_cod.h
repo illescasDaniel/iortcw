@@ -129,6 +129,18 @@ typedef struct {
 	float hudLowHealthStart;   // health/max at which blood starts
 	float hudLowHealthMaxAlpha;// blood overlay alpha near death
 
+	// codmod: CoD 4-post dynamic crosshair (phase 5c follow-up)
+	int crosshairStyle;        // 1 = CoD posts+bloom; 0 = vanilla shader
+	float crosshairGap;        // base half-gap (640 coords)
+	float crosshairLength;     // post length
+	float crosshairWidth;      // post thickness
+	int crosshairDot;          // 1 = hip-fire center dot
+	float crosshairBloom;      // extra gap from aimSpreadScale (0..1)
+	float crosshairMoveBloom;  // extra gap at full sprint speed
+	float crosshairCrouchScale;// gap multiplier while crouching
+	float crosshairSprintAlpha;// post alpha at full sprint (dot stays)
+	int crosshairOutline;      // 1 = 1px black outline for contrast
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;

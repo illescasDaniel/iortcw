@@ -2480,25 +2480,6 @@ static void CG_DrawCrosshair( void ) {
 		return;
 	}
 
-	// codmod: while ADS, replace the hip crosshair with a center dot (phase 3.7 interim).
-	// cod_adsCrosshair 1 = dot (default until all weapons are tuned); 2 = hide completely.
-	if ( bg_cod.enable && bg_cod.adsEnable && bg_cod.adsCrosshair > 0 && CG_CodAdsFrac() > 0.5f ) {
-		if ( bg_cod.adsCrosshair >= 2 ) {
-			return;
-		}
-		if ( cg_crosshairHealth.integer ) {
-			// codmod: phase 5c — tint by health/maxHealth (white→red), not vanilla ~100HP ramp
-			if ( bg_cod.hudEnable && bg_cod.hudHealthCrosshair ) {
-				CG_CodColorForHealth( hcolor );
-			} else {
-				CG_ColorForHealth( hcolor );
-			}
-		}
-		hcolor[3] = cg_crosshairAlpha.value;
-		CG_FillRect( 319, 239, 2, 2, hcolor );
-		return;
-	}
-
 	// set color based on health
 	if ( cg_crosshairHealth.integer ) {
 		if ( bg_cod.enable && bg_cod.hudEnable && bg_cod.hudHealthCrosshair ) {
@@ -2506,6 +2487,32 @@ static void CG_DrawCrosshair( void ) {
 		} else {
 			CG_ColorForHealth( hcolor );
 		}
+	}
+	hcolor[3] = cg_crosshairAlpha.value;
+
+	// codmod: CoD 4-post bloom reticle (phase 5c follow-up). Handles ADS post-fade +
+	// interim center dot (cod_adsCrosshair 1). Style 0 falls through to vanilla shader.
+	if ( bg_cod.enable && bg_cod.crosshairStyle ) {
+		if ( friendInSights ) {
+			hcolor[0] = 0.2f;
+			hcolor[1] = 0.9f;
+			hcolor[2] = 0.2f;
+		}
+		CG_CodDrawCrosshair( hcolor );
+		return;
+	}
+
+	// codmod: while ADS, replace the hip crosshair with a center dot (phase 3.7 interim).
+	// cod_adsCrosshair 1 = dot (default until all weapons are tuned); 2 = hide completely.
+	if ( bg_cod.enable && bg_cod.adsEnable && bg_cod.adsCrosshair > 0 && CG_CodAdsFrac() > 0.5f ) {
+		if ( bg_cod.adsCrosshair >= 2 ) {
+			return;
+		}
+		CG_FillRect( 319, 239, 2, 2, hcolor );
+		return;
+	}
+
+	if ( cg_crosshairHealth.integer ) {
 		trap_R_SetColor( hcolor );
 	} else {
 		trap_R_SetColor( NULL );
