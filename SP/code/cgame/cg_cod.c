@@ -160,6 +160,107 @@ void CG_CodAdsTuneDump_f( void ) {
 	}
 }
 
+// codmod: phase 3.8 scope-hold edge/queue tracking. File-static is fine -- CG_DrawActiveFrame
+// calls CG_CodUpdateScopeHold() exactly once per real (unpredicted) frame, never rewound.
+static qboolean codScopeLastHeld;    // last frame's WBUTTON_COD_ADS state, for edge detection
+static int codScopeQueuedWant = -1;  // -1 = nothing queued, 0 = queued release, 1 = queued press
+
+/*
+================
+CG_CodUpdateScopeHold
+
+codmod: phase 3.8 -- "every weapon aims with right-click" extends to the three scoped
+rifles. Holding WBUTTON_COD_ADS on an unscoped rifle whose scope is selectable switches to
+the real scope the same way `weapalt` does (CG_CodAltWeapon); releasing switches back.
+`weapalt` itself still works independently (CG_AltWeapon_f). Called every frame from
+CG_DrawActiveFrame, before the usercmd weapon selection is read, so cg.weaponSelect (and the
+usercmd it feeds) reflects the hold this frame. See docs/phase-3-ads.md section 3.8.
+================
+*/
+void CG_CodUpdateScopeHold( void ) {
+	usercmd_t cmd;
+	qboolean adsHeld;
+	int weapon;
+	qboolean isScopeWeapon;
+	qboolean reloading;
+
+	if ( !cg.snap ) {
+		return;
+	}
+
+	if ( !( bg_cod.enable && bg_cod.adsEnable ) ) {
+		cg.codScopeByAds = qfalse;
+		codScopeQueuedWant = -1;
+		return;
+	}
+
+	isScopeWeapon = BG_CodIsScopeWeapon( cg.weaponSelect );
+
+	// codmod: unexpected weapon change (empty-mag auto-switch in cg_event.c, the
+	// speed-based auto-drop in CG_DrawActiveFrame, a manual number-key switch, or death) --
+	// something switched us away from the scope without going through our own release path
+	// below. Clear the bookkeeping; nothing to undo, the weapon is already gone.
+	if ( cg.codScopeByAds && !isScopeWeapon ) {
+		cg.codScopeByAds = qfalse;
+		codScopeQueuedWant = -1;
+	}
+
+	trap_GetUserCmd( trap_GetCurrentCmdNumber(), &cmd );
+	adsHeld = ( cmd.wbuttons & WBUTTON_COD_ADS ) ? qtrue : qfalse;
+
+	reloading = (qboolean)( cg.snap->ps.weaponstate == WEAPON_RELOADING );
+
+	// apply a queued edge once the weapon settles -- never while reloading (vanilla rule,
+	// docs/phase-3-ads.md section 3.9)
+	if ( codScopeQueuedWant >= 0 && cg.snap->ps.weaponstate == WEAPON_READY ) {
+		CG_CodAltWeapon( qtrue );
+		cg.codScopeByAds = ( codScopeQueuedWant == 1 ) ? qtrue : qfalse;
+		codScopeQueuedWant = -1;
+	}
+
+	if ( adsHeld == codScopeLastHeld ) {
+		return;   // no press/release edge this frame
+	}
+	codScopeLastHeld = adsHeld;
+
+	if ( reloading ) {
+		return;   // never touch alt-fire mid reload (vanilla rule)
+	}
+
+	weapon = cg.weaponSelect;
+
+	if ( adsHeld ) {
+		// press: only an unscoped rifle with a selectable scope alt is eligible. Plain
+		// iron-sight ADS (PM_CodUpdateADS, bg_pmove.c) handles every other weapon.
+		if ( isScopeWeapon || !CG_CodHasSelectableAlt( weapon ) ) {
+			return;
+		}
+
+		if ( cg.snap->ps.weaponstate == WEAPON_RAISING || cg.snap->ps.weaponstate == WEAPON_RAISING_TORELOAD
+			 || cg.snap->ps.weaponstate == WEAPON_DROPPING || cg.snap->ps.weaponstate == WEAPON_DROPPING_TORELOAD ) {
+			codScopeQueuedWant = 1;   // mid weapon-change, apply once WEAPON_READY
+		} else {
+			CG_CodAltWeapon( qtrue );
+			cg.codScopeByAds = qtrue;
+		}
+	} else {
+		// release: only undo a scope *we* entered. If the player scoped with `weapalt`
+		// (cg.codScopeByAds not set), releasing ADS does nothing -- the vanilla workflow
+		// keeps working.
+		if ( !cg.codScopeByAds ) {
+			return;
+		}
+
+		if ( cg.snap->ps.weaponstate == WEAPON_RAISING || cg.snap->ps.weaponstate == WEAPON_RAISING_TORELOAD
+			 || cg.snap->ps.weaponstate == WEAPON_DROPPING || cg.snap->ps.weaponstate == WEAPON_DROPPING_TORELOAD ) {
+			codScopeQueuedWant = 0;
+		} else {
+			CG_CodAltWeapon( qtrue );
+			cg.codScopeByAds = qfalse;
+		}
+	}
+}
+
 /*
 ================
 CG_CodStateName

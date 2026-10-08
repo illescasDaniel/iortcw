@@ -1578,6 +1578,11 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 		return;
 	}
 
+	// codmod: hold-right-click-to-scope (phase 3.8), before the vanilla speed-based
+	// auto-drop below and before the usercmd weapon selection is read, so cg.weaponSelect
+	// reflects this frame's ADS hold. See cg_cod.c.
+	CG_CodUpdateScopeHold();
+
 	if ( cg.weaponSelect == WP_FG42SCOPE || cg.weaponSelect == WP_SNOOPERSCOPE || cg.weaponSelect == WP_SNIPERRIFLE ) {
 		float spd;
 		spd = VectorLength( cg.snap->ps.velocity );

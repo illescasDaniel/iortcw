@@ -3888,11 +3888,16 @@ void CG_FinishWeaponChange( int lastweap, int newweap ) {
 
 /*
 ==============
-CG_AltfireWeapon_f
+CG_CodAltWeapon
 	for example, switching between WP_MAUSER and WP_SNIPERRIFLE
+
+codmod: factored out of CG_AltWeapon_f (phase 3.8) so CG_CodUpdateScopeHold (cg_cod.c) can
+drive the same alt-weapon switch from a held ADS button. force=qtrue skips the
+cg_weaponCycleDelay throttle below -- a deliberate hold-to-scope press/release shouldn't
+get swallowed by the "don't spam weapalt" pacing that only matters for the key.
 ==============
 */
-void CG_AltWeapon_f( void ) {
+void CG_CodAltWeapon( qboolean force ) {
 	int original, num;
 
 	if ( !cg.snap ) {
@@ -3906,7 +3911,7 @@ void CG_AltWeapon_f( void ) {
 		return;
 	}
 
-	if ( cg.time - cg.weaponSelectTime < cg_weaponCycleDelay.integer ) {
+	if ( !force && cg.time - cg.weaponSelectTime < cg_weaponCycleDelay.integer ) {
 		return; // force pause so holding it down won't go too fast
 
 	}
@@ -3953,6 +3958,31 @@ void CG_AltWeapon_f( void ) {
 //----(SA)	end
 		CG_FinishWeaponChange( original, num );
 	}
+}
+
+/*
+==============
+CG_AltWeapon_f
+	the "weapalt" console command -- key-driven alt-weapon switch
+==============
+*/
+void CG_AltWeapon_f( void ) {
+	CG_CodAltWeapon( qfalse );
+}
+
+/*
+==============
+CG_CodHasSelectableAlt
+
+codmod: phase 3.8 -- true if `weapon` has an alt weapon (its scope, for the three rifles)
+and that alt is currently selectable. Used by CG_CodUpdateScopeHold (cg_cod.c) to decide
+whether an ADS press on the parent rifle should trigger the real scope instead of
+iron-sight ADS.
+==============
+*/
+qboolean CG_CodHasSelectableAlt( int weapon ) {
+	int alt = getAltWeapon( weapon );
+	return ( alt != weapon && CG_WeaponSelectable( alt ) ) ? qtrue : qfalse;
 }
 
 

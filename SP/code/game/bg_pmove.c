@@ -2195,14 +2195,23 @@ static void PM_BeginWeaponChange( int oldweapon, int newweapon, qboolean reload 
 			switchtime = 50;        // fast
 		}
 		break;
+	}
 
-//		case WP_MAUSER:
-//		case WP_SNIPERRIFLE:
-//		case WP_GARAND:
-//		case WP_SNOOPERSCOPE:
-//			if(altswitch)
-//				switchtime  = 100;
-//			break;
+	// codmod: configurable rifle<->scope switch speed (phase 3.8.6), player only. 0 (the
+	// default) keeps the vanilla times above -- FG42<->FG42SCOPE fast (50ms), the other two
+	// pairs at the default 250ms. >0 overrides all three pairs with the same value; measure
+	// vanilla with cod_scopeSwitchTime 0 first (expect ~500ms raise+drop total).
+	if ( altswitch && !pm->ps->aiChar && bg_cod.enable && bg_cod.adsEnable && bg_cod.scopeSwitchTime > 0 ) {
+		switch ( oldweapon ) {
+		case WP_MAUSER:
+		case WP_SNIPERRIFLE:
+		case WP_GARAND:
+		case WP_SNOOPERSCOPE:
+		case WP_FG42:
+		case WP_FG42SCOPE:
+			switchtime = (int)bg_cod.scopeSwitchTime;
+			break;
+		}
 	}
 
 	pm->ps->weaponTime += switchtime;
@@ -2276,6 +2285,23 @@ static void PM_FinishWeaponChange( void ) {
 			switchtime = 50;        // fast
 		}
 		break;
+	}
+
+	// codmod: configurable rifle<->scope switch speed (phase 3.8.6), player only -- mirrors
+	// the override in PM_BeginWeaponChange above so the raise half of the switch matches
+	// the drop half.
+	if ( newweapon == weapAlts[oldweapon] && !pm->ps->aiChar && bg_cod.enable && bg_cod.adsEnable
+		 && bg_cod.scopeSwitchTime > 0 ) {
+		switch ( newweapon ) {
+		case WP_MAUSER:
+		case WP_SNIPERRIFLE:
+		case WP_GARAND:
+		case WP_SNOOPERSCOPE:
+		case WP_FG42:
+		case WP_FG42SCOPE:
+			switchtime = (int)bg_cod.scopeSwitchTime;
+			break;
+		}
 	}
 
 	pm->ps->weaponTime += switchtime;
