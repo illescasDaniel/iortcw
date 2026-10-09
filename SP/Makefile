@@ -2645,6 +2645,7 @@ Q3UIOBJ_ = \
   $(B)/$(BASEGAME)/ui/ui_shared.o \
   \
   $(B)/$(BASEGAME)/ui/bg_misc.o \
+  $(B)/$(BASEGAME)/ui/bg_cod.o \
   $(B)/$(BASEGAME)/ui/bg_lib.o \
   \
   $(B)/$(BASEGAME)/qcommon/q_math.o \

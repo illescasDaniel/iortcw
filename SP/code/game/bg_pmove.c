@@ -3800,11 +3800,14 @@ static void PM_DropTimers( void ) {
 ================
 PM_CodEndSlide
 
-codmod: clear slide flag, start cooldown (phase 6). PMF_DUCKED stays for hand-off to crouch.
+codmod: clear slide flag, start cooldown (phase 6). Stand up when there is headroom
+(CoD-style — slide does not leave you crouched). Sticky toggle crouch is cleared on the
+client when PMF_COD_SLIDING falls (CG_CodUpdateToggleCrouch).
 ================
 */
 static void PM_CodEndSlide( void ) {
 	int cd;
+	trace_t trace;
 
 	pm->ps->pm_flags &= ~PMF_COD_SLIDING;
 	cd = (int)bg_cod.slideCooldown;
@@ -3813,6 +3816,18 @@ static void PM_CodEndSlide( void ) {
 	}
 	pm->ps->stats[STAT_COD_SLIDE] = -cd;
 	pm->ps->stats[STAT_COD_SLIDE_SPEED] = 0;
+
+	// try to stand (same trace as PM_CheckDuck); stay ducked under a low ceiling
+	pm->maxs[2] = pm->ps->maxs[2];
+	pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
+	if ( !trace.allsolid ) {
+		pm->ps->pm_flags &= ~PMF_DUCKED;
+		pm->ps->viewheight = pm->ps->standViewHeight;
+	} else {
+		pm->maxs[2] = pm->ps->crouchMaxZ;
+		pm->ps->pm_flags |= PMF_DUCKED;
+		pm->ps->viewheight = pm->ps->crouchViewHeight;
+	}
 }
 
 /*

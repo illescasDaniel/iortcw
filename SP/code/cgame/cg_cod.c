@@ -807,6 +807,18 @@ void CG_ToggleCrouch_f( void ) {
 }
 
 void CG_CodUpdateToggleCrouch( void ) {
+	static qboolean wasSliding;
+	qboolean sliding;
+
+	// codmod: CoD stands after a slide — clear sticky toggle crouch so the next CheckDuck
+	// does not immediately re-duck (phase 6 follow-up).
+	sliding = ( cg.predictedPlayerState.pm_flags & PMF_COD_SLIDING ) ? qtrue : qfalse;
+	if ( wasSliding && !sliding && cg.codCrouchHeld ) {
+		cg.codCrouchHeld = qfalse;
+		trap_SendConsoleCommand( "-movedown\n" );
+	}
+	wasSliding = sliding;
+
 	if ( !cg.codCrouchHeld ) {
 		return;
 	}
