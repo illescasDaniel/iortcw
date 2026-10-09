@@ -340,8 +340,12 @@ static void ResampleTexture( byte *in, int inwidth, int inheight, byte *out,
 	int		i, j;
 	byte	*inrow, *inrow2;
 	int		frac, fracstep;
-	int		p1[2048], p2[2048];
+	int		*p1, *p2;
 	byte	*pix1, *pix2, *pix3, *pix4;
+
+	// codmod: was p1[2048]/p2[2048] — allocate so HD/4K textures cannot overflow.
+	p1 = ri.Hunk_AllocateTempMemory( outwidth * sizeof( int ) );
+	p2 = ri.Hunk_AllocateTempMemory( outwidth * sizeof( int ) );
 
 	fracstep = inwidth*0x10000/outwidth;
 
@@ -370,6 +374,9 @@ static void ResampleTexture( byte *in, int inwidth, int inheight, byte *out,
 			*out++ = (pix1[3] + pix2[3] + pix3[3] + pix4[3])>>2;
 		}
 	}
+
+	ri.Hunk_FreeTempMemory( p2 );
+	ri.Hunk_FreeTempMemory( p1 );
 }
 
 static void RGBAtoYCoCgA(const byte *in, byte *out, int width, int height)
