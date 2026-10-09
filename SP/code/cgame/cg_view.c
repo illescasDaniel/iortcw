@@ -613,6 +613,14 @@ static void CG_OffsetFirstPersonView( void ) {
 		angles[ROLL] -= delta * runRoll;
 	}
 
+	// codmod: slide view roll (phase 6)
+	if ( bg_cod.enable && bg_cod.slideEnable ) {
+		float slideS = CG_CodSlideFrac();
+		if ( slideS > 0.0f ) {
+			angles[ROLL] += bg_cod.slideRoll * slideS;
+		}
+	}
+
 	// add angles based on bob
 
 	// make sure the bob is visible even at low speeds
@@ -939,6 +947,14 @@ static int CG_CalcFov( void ) {
 			float sprintE = BG_CodSmoothstep( CG_CodSprintFrac() );
 			if ( sprintE > 0.0f && CG_CodAdsFrac() <= 0.01f ) {
 				fov_x *= 1.0f + ( bg_cod.sprintFovScale - 1.0f ) * sprintE;
+			}
+		}
+
+		// codmod: slide FOV kick after ADS (phase 6)
+		if ( !cg.zoomedBinoc && !cg.zoomval && bg_cod.enable && bg_cod.slideEnable ) {
+			float slideS = CG_CodSlideFrac();
+			if ( slideS > 0.0f ) {
+				fov_x *= 1.0f + bg_cod.slideFovKick * slideS;
 			}
 		}
 	}

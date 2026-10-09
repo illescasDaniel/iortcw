@@ -263,6 +263,7 @@ typedef enum {
 #define PMF_BACKWARDS_RUN   16      // coast down to backwards run
 #define PMF_TIME_LAND       32      // pm_time is time before rejump
 #define PMF_TIME_KNOCKBACK  64      // pm_time is an air-accelerate only time
+#define PMF_COD_SLIDING     128     // codmod: phase 6 tactical slide (bit 128 was free at 438e7d4)
 #define PMF_TIME_WATERJUMP  256     // pm_time is waterjump
 #define PMF_RESPAWNED       512     // clear after attack and jump buttons come up
 #define PMF_USE_ITEM_HELD   1024
@@ -845,6 +846,8 @@ typedef enum {
 	EV_GIVEPAGE,    //----(SA)	added
 	EV_CLOSEMENU,   //----(SA)	added
 	EV_SPAWN_SPIRIT,
+
+	EV_COD_SLIDE,   // codmod: phase 6 — tactical slide start (scrape sound)
 
 	EV_MAX_EVENTS   // just added as an 'endcap'
 

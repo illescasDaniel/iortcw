@@ -109,6 +109,53 @@ float CG_CodSprintFrac( void ) {
 
 /*
 ================
+CG_CodSlideFrac
+
+codmod: eased 0..1 slide camera/gun fraction (phase 6). Tracks remaining slide time with
+smoothstep, and fades in over ~120 ms from the PMF_COD_SLIDING edge.
+================
+*/
+float CG_CodSlideFrac( void ) {
+	playerState_t *ps;
+	float s, fadeIn, slideTime;
+
+	ps = &cg.predictedPlayerState;
+	if ( !( bg_cod.enable && bg_cod.slideEnable )
+		 || !( ps->pm_flags & PMF_COD_SLIDING )
+		 || ps->stats[STAT_COD_SLIDE] <= 0 ) {
+		cg.codSlideStartTime = 0;
+		return 0.0f;
+	}
+
+	if ( cg.codSlideStartTime <= 0 ) {
+		cg.codSlideStartTime = cg.time;
+	}
+
+	slideTime = bg_cod.slideTime;
+	if ( slideTime < 1.0f ) {
+		slideTime = 1.0f;
+	}
+	s = (float)ps->stats[STAT_COD_SLIDE] / slideTime;
+	if ( s < 0.0f ) {
+		s = 0.0f;
+	} else if ( s > 1.0f ) {
+		s = 1.0f;
+	}
+	s = BG_CodSmoothstep( s );
+
+	fadeIn = (float)( cg.time - cg.codSlideStartTime ) / 120.0f;
+	if ( fadeIn < 0.0f ) {
+		fadeIn = 0.0f;
+	} else if ( fadeIn > 1.0f ) {
+		fadeIn = 1.0f;
+	}
+	fadeIn = BG_CodSmoothstep( fadeIn );
+
+	return s * fadeIn;
+}
+
+/*
+================
 CG_CodGaitBobAmp
 
 codmod: walk / jog / sprint bob amplitude multiplier for weapon and camera (phase 4.2).
@@ -555,7 +602,7 @@ void CG_CodUpdateScopeHold( void ) {
 CG_CodStateName
 
 codmod: picks the debug HUD state label. Priority matches the order in architecture.md
-section 6 (RUN|WALK|SPRINT|CROUCH|AIR); PRONE/CRAWL/SLIDE are added in phases 5/5b.
+section 6 (RUN|WALK|SPRINT|CROUCH|PRONE|CRAWL|SLIDE|AIR).
 ================
 */
 static const char *CG_CodStateName( void ) {
@@ -566,6 +613,9 @@ static const char *CG_CodStateName( void ) {
 
 	if ( ps->groundEntityNum == ENTITYNUM_NONE ) {
 		return "AIR";
+	}
+	if ( ps->pm_flags & PMF_COD_SLIDING ) {
+		return "SLIDE";
 	}
 	if ( ps->pm_flags & PMF_DUCKED ) {
 		return "CROUCH";
@@ -676,6 +726,18 @@ void CG_CodDrawDebugHud( void ) {
 	// codmod: landing slowdown timer (phase 5)
 	if ( ps->stats[STAT_COD_LAND] > 0 ) {
 		Com_sprintf( line, sizeof( line ), "landSlow %d ms", ps->stats[STAT_COD_LAND] );
+		CG_DrawSmallStringColor( 4, y, line, color );
+		y += SMALLCHAR_HEIGHT;
+	}
+
+	// codmod: slide remaining / cooldown (phase 6)
+	if ( ps->stats[STAT_COD_SLIDE] > 0 ) {
+		Com_sprintf( line, sizeof( line ), "slide %d ms  frac %.2f",
+					 ps->stats[STAT_COD_SLIDE], CG_CodSlideFrac() );
+		CG_DrawSmallStringColor( 4, y, line, color );
+		y += SMALLCHAR_HEIGHT;
+	} else if ( ps->stats[STAT_COD_SLIDE] < 0 ) {
+		Com_sprintf( line, sizeof( line ), "slide cooldown %d ms", -ps->stats[STAT_COD_SLIDE] );
 		CG_DrawSmallStringColor( 4, y, line, color );
 		y += SMALLCHAR_HEIGHT;
 	}

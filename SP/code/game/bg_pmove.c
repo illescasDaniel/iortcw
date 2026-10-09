@@ -1738,7 +1738,10 @@ static void PM_CheckDuck( void ) {
 		return;
 	}
 
-	if ( pm->cmd.upmove < 0 ) { // duck
+	// codmod: force crouch bbox/view while sliding even if crouch is released (phase 6)
+	if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+		pm->ps->pm_flags |= PMF_DUCKED;
+	} else if ( pm->cmd.upmove < 0 ) { // duck
 		pm->ps->pm_flags |= PMF_DUCKED;
 	} else
 	{   // stand up if possible
@@ -1824,6 +1827,14 @@ static void PM_Footsteps( void ) {
 			}
 		}
 
+		return;
+	}
+
+	// codmod: slide — idle crouch legs, no footsteps / bob advance (phase 6)
+	if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+		pm->ps->bobCycle = 0;
+		pm->ps->footstepCount = 0;
+		BG_AnimScriptAnimation( pm->ps, pm->ps->aiState, ANIM_MT_IDLECR, qtrue );
 		return;
 	}
 
@@ -3787,6 +3798,249 @@ static void PM_DropTimers( void ) {
 
 /*
 ================
+PM_CodEndSlide
+
+codmod: clear slide flag, start cooldown (phase 6). PMF_DUCKED stays for hand-off to crouch.
+================
+*/
+static void PM_CodEndSlide( void ) {
+	int cd;
+
+	pm->ps->pm_flags &= ~PMF_COD_SLIDING;
+	cd = (int)bg_cod.slideCooldown;
+	if ( cd < 0 ) {
+		cd = 0;
+	}
+	pm->ps->stats[STAT_COD_SLIDE] = -cd;
+	pm->ps->stats[STAT_COD_SLIDE_SPEED] = 0;
+}
+
+/*
+================
+PM_CodCheckSlideStart
+
+codmod: sprint + crouch press edge → tactical slide (phase 6). Uses COD_SF_SPRINTING from
+the previous command (before PM_CodUpdateSprint), so call this before UpdateSprint.
+================
+*/
+static void PM_CodCheckSlideStart( void ) {
+	float hspeed;
+	float start;
+	vec3_t horiz;
+
+	if ( pm->ps->aiChar || !( bg_cod.enable && bg_cod.slideEnable ) ) {
+		return;
+	}
+	if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+		return;
+	}
+	if ( pm->ps->stats[STAT_COD_SLIDE] < 0 ) {
+		return; // cooldown
+	}
+	if ( !( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) ) {
+		return;
+	}
+	if ( pm->cmd.upmove >= 0 || pml.codWasDucked ) {
+		return; // need crouch press edge while previously standing
+	}
+	if ( !pml.walking || pm->cmd.forwardmove <= 0 || pm->waterlevel >= 2 || pml.ladder ) {
+		return;
+	}
+
+	horiz[0] = pm->ps->velocity[0];
+	horiz[1] = pm->ps->velocity[1];
+	horiz[2] = 0.0f;
+	hspeed = VectorLength( horiz );
+	if ( hspeed < bg_cod.slideMinSpeed ) {
+		return;
+	}
+
+	start = hspeed + bg_cod.slideBoost;
+	if ( start > bg_cod.slideMaxSpeed ) {
+		start = bg_cod.slideMaxSpeed;
+	}
+
+	pm->ps->pm_flags |= PMF_COD_SLIDING;
+	pm->ps->pm_flags |= PMF_DUCKED;
+	pm->ps->stats[STAT_COD_SLIDE] = (int)bg_cod.slideTime;
+	pm->ps->stats[STAT_COD_SLIDE_SPEED] = (int)( start + 0.5f );
+	pm->ps->stats[STAT_COD_FLAGS] &= ~COD_SF_SPRINTING;
+
+	if ( hspeed > 1.0f ) {
+		VectorNormalize( horiz );
+		pm->ps->velocity[0] = horiz[0] * start;
+		pm->ps->velocity[1] = horiz[1] * start;
+	} else {
+		pm->ps->velocity[0] = pml.forward[0] * start;
+		pm->ps->velocity[1] = pml.forward[1] * start;
+	}
+
+	if ( bg_cod.slideStaminaCost > 0.0f ) {
+		pm->ps->sprintTime -= (int)bg_cod.slideStaminaCost;
+		if ( pm->ps->sprintTime < 0 ) {
+			pm->ps->sprintTime = 0;
+		}
+	}
+
+	PM_AddEvent( EV_COD_SLIDE );
+}
+
+/*
+================
+PM_CodSlideMove
+
+codmod: frictionless linear decay slide with limited steering (phase 6). Replaces
+PM_WalkMove while PMF_COD_SLIDING && walking.
+================
+*/
+static void PM_CodSlideMove( void ) {
+	int i;
+	float fmove, smove;
+	float t, speed, slideTime, endSpeed, startSpeed, hspeed;
+	vec3_t wishvel, wishdir, dir, horiz;
+	float wishLen;
+	trace_t trace;
+
+	if ( bg_cod.slideJumpCancel && PM_CheckJump() ) {
+		PM_CodEndSlide();
+		// stand up if there is headroom (same idea as PM_CheckDuck)
+		pm->maxs[2] = pm->ps->maxs[2];
+		pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
+		if ( !trace.allsolid ) {
+			pm->ps->pm_flags &= ~PMF_DUCKED;
+			pm->ps->viewheight = pm->ps->standViewHeight;
+		} else {
+			pm->maxs[2] = pm->ps->crouchMaxZ;
+			pm->ps->viewheight = pm->ps->crouchViewHeight;
+		}
+		PM_AirMove();
+		return;
+	}
+
+	slideTime = bg_cod.slideTime;
+	if ( slideTime < 1.0f ) {
+		slideTime = 1.0f;
+	}
+	endSpeed = bg_cod.slideEndSpeed;
+	startSpeed = (float)pm->ps->stats[STAT_COD_SLIDE_SPEED];
+
+	// optional slope: nudge stored start speed downhill so decay stays linear but longer/faster
+	if ( bg_cod.slideSlope != 0.0f && pml.groundPlane ) {
+		float down = -pml.groundTrace.plane.normal[2];
+		if ( down > 0.0f ) {
+			startSpeed += bg_cod.gravity * bg_cod.slideSlope * down * pml.frametime;
+			pm->ps->stats[STAT_COD_SLIDE_SPEED] = (int)( startSpeed + 0.5f );
+		}
+	}
+
+	pm->ps->stats[STAT_COD_SLIDE] -= pml.msec;
+	t = (float)pm->ps->stats[STAT_COD_SLIDE] / slideTime;
+	if ( t < 0.0f ) {
+		t = 0.0f;
+	}
+	if ( t > 1.0f ) {
+		t = 1.0f;
+	}
+	speed = endSpeed + ( startSpeed - endSpeed ) * t;
+
+	// current horizontal direction
+	dir[0] = pm->ps->velocity[0];
+	dir[1] = pm->ps->velocity[1];
+	dir[2] = 0.0f;
+	if ( VectorNormalize( dir ) < 1.0f ) {
+		dir[0] = pml.forward[0];
+		dir[1] = pml.forward[1];
+		dir[2] = 0.0f;
+		VectorNormalize( dir );
+	}
+
+	// wishdir from look + cmd (same projection idea as PM_WalkMove)
+	fmove = pm->cmd.forwardmove;
+	smove = pm->cmd.rightmove;
+	pml.forward[2] = 0.0f;
+	pml.right[2] = 0.0f;
+	PM_ClipVelocity( pml.forward, pml.groundTrace.plane.normal, pml.forward, OVERCLIP );
+	PM_ClipVelocity( pml.right, pml.groundTrace.plane.normal, pml.right, OVERCLIP );
+	VectorNormalize( pml.forward );
+	VectorNormalize( pml.right );
+	for ( i = 0; i < 3; i++ ) {
+		wishvel[i] = pml.forward[i] * fmove + pml.right[i] * smove;
+	}
+	wishvel[2] = 0.0f;
+	wishLen = VectorNormalize2( wishvel, wishdir );
+	if ( wishLen > 0.0f && bg_cod.slideSteer > 0.0f ) {
+		dir[0] += wishdir[0] * bg_cod.slideSteer * pml.frametime * 4.0f;
+		dir[1] += wishdir[1] * bg_cod.slideSteer * pml.frametime * 4.0f;
+		dir[2] = 0.0f;
+		VectorNormalize( dir );
+	}
+
+	pm->ps->velocity[0] = dir[0] * speed;
+	pm->ps->velocity[1] = dir[1] * speed;
+	PM_ClipVelocity( pm->ps->velocity, pml.groundTrace.plane.normal, pm->ps->velocity, OVERCLIP );
+	PM_StepSlideMove( qfalse );
+
+	horiz[0] = pm->ps->velocity[0];
+	horiz[1] = pm->ps->velocity[1];
+	horiz[2] = 0.0f;
+	hspeed = VectorLength( horiz );
+
+	if ( pm->ps->stats[STAT_COD_SLIDE] <= 0 || hspeed <= endSpeed + 1.0f ) {
+		// snap to end speed along remaining direction for a clean crouch hand-off
+		if ( hspeed > 0.1f ) {
+			VectorNormalize( horiz );
+			pm->ps->velocity[0] = horiz[0] * endSpeed;
+			pm->ps->velocity[1] = horiz[1] * endSpeed;
+		}
+		PM_CodEndSlide();
+	}
+}
+
+/*
+================
+PM_CodSlideFrame
+
+codmod: per-command slide bookkeeping (phase 6). Cooldown tick, savegame clamp, forced end
+on leave-ground/water/ladder, then start check. Call after GroundTrace, before UpdateSprint.
+================
+*/
+static void PM_CodSlideFrame( void ) {
+	if ( pm->ps->aiChar ) {
+		return;
+	}
+
+	// savegame: stats survive load, pm_flags do not — drop orphan slide timers
+	if ( pm->ps->stats[STAT_COD_SLIDE] > 0 && !( pm->ps->pm_flags & PMF_COD_SLIDING ) ) {
+		pm->ps->stats[STAT_COD_SLIDE] = 0;
+		pm->ps->stats[STAT_COD_SLIDE_SPEED] = 0;
+	}
+
+	if ( !( bg_cod.enable && bg_cod.slideEnable ) ) {
+		if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+			PM_CodEndSlide();
+		}
+		return;
+	}
+
+	if ( pm->ps->stats[STAT_COD_SLIDE] < 0 ) {
+		pm->ps->stats[STAT_COD_SLIDE] += pml.msec;
+		if ( pm->ps->stats[STAT_COD_SLIDE] > 0 ) {
+			pm->ps->stats[STAT_COD_SLIDE] = 0;
+		}
+	}
+
+	if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+		if ( !pml.walking || pm->waterlevel >= 2 || pml.ladder ) {
+			PM_CodEndSlide();
+			return;
+		}
+	}
+
+	PM_CodCheckSlideStart();
+}
+
+/*
+================
 PM_CodUpdateADS
 
 codmod: advances the player's networked ADS fraction (ps->stats[STAT_COD_ADS], 0..1000)
@@ -3873,6 +4127,7 @@ static void PM_CodUpdateSprint( void ) {
 	wantSprint = ( pm->cmd.buttons & BUTTON_SPRINT )
 				 && ( bg_cod.sprintForwardOnly ? ( pm->cmd.forwardmove > 0 ) : moving )
 				 && !( pm->ps->pm_flags & PMF_DUCKED )
+				 && !( pm->ps->pm_flags & PMF_COD_SLIDING )
 				 && pm->waterlevel < 2
 				 && !( pm->cmd.buttons & BUTTON_WALKING )
 				 && !( pm->cmd.wbuttons & WBUTTON_COD_ADS )
@@ -3935,6 +4190,10 @@ void PM_UpdateLean( playerState_t *ps, usercmd_t *cmd, pmove_t *tpm ) {
 	// not allowed when...
 	if ( ( ps->eFlags & ( EF_MELEE_ACTIVE |   // ...holding a chair
 						  EF_MG42_ACTIVE ) ) ) { // ...on mg42
+		leaning = 0;
+	}
+	// codmod: no lean while sliding (phase 6)
+	if ( ps->pm_flags & PMF_COD_SLIDING ) {
 		leaning = 0;
 	}
 	// codmod: cod_leanAllowFire lets the player keep leaning while firing (phase 2.3.2)
@@ -4526,6 +4785,10 @@ void PmoveSingle( pmove_t *pmove ) {
 	// clear all pmove local vars
 	memset( &pml, 0, sizeof( pml ) );
 
+	// codmod: remember pre-duck PMF_DUCKED for slide start edge (phase 6). Set after
+	// memset — pml is zeroed each call.
+	pml.codWasDucked = ( pm->ps->pm_flags & PMF_DUCKED ) ? qtrue : qfalse;
+
 	// determine the time
 	pml.msec = pmove->cmd.serverTime - pm->ps->commandTime;
 	if ( !isDummy ) {
@@ -4620,6 +4883,10 @@ void PmoveSingle( pmove_t *pmove ) {
 	// reads WBUTTON_COD_ADS off pm->cmd directly to block/cancel sprint while ADS is held.
 	PM_CodUpdateADS();
 
+	// codmod: slide bookkeeping before UpdateSprint so COD_SF_SPRINTING from the previous
+	// command is still set for the sprint→crouch start edge (phase 6).
+	PM_CodSlideFrame();
+
 	// codmod: decide sprint state before the move dispatch so PM_CmdScale/PM_WalkMove/
 	// PM_Sprint all agree this frame (phase 2.1.c)
 	PM_CodUpdateSprint();
@@ -4653,9 +4920,17 @@ void PmoveSingle( pmove_t *pmove ) {
 		PM_WaterMove();
 	} else if ( pml.walking ) {
 		// walking on ground
-		PM_WalkMove();
+		// codmod: slide replaces walk while PMF_COD_SLIDING (phase 6)
+		if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+			PM_CodSlideMove();
+		} else {
+			PM_WalkMove();
+		}
 	} else {
-		// airborne
+		// airborne — leave-ground also ends slide in PM_CodSlideFrame; belt-and-suspenders here
+		if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+			PM_CodEndSlide();
+		}
 		PM_AirMove();
 	}
 

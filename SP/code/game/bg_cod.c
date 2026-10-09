@@ -193,6 +193,22 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_flashlightG",        "0.95", 0,            CODOFS( flashlightG ),        0 },
 	{ "cod_flashlightB",        "0.85", 0,            CODOFS( flashlightB ),        0 },
 
+	// codmod: Phase 6 tactical slide (docs/phase-6-slide.md + reference-values.md)
+	{ "cod_slideEnable",        "1",    0,            CODOFS( slideEnable ),        1 },
+	{ "cod_slideBoost",         "60",   0,            CODOFS( slideBoost ),         0 },
+	{ "cod_slideMaxSpeed",      "380",  0,            CODOFS( slideMaxSpeed ),      0 },
+	{ "cod_slideTime",          "1200", 0,            CODOFS( slideTime ),          0 },
+	{ "cod_slideEndSpeed",      "130",  0,            CODOFS( slideEndSpeed ),      0 },
+	{ "cod_slideMinSpeed",      "260",  0,            CODOFS( slideMinSpeed ),      0 },
+	{ "cod_slideCooldown",     "600",  0,            CODOFS( slideCooldown ),     0 },
+	{ "cod_slideSteer",         "0.15", 0,            CODOFS( slideSteer ),         0 },
+	{ "cod_slideJumpCancel",    "1",    0,            CODOFS( slideJumpCancel ),    1 },
+	{ "cod_slideAllowADS",      "0",    0,            CODOFS( slideAllowADS ),      1 },
+	{ "cod_slideSlope",         "0",    0,            CODOFS( slideSlope ),         0 },
+	{ "cod_slideStaminaCost",   "0",    0,            CODOFS( slideStaminaCost ),   0 },
+	{ "cod_slideRoll",          "4",    0,            CODOFS( slideRoll ),          0 },
+	{ "cod_slideFovKick",       "0.05", 0,            CODOFS( slideFovKick ),       0 },
+
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
 	{ "cod_menuScale",          "0.7",  CVAR_ARCHIVE, CODOFS( menuScale ),          0 },
@@ -421,6 +437,11 @@ qboolean BG_CodCanADS( const playerState_t *ps ) {
 	}
 
 	if ( ps->eFlags & ( EF_ZOOMING | EF_MG42_ACTIVE | EF_MELEE_ACTIVE ) ) {
+		return qfalse;
+	}
+
+	// codmod: no ADS while sliding unless cod_slideAllowADS (phase 6)
+	if ( ( ps->pm_flags & PMF_COD_SLIDING ) && !bg_cod.slideAllowADS ) {
 		return qfalse;
 	}
 

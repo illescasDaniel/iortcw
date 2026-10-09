@@ -813,6 +813,8 @@ typedef struct {
 	float codSprintFrac;                 // codmod: phase 4 — 0..1 visual sprint gun-lower fraction
 	int codSprintFracTime;               // codmod: cg.time of last CG_CodSprintFrac update
 
+	int codSlideStartTime;               // codmod: phase 6 — cg.time when PMF_COD_SLIDING rose
+
 	int codQkPrev;                       // codmod: phase 5.5 — weapon to restore after quickknife
 	int codQkState;                      // codmod: 0 idle, 1 switching, 2 swinging, 3 returning
 	int codQkStartTime;                  // codmod: cg.time when quickknife started
@@ -2259,6 +2261,7 @@ void CG_CodAddFlashlight( void );      // codmod: phase 5d view dlight
 void CG_QuickKnife_f( void );          // codmod: phase 5.5 CoD-style quick knife
 float CG_CodAdsFrac( void );           // codmod: phase 3.5, raw 0..1, forced to 1 by cod_adsLock
 float CG_CodSprintFrac( void );        // codmod: phase 4, 0..1 visual sprint lower (eased)
+float CG_CodSlideFrac( void );         // codmod: phase 6, 0..1 eased slide camera/gun frac
 float CG_CodGaitBobAmp( void );        // codmod: phase 4, walk/jog/sprint bob amplitude scale
 void CG_CodUpdateAdsTune( void );      // codmod: phase 3.5 alignment tooling
 void CG_CodAdsTuneLoad_f( void );      // codmod: phase 3.5 alignment tooling

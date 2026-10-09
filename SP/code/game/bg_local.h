@@ -61,6 +61,9 @@ typedef struct {
 
 	// Ridah, ladders
 	qboolean ladder;
+
+	// codmod: phase 6 — PMF_DUCKED before PM_CheckDuck this command (slide start edge)
+	qboolean codWasDucked;
 } pml_t;
 
 extern pmove_t     *pm;

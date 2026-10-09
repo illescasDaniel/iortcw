@@ -1869,6 +1869,15 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 		VectorMA( origin, bg_cod.sprintGunUp * sprintE, up, origin );
 	}
 
+	// codmod: slide viewmodel dip + roll (phase 6). Fire is allowed while sliding.
+	if ( bg_cod.enable && bg_cod.slideEnable ) {
+		float slideS = CG_CodSlideFrac();
+		if ( slideS > 0.0f ) {
+			angles[ROLL] -= 8.0f * slideS;
+			origin[2] -= 3.0f * slideS;
+		}
+	}
+
 	// RF, subtract the kickAngles
 	VectorMA( angles, -1.0, cg.kickAngles, angles );
 

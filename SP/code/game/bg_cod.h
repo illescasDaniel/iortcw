@@ -159,6 +159,22 @@ typedef struct {
 	float flashlightG;
 	float flashlightB;
 
+	// codmod: Phase 6 tactical slide (docs/phase-6-slide.md)
+	int slideEnable;           // master: sprint+crouch slide
+	float slideBoost;          // u/s added at slide start
+	float slideMaxSpeed;       // cap after boost
+	float slideTime;           // ms, linear decay duration
+	float slideEndSpeed;       // decays to this (≈ crouch speed)
+	float slideMinSpeed;       // min horizontal speed to start
+	float slideCooldown;       // ms after slide ends
+	float slideSteer;          // 0 = locked dir, 1 = air-control-like
+	int slideJumpCancel;       // 1 = jump ends slide and keeps momentum
+	int slideAllowADS;         // 0 = no ADS while sliding (default)
+	float slideSlope;          // optional downhill boost on start-speed; 0 = off
+	float slideStaminaCost;    // optional stamina units on start; 0 = free
+	float slideRoll;           // degrees view roll × slide frac (cgame)
+	float slideFovKick;        // FOV *= 1 + kick × frac (cgame)
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;
@@ -201,8 +217,8 @@ extern const int bg_numCodCvars;
 
 // codmod: g_main.c / cg_main.c each keep a static vmCvar_t[BG_COD_MAX_CVARS] and pass it in.
 // Bump this if bg_codCvars ever grows past it -- BG_CodRegisterCvars() clamps defensively.
-// (phase 3–5c + E9; leave headroom for slide/prone.)
-#define BG_COD_MAX_CVARS 128
+// (phase 3–6 + E9; leave headroom for prone.)
+#define BG_COD_MAX_CVARS 160
 
 void BG_CodRegisterCvars( vmCvar_t *cvars, int maxCvars );
 void BG_CodUpdateCvars( vmCvar_t *cvars, int maxCvars );
