@@ -320,6 +320,12 @@ void    trap_R_AddLightToScene( const vec3_t org, float intensity, float r, floa
 	syscall( CG_R_ADDLIGHTTOSCENE, org, PASSFLOAT( intensity ), PASSFLOAT( r ), PASSFLOAT( g ), PASSFLOAT( b ), overdraw );
 }
 
+void    trap_R_AddSpotLightToScene( const vec3_t org, float intensity, float r, float g, float b,
+									const vec3_t dir, float coneAngleDeg, int overdraw ) {
+	syscall( CG_R_ADDSPOTLIGHTTOSCENE, org, PASSFLOAT( intensity ), PASSFLOAT( r ), PASSFLOAT( g ), PASSFLOAT( b ),
+			 dir, PASSFLOAT( coneAngleDeg ), overdraw );
+}
+
 //----(SA)
 void    trap_R_AddCoronaToScene( const vec3_t org, float r, float g, float b, float scale, int id, int flags ) {
 	syscall( CG_R_ADDCORONATOSCENE, org, PASSFLOAT( r ), PASSFLOAT( g ), PASSFLOAT( b ), PASSFLOAT( scale ), id, flags );

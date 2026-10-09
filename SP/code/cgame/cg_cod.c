@@ -847,10 +847,8 @@ void CG_ToggleFlashlight_f( void ) {
 }
 
 void CG_CodAddFlashlight( void ) {
-	vec3_t start, dir, end, lightPos;
-	trace_t tr;
-	float intensity, range, minDist, hitDist, closeScale, t, falloff, radius;
-	int i;
+	vec3_t start, dir;
+	float intensity, radius;
 
 	if ( !cg.codFlashlightOn ) {
 		return;
@@ -869,83 +867,32 @@ void CG_CodAddFlashlight( void ) {
 	if ( intensity < 1.0f ) {
 		intensity = 500.0f;
 	}
-	range = intensity * 2.0f;
-	if ( range < 448.0f ) {
-		range = 448.0f;
+	// Beam reach (dlight radius). Intensity cvar doubles as a range scale.
+	radius = intensity * 2.2f;
+	if ( radius < 512.0f ) {
+		radius = 512.0f;
 	}
-	if ( range > 1600.0f ) {
-		range = 1600.0f;
-	}
-
-	// cod_flashlightMinDist: hit distance where dlights reach full strength.
-	// Linear ramp 55% at contact → 100% at minDist (no hard floor that masked tuning).
-	minDist = bg_cod.flashlightMinDist;
-	if ( minDist < 48.0f ) {
-		minDist = 48.0f;
-	}
-	if ( minDist > 768.0f ) {
-		minDist = 768.0f;
+	if ( radius > 1800.0f ) {
+		radius = 1800.0f;
 	}
 
+	// MinDist kept for menu/tuning compatibility; spots don't need the old close-wall curve.
+	(void)bg_cod.flashlightMinDist;
+
+	// Origin slightly forward of the eye so the gun mesh / near plane don't bathe the world.
 	VectorCopy( cg.refdef.vieworg, start );
-	VectorMA( start, 12.0f, cg.refdef.viewaxis[0], start );
+	VectorMA( start, 10.0f, cg.refdef.viewaxis[0], start );
 	VectorCopy( cg.refdef.viewaxis[0], dir );
 
-	VectorMA( start, range, dir, end );
-	CG_Trace( &tr, start, NULL, NULL, end, cg.snap->ps.clientNum, MASK_SHOT );
-	hitDist = range * tr.fraction;
-
-	t = hitDist / minDist;
-	if ( t > 1.0f ) {
-		t = 1.0f;
-	} else if ( t < 0.0f ) {
-		t = 0.0f;
-	}
-	closeScale = 0.55f + 0.45f * t;
-
-	// Lighting only — no CG_Spotlight cone/core overlay (HUD icon shows on-state).
-	// REF_FORCE_DLIGHT: wolfconfig often has r_dynamiclight 0.
-
-	VectorMA( start, 16.0f, dir, lightPos );
-	if ( hitDist > 20.0f ) {
-		trap_R_AddLightToScene( lightPos, intensity * 0.14f * closeScale,
+	// Eye-origin spot cones (rend2). No impact point-light on the aimed wall — that was the
+	// "each wall texture gets individually bright" look. REF_FORCE_DLIGHT: wolfconfig often
+	// has r_dynamiclight 0.
+	trap_R_AddSpotLightToScene( start, radius * 0.55f,
 								bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
-								REF_FORCE_DLIGHT );
-	}
-
-	if ( hitDist > 72.0f ) {
-		for ( i = 1; i <= 3; i++ ) {
-			t = ( (float)i / 3.0f ) * tr.fraction;
-			if ( t < 0.12f ) {
-				continue;
-			}
-			falloff = 1.0f - t * 0.55f;
-			radius = intensity * 0.22f * falloff * closeScale;
-			if ( radius < 28.0f ) {
-				continue;
-			}
-			VectorMA( start, range * t, dir, lightPos );
-			trap_R_AddLightToScene( lightPos, radius,
-									bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
-									REF_FORCE_DLIGHT );
-		}
-	}
-
-	// Always light the aimed surface (close walls included).
-	if ( tr.fraction < 1.0f ) {
-		VectorMA( start, hitDist - 6.0f, dir, lightPos );
-		if ( hitDist < 12.0f ) {
-			VectorMA( start, hitDist * 0.5f, dir, lightPos );
-		}
-		trap_R_AddLightToScene( lightPos, intensity * 0.42f * closeScale,
-								bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
-								REF_FORCE_DLIGHT );
-	} else {
-		VectorMA( start, range * 0.55f, dir, lightPos );
-		trap_R_AddLightToScene( lightPos, intensity * 0.2f,
-								bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
-								REF_FORCE_DLIGHT );
-	}
+								dir, 16.0f, REF_FORCE_DLIGHT );
+	trap_R_AddSpotLightToScene( start, radius,
+								bg_cod.flashlightR * 0.65f, bg_cod.flashlightG * 0.65f, bg_cod.flashlightB * 0.65f,
+								dir, 28.0f, REF_FORCE_DLIGHT );
 }
 
 /*

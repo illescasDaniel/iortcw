@@ -846,6 +846,11 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	case CG_ALLOC:
 		return VM_Alloc( args[1] );
 
+	// codmod: directional spotlight
+	case CG_R_ADDSPOTLIGHTTOSCENE:
+		re.AddSpotLightToScene( VMA( 1 ), VMF( 2 ), VMF( 3 ), VMF( 4 ), VMF( 5 ), VMA( 6 ), VMF( 7 ), args[8] );
+		return 0;
+
 	default:
 		Com_Error( ERR_DROP, "Bad cgame system trap: %ld", (long int) args[0] );
 	}

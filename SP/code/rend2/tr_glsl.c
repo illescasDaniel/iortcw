@@ -160,6 +160,8 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_FireRiseDir", GLSL_VEC3 },
 	{ "u_ZFadeLowest", GLSL_FLOAT },
 	{ "u_ZFadeHighest", GLSL_FLOAT },
+
+	{ "u_LightSpot", GLSL_VEC4 },
 };
 
 typedef enum
