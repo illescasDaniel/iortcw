@@ -803,9 +803,16 @@ void ClientThink_real( gentity_t *ent ) {
 	}
 
 	if ( client->cameraPortal ) {
-		G_SetOrigin( client->cameraPortal, client->ps.origin );
-		trap_LinkEntity( client->cameraPortal );
-		VectorCopy( client->cameraOrigin, client->cameraPortal->s.origin2 );
+		// codmod: reject dangling pointers from legacy saves (cameraPortal was not F_ENTITY)
+		if ( client->cameraPortal < g_entities
+			 || client->cameraPortal >= g_entities + MAX_GENTITIES
+			 || !client->cameraPortal->inuse ) {
+			client->cameraPortal = NULL;
+		} else {
+			G_SetOrigin( client->cameraPortal, client->ps.origin );
+			trap_LinkEntity( client->cameraPortal );
+			VectorCopy( client->cameraOrigin, client->cameraPortal->s.origin2 );
+		}
 	}
 
 	// mark the time, so the connection sprite can be removed

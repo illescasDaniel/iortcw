@@ -2220,6 +2220,7 @@ void CG_Spotlight( centity_t *cent, float *color, vec3_t start, vec3_t dir, int 
 #define SL_LOCKUV           0x080   // lock the texture coordinates at the 'true' length of the requested beam.
 #define SL_NOCORE           0x100   // don't draw the center 'core' beam
 #define SL_TRACEWORLDONLY   0x200
+#define SL_NOMODEL          0x400   // codmod: skip searchlight base/lamp md3s (player flashlight)
 //----(SA)	done
 
 void CG_RumbleEfx( float pitch, float yaw );

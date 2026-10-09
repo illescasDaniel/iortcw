@@ -847,9 +847,11 @@ void CG_ToggleFlashlight_f( void ) {
 }
 
 void CG_CodAddFlashlight( void ) {
-	vec3_t start, end, lightPos;
+	vec3_t start, dir, end, lightPos;
+	vec4_t color;
 	trace_t tr;
-	float intensity;
+	float intensity, range, t, falloff;
+	int i;
 
 	if ( !cg.codFlashlightOn ) {
 		return;
@@ -866,24 +868,50 @@ void CG_CodAddFlashlight( void ) {
 
 	intensity = bg_cod.flashlightIntensity;
 	if ( intensity < 1.0f ) {
-		intensity = 350.0f;
+		intensity = 500.0f;
+	}
+	// Beam length scales with intensity (default 500 → ~750 u).
+	range = intensity * 1.5f;
+	if ( range < 512.0f ) {
+		range = 512.0f;
+	}
+	if ( range > 1536.0f ) {
+		range = 1536.0f;
 	}
 
-	// Trace ahead so the beam lights walls (point light at the eye alone is easy to miss).
-	// REF_FORCE_DLIGHT: wolfconfig often has r_dynamiclight 0 — without FORCE the light is dropped.
+	// Origin slightly forward of the eye so the cone clears the near plane / gun mesh.
 	VectorCopy( cg.refdef.vieworg, start );
-	VectorMA( start, 768.0f, cg.refdef.viewaxis[0], end );
-	CG_Trace( &tr, start, NULL, NULL, end, cg.snap->ps.clientNum, MASK_SHOT );
-	VectorMA( start, 32.0f + 200.0f * tr.fraction, cg.refdef.viewaxis[0], lightPos );
+	VectorMA( start, 12.0f, cg.refdef.viewaxis[0], start );
+	VectorCopy( cg.refdef.viewaxis[0], dir );
 
-	trap_R_AddLightToScene( lightPos, intensity * ( 0.55f + 0.45f * tr.fraction ),
+	color[0] = bg_cod.flashlightR;
+	color[1] = bg_cod.flashlightG;
+	color[2] = bg_cod.flashlightB;
+	color[3] = 0.28f;
+
+	// Proper spotlight cone + core + wall impact (engine CG_Spotlight). No map
+	// searchlight props, no camera flare, no built-in dlight (we force our own).
+	CG_Spotlight( &cg.predictedPlayerEntity, color, start, dir,
+				  16, range, 0, 7.0f,
+				  SL_NOMODEL | SL_NOFLARE | SL_NODLIGHT | SL_NOSTARTCAP | SL_LOCKTRACETORANGE );
+
+	// REF_FORCE_DLIGHT: wolfconfig often has r_dynamiclight 0 — without FORCE lights are dropped.
+	VectorMA( start, range, dir, end );
+	CG_Trace( &tr, start, NULL, NULL, end, cg.snap->ps.clientNum, MASK_SHOT );
+
+	VectorMA( start, 20.0f, dir, lightPos );
+	trap_R_AddLightToScene( lightPos, intensity * 0.45f,
 							bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
 							REF_FORCE_DLIGHT );
-	// Soft fill near the view so close geometry is lit too.
-	VectorMA( start, 24.0f, cg.refdef.viewaxis[0], lightPos );
-	trap_R_AddLightToScene( lightPos, intensity * 0.35f,
-							bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
-							REF_FORCE_DLIGHT );
+
+	for ( i = 1; i <= 4; i++ ) {
+		t = ( (float)i / 4.0f ) * tr.fraction;
+		falloff = 1.0f - t * 0.5f;
+		VectorMA( start, range * t, dir, lightPos );
+		trap_R_AddLightToScene( lightPos, intensity * 0.5f * falloff,
+								bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
+								REF_FORCE_DLIGHT );
+	}
 }
 
 /*
