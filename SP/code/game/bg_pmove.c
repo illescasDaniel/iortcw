@@ -2861,6 +2861,13 @@ static void PM_Weapon( void ) {
 	qboolean akimboFire;
 	qboolean gameReloading;
 
+	// codmod: track attack release for click-fire weapons (and pistol tap-fire).
+	// Vanilla only set releasedFire inside pistol-specific blocks; bolt/semi need it too.
+	// Runs before the respawn gate so the first post-spawn click is allowed.
+	if ( !pm->ps->aiChar && !( pm->cmd.buttons & BUTTON_ATTACK ) ) {
+		pm->ps->releasedFire = qtrue;
+	}
+
 	// don't allow attack until all buttons are up
 	if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
 		return;
@@ -3225,6 +3232,15 @@ static void PM_Weapon( void ) {
 			PM_ContinueWeaponAnim( WEAP_IDLE1 );
 		}
 
+		pm->ps->weaponstate = WEAPON_READY;
+		return;
+	}
+
+	// codmod: CoD fire modes — pistols / bolt / semi fire once per click; holding only
+	// keeps spraying on automatics (MP40 / Thompson / Sten / FG42 / Venom / flame).
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.semiAutoClick
+		 && BG_CodNeedsClickFire( pm->ps->weapon ) && !delayedFire
+		 && !pm->ps->releasedFire ) {
 		pm->ps->weaponstate = WEAPON_READY;
 		return;
 	}

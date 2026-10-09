@@ -62,6 +62,9 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_adsTimeIn",          "220",  0,            CODOFS( adsTimeIn ),          0 },
 	{ "cod_adsTimeOut",         "180",  0,            CODOFS( adsTimeOut ),         0 },
 	{ "cod_adsSpreadScale",     "0.35", 0,            CODOFS( adsSpreadScale ),     0 },
+	// codmod: CoD hipfire cone — standing-still aimSpread decays to 0; floor keeps hip inaccurate.
+	{ "cod_hipSpreadMin",       "0.55", 0,            CODOFS( hipSpreadMin ),       0 },
+	{ "cod_hipSpreadScale",     "1",    0,            CODOFS( hipSpreadScale ),     0 },
 	{ "cod_adsSensScale",       "1",    0,            CODOFS( adsSensScale ),       0 },
 	{ "cod_adsBobScale",        "0.85", 0,            CODOFS( adsBobScale ),        0 },
 	// codmod: FOV zoom magnifies the RF_DEPTHHACK viewmodel; push it forward while ADS so
@@ -122,6 +125,8 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_pistolNextShot",     "120",  0,            CODOFS( pistolNextShot ),     0 },
 	{ "cod_pistolFireDelay",    "0",    0,            CODOFS( pistolFireDelay ),    0 },
 	{ "cod_autoFireScale",      "1",    0,            CODOFS( autoFireScale ),      0 },
+	// codmod: CoD fire modes — hold sprays MP40/Thompson/Sten/FG42/Venom/flame only.
+	{ "cod_semiAutoClick",      "1",    0,            CODOFS( semiAutoClick ),      1 },
 	{ "cod_jumpVelocity",       "250",  0,            CODOFS( jumpVelocity ),       0 },
 	{ "cod_gravity",            "800",  0,            CODOFS( gravity ),            0 },
 	{ "cod_accelerate",         "8",    0,            CODOFS( accelerate ),         0 },
@@ -282,6 +287,78 @@ codmod: weapons that get SP tap-fire / pistol interval overrides (phase 5).
 */
 qboolean BG_CodIsPistol( int weapon ) {
 	return ( weapon == WP_LUGER || weapon == WP_COLT || weapon == WP_SILENCER ) ? qtrue : qfalse;
+}
+
+/*
+================
+BG_CodNeedsClickFire
+
+codmod: true for weapons that fire one shot per click (pistols, bolt/semi rifles,
+panzer). Hold-to-spray stays on MP40 / Thompson / Sten / FG42 / Venom / flamethrower.
+================
+*/
+qboolean BG_CodNeedsClickFire( int weapon ) {
+	switch ( weapon ) {
+	case WP_LUGER:
+	case WP_COLT:
+	case WP_SILENCER:
+	case WP_AKIMBO:
+	case WP_MAUSER:
+	case WP_GARAND:
+	case WP_SNIPERRIFLE:
+	case WP_SNOOPERSCOPE:
+	case WP_PANZERFAUST:
+		return qtrue;
+	default:
+		return qfalse;
+	}
+}
+
+/*
+================
+BG_CodFireSpreadScale
+
+codmod: CoD hip → ADS cone. Hip uses max(aimSpread, hipSpreadMin) * hipSpreadScale;
+ADS lerps that toward aimSpread * adsSpreadScale. adsFrac 0 = full hip, 1 = full ADS.
+================
+*/
+float BG_CodFireSpreadScale( float aimSpread, int weapon, float adsFrac ) {
+	float hip;
+	float ads;
+	float hipMin = bg_cod.hipSpreadMin;
+	float hipMul = bg_cod.hipSpreadScale;
+
+	if ( aimSpread < 0.0f ) {
+		aimSpread = 0.0f;
+	} else if ( aimSpread > 1.0f ) {
+		aimSpread = 1.0f;
+	}
+	if ( adsFrac < 0.0f ) {
+		adsFrac = 0.0f;
+	} else if ( adsFrac > 1.0f ) {
+		adsFrac = 1.0f;
+	}
+
+	hip = aimSpread;
+	if ( hipMin > 0.0f && hip < hipMin ) {
+		hip = hipMin;
+	}
+	if ( hipMul > 0.0f && hipMul != 1.0f ) {
+		hip *= hipMul;
+	}
+	if ( hip > 1.0f ) {
+		hip = 1.0f;
+	}
+
+	ads = aimSpread * BG_CodAdsSpreadScale( weapon );
+
+	if ( adsFrac <= 0.0f ) {
+		return hip;
+	}
+	if ( adsFrac >= 1.0f ) {
+		return ads;
+	}
+	return hip + ( ads - hip ) * adsFrac;
 }
 
 /*

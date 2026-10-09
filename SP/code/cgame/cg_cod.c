@@ -1120,6 +1120,13 @@ void CG_CodDrawCrosshair( const vec4_t hcolor ) {
 	} else if ( spreadT > 1.0f ) {
 		spreadT = 1.0f;
 	}
+	// Match FireWeapon hip floor so the reticle gap reads the CoD cone while hip.
+	if ( bg_cod.enable && bg_cod.adsEnable && bg_cod.hipSpreadMin > 0.0f ) {
+		float hipVis = bg_cod.hipSpreadMin * ( 1.0f - ads );
+		if ( spreadT < hipVis ) {
+			spreadT = hipVis;
+		}
+	}
 
 	VectorCopy( ps->velocity, vel );
 	vel[2] = 0.0f;

@@ -1724,16 +1724,13 @@ void FireWeapon( gentity_t *ent ) {
 		aimSpreadScale = 1.0;
 	}
 
-	// codmod: ADS tightens spread for the player only (phase 3.4). Scales the already
-	// computed aimSpreadScale toward cod_adsSpreadScale as STAT_COD_ADS ramps in. This is
-	// the single place aimSpreadScale feeds every Bullet_Fire()/weapon_venom_fire()/
-	// Weapon_RocketLauncher_Fire() call below, so one multiply covers all of them. AI
-	// (and any weapon that can't ADS) keep frac at 0, so this is a no-op for them.
+	// codmod: CoD hipfire cone + ADS tighten (player only). Hip floors aimSpreadScale so
+	// standing still is still inaccurate; ADS lerps toward adsSpreadScale. Single place
+	// that feeds every Bullet_Fire()/weapon_venom_fire()/Weapon_RocketLauncher_Fire()
+	// below. AI (adsFrac 0, skipped) keep vanilla aimSpreadScale.
 	if ( !ent->aiCharacter && bg_cod.enable && bg_cod.adsEnable ) {
 		float adsFrac = ent->client->ps.stats[STAT_COD_ADS] / 1000.0f;
-		if ( adsFrac > 0.0f ) {
-			aimSpreadScale *= 1.0f + ( BG_CodAdsSpreadScale( ent->s.weapon ) - 1.0f ) * adsFrac;
-		}
+		aimSpreadScale = BG_CodFireSpreadScale( aimSpreadScale, ent->s.weapon, adsFrac );
 	}
 
 	// fire the specific weapon

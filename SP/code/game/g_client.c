@@ -1816,6 +1816,11 @@ void ClientSpawn( gentity_t *ent ) {
 
 	client->ps.clientNum = index;
 
+	// codmod: allow the first click after spawn (ps memset leaves releasedFire false).
+	if ( !( ent->r.svFlags & SVF_CASTAI ) ) {
+		client->ps.releasedFire = qtrue;
+	}
+
 	// DHM - Nerve :: Add appropriate weapons
 	if ( g_gametype.integer == GT_WOLF ) {
 		SetWolfSpawnWeapons( client ); // JPW NERVE -- increases stats[STAT_MAX_HEALTH] based on # of medics in game

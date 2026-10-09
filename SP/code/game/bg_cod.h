@@ -51,6 +51,8 @@ typedef struct {
 	float adsTimeIn;        // ms, default raise time when a weapon's own timeIn is 0
 	float adsTimeOut;       // ms, default lower time when a weapon's own timeOut is 0
 	float adsSpreadScale;   // x aimSpreadScale while fully in ADS; default when a weapon's own spreadScale is 0
+	float hipSpreadMin;     // floor on aimSpreadScale while hip-firing (CoD cone); 0 = off
+	float hipSpreadScale;   // extra hip multiplier after the floor (1 = none)
 	float adsSensScale;     // extra multiplier on top of the FOV-derived sensitivity scale
 	float adsBobScale;      // viewmodel bob/land-dip/idle-drift are scaled by 1 - e*adsBobScale
 	float adsGunFovComp;    // pushes the viewmodel forward in proportion to the FOV zoom (cgame)
@@ -94,6 +96,7 @@ typedef struct {
 	float pistolNextShot;      // ms min between pistol shots (0 = ammoTable)
 	float pistolFireDelay;     // ms first-shot delay override for pistols
 	float autoFireScale;       // scale nextShotTime for SMGs/FG42 (1 = vanilla)
+	int semiAutoClick;         // 1 = pistols/bolt/semi need release between shots (hold only sprays autos)
 	float jumpVelocity;        // u/s vertical jump for player (vanilla JUMP_VELOCITY 270)
 	float gravity;             // player ps.gravity (vanilla 800)
 	float accelerate;          // player ground accelerate (vanilla pm_accelerate 10)
@@ -155,6 +158,12 @@ typedef struct {
 
 // codmod: Luger / Colt / Silencer — SP pistol tap-fire set (phase 5).
 qboolean BG_CodIsPistol( int weapon );
+
+// codmod: pistols / bolt / semi that must click per shot (not hold-to-spray).
+qboolean BG_CodNeedsClickFire( int weapon );
+
+// codmod: player fire cone — hip floor lerps to ADS-tightened spread by adsFrac (0..1).
+float BG_CodFireSpreadScale( float aimSpread, int weapon, float adsFrac );
 
 // codmod: generic smoothstep ease, 0..1 in, 0..1 out (phase 3.5+). GCC doesn't warn about
 // unused "static inline" functions, so qagame linking this header unused is fine.
