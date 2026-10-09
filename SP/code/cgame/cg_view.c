@@ -1613,6 +1613,9 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// codmod: CoD-style quick knife state machine (phase 5.5)
 	CG_CodUpdateQuickKnife();
 
+	// codmod: toggle crouch auto-stand on jump (phase 5d)
+	CG_CodUpdateToggleCrouch();
+
 	if ( cg.weaponSelect == WP_FG42SCOPE || cg.weaponSelect == WP_SNOOPERSCOPE || cg.weaponSelect == WP_SNIPERRIFLE ) {
 		float spd;
 		spd = VectorLength( cg.snap->ps.velocity );
@@ -1699,6 +1702,8 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 		DEBUGTIME
 	}
 
+	// codmod: player flashlight dlight (phase 5d), after vieworg is set
+	CG_CodAddFlashlight();
 
 	CG_AddViewWeapon( &cg.predictedPlayerState );
 

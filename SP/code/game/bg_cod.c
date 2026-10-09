@@ -185,6 +185,13 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_hitMarkerWidth",     "2",    0,            CODOFS( hitMarkerWidth ),     0 },
 	{ "cod_hitMarkerSound",     "1",    0,            CODOFS( hitMarkerSound ),     1 },
 
+	// codmod: phase 5d flashlight (client-local view dlight)
+	{ "cod_flashlightEnable",   "1",    0,            CODOFS( flashlightEnable ),   1 },
+	{ "cod_flashlightIntensity","350",  0,            CODOFS( flashlightIntensity ), 0 },
+	{ "cod_flashlightR",        "1",    0,            CODOFS( flashlightR ),        0 },
+	{ "cod_flashlightG",        "0.95", 0,            CODOFS( flashlightG ),        0 },
+	{ "cod_flashlightB",        "0.85", 0,            CODOFS( flashlightB ),        0 },
+
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
 	{ "cod_menuScale",          "0.7",  CVAR_ARCHIVE, CODOFS( menuScale ),          0 },

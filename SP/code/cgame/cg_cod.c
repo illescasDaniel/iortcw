@@ -4,6 +4,7 @@
 // section 6. Extended in later phases (ADS, slide, prone).
 
 #include "cg_local.h"
+#include "../client/keycodes.h" // codmod: K_SPACE for toggle-crouch auto-stand (phase 5d)
 
 // codmod: Phase 3.5 per-weapon iron-sight ADS. Primary pose is computed every frame from
 // tag_flash (see CG_CodApplyIronSightAds) so the rear sight sits on the screen center like
@@ -724,6 +725,83 @@ void CG_ToggleAds_f( void ) {
 	} else {
 		trap_SendConsoleCommand( "-ads\n" );
 	}
+}
+
+/*
+================
+CG_ToggleCrouch_f / CG_CodUpdateToggleCrouch
+
+codmod: sticky crouch toggle (phase 5d). Alternates +movedown/-movedown. Jump
+(SPACE) auto-stands so upmove is not cancelled (jump and crouch share one axis).
+================
+*/
+void CG_ToggleCrouch_f( void ) {
+	cg.codCrouchHeld = !cg.codCrouchHeld;
+	if ( cg.codCrouchHeld ) {
+		trap_SendConsoleCommand( "+movedown\n" );
+	} else {
+		trap_SendConsoleCommand( "-movedown\n" );
+	}
+}
+
+void CG_CodUpdateToggleCrouch( void ) {
+	if ( !cg.codCrouchHeld ) {
+		return;
+	}
+	// Default jump is SPACE; clear sticky crouch so jump works.
+	if ( trap_Key_IsDown( K_SPACE ) ) {
+		cg.codCrouchHeld = qfalse;
+		trap_SendConsoleCommand( "-movedown\n" );
+	}
+}
+
+/*
+================
+CG_ToggleFlashlight_f / CG_CodAddFlashlight
+
+codmod: client-local view flashlight (phase 5d). RTCW SP has no player lamp.
+================
+*/
+void CG_ToggleFlashlight_f( void ) {
+	if ( !( bg_cod.enable && bg_cod.flashlightEnable ) ) {
+		cg.codFlashlightOn = qfalse;
+		return;
+	}
+	cg.codFlashlightOn = !cg.codFlashlightOn;
+}
+
+void CG_CodAddFlashlight( void ) {
+	vec3_t origin;
+
+	if ( !cg.codFlashlightOn ) {
+		return;
+	}
+	if ( !( bg_cod.enable && bg_cod.flashlightEnable ) ) {
+		return;
+	}
+	if ( !cg.snap || cg.renderingThirdPerson ) {
+		return;
+	}
+	if ( cg.snap->ps.pm_type == PM_INTERMISSION || cg.snap->ps.stats[STAT_HEALTH] <= 0 ) {
+		return;
+	}
+
+	// Slightly forward of the eye so the light is not buried in the head hull.
+	VectorMA( cg.refdef.vieworg, 16.0f, cg.refdef.viewaxis[0], origin );
+	trap_R_AddLightToScene( origin, bg_cod.flashlightIntensity,
+							bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB, 0 );
+}
+
+/*
+================
+CG_CodResetBinds_f
+
+codmod: console helper for a full bind reset (phase 5d). Same as execing
+codmod_binds.cfg (unbindall → default.cfg → codmod deltas).
+================
+*/
+void CG_CodResetBinds_f( void ) {
+	trap_SendConsoleCommand( "exec codmod_binds.cfg\n" );
 }
 
 // codmod: quickknife state machine (phase 5.5). Values match cg.codQkState.

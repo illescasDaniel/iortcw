@@ -152,6 +152,13 @@ typedef struct {
 	float hitMarkerWidth;      // tick thickness
 	int hitMarkerSound;        // 1 = play body/headshot ticks
 
+	// codmod: player flashlight (phase 5d) — client-local dlight
+	int flashlightEnable;      // master for toggleflashlight + draw
+	float flashlightIntensity; // trap_R_AddLightToScene radius-ish intensity
+	float flashlightR;
+	float flashlightG;
+	float flashlightB;
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;

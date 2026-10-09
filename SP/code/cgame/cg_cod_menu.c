@@ -229,6 +229,13 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_FLOAT, "cod_hitMarkerWidth",     "cod_hitMarkerWidth",     0.25f, 1,    NULL },
 	{ COD_MI_BOOL,  "cod_hitMarkerSound",     "cod_hitMarkerSound",     1,     1,    NULL },
 
+	{ COD_MI_SECTION, "FLASHLIGHT", NULL, 0, 0, NULL },
+	{ COD_MI_BOOL,  "cod_flashlightEnable",   "cod_flashlightEnable",   1,     1,    NULL },
+	{ COD_MI_FLOAT, "cod_flashlightIntensity","cod_flashlightIntensity",25,    50,   NULL },
+	{ COD_MI_FLOAT, "cod_flashlightR",        "cod_flashlightR",        0.05f, 0.1f, NULL },
+	{ COD_MI_FLOAT, "cod_flashlightG",        "cod_flashlightG",        0.05f, 0.1f, NULL },
+	{ COD_MI_FLOAT, "cod_flashlightB",        "cod_flashlightB",        0.05f, 0.1f, NULL },
+
 	{ COD_MI_SECTION, "GAIT / SPRINT GUN", NULL, 0, 0, NULL },
 	{ COD_MI_FLOAT, "cod_sprintRaiseTime",    "cod_sprintRaiseTime",    10,   50,   NULL },
 	{ COD_MI_FLOAT, "cod_sprintGunPitch",     "cod_sprintGunPitch",     0.5f, 2,    NULL },

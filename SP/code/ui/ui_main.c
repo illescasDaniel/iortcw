@@ -4677,6 +4677,16 @@ static void UI_RunMenuScript( char **args ) {
 			trap_Cmd_ExecuteText( EXEC_NOW, "exec language.cfg\n" );       // NERVE - SMF
 			trap_Cmd_ExecuteText( EXEC_NOW, "setRecommended\n" );     // NERVE - SMF
 			Controls_SetDefaults();
+			// codmod: re-apply full codmod bind reset (ADS, quickknife, toggle crouch,
+			// flashlight, unbind CTRL) so menu Defaults is not vanilla-only (phase 5d).
+			{
+				char fsGame[MAX_QPATH];
+
+				trap_Cvar_VariableStringBuffer( "fs_game", fsGame, sizeof( fsGame ) );
+				if ( !Q_stricmp( fsGame, "codmod" ) ) {
+					trap_Cmd_ExecuteText( EXEC_NOW, "exec codmod_binds.cfg\n" );
+				}
+			}
 #ifdef CINEMATICS_INTRO
 			trap_Cvar_Set( "com_introPlayed", "1" );
 #endif

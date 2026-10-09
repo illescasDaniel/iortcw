@@ -1615,7 +1615,12 @@ static void CG_RunWeapLerpFrame( clientInfo_t *ci, weaponInfo_t *wi, lerpFrame_t
 			 animId == WEAP_ALTSWITCHTO ||
 			 animId == WEAP_ATTACK1 ||
 			 animId == WEAP_ATTACK2 ||
-			 animId == WEAP_ATTACK_LASTSHOT ) {
+			 animId == WEAP_ATTACK_LASTSHOT ||
+			 animId == WEAP_RELOAD1 ||
+			 animId == WEAP_RELOAD2 ||
+			 animId == WEAP_RELOAD3 ) {
+			// codmod: also clear on reload (phase 5d) so auto-reload after fire
+			// does not blend from a held attack pose into a silent skip.
 			CG_ClearWeapLerpFrame( wi, lf, newAnimation );
 		} else {
 			CG_SetWeapLerpFrameAnimation( wi, lf, newAnimation );

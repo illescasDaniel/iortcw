@@ -525,6 +525,12 @@ int Pickup_Health( gentity_t *ent, gentity_t *other ) {
 		max = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
 	}
 
+	// codmod: player never overheals past cod_maxHealth (phase 5d). AI keep vanilla 2×.
+	if ( other->client && !other->client->ps.aiChar && !other->aiCharacter
+		 && bg_cod.enable && bg_cod.vitalsEnable && bg_cod.maxHealth > 0 ) {
+		max = other->client->ps.stats[STAT_MAX_HEALTH];
+	}
+
 	if ( ent->count ) {
 		quantity = ent->count;
 	} else {

@@ -159,7 +159,10 @@ static void PM_StartWeaponAnim( int anim ) {
 	// low-priority anims (IDLE via PM_ContinueWeaponAnim) so a quick
 	// click-release can't replace ATTACK with IDLE in the same predict batch
 	// — that was the random "gun doesn't recoil" on hip pistol taps.
-	if ( !isAttack && pm->ps->weapAnimTimer > 0 ) {
+	// Reload is also high-priority (phase 5d): empty-clip auto-reload must
+	// not be suppressed while the attack lock is still ticking.
+	if ( !isAttack && anim != WEAP_RELOAD1 && anim != WEAP_RELOAD2 && anim != WEAP_RELOAD3
+		 && pm->ps->weapAnimTimer > 0 ) {
 		return;
 	}
 
@@ -2143,7 +2146,10 @@ static void PM_BeginWeaponReload( int weapon ) {
 	}
 
 
-	PM_ContinueWeaponAnim( WEAP_RELOAD1 );
+	// codmod: always restart FP reload anim (phase 5d). Clear attack weapAnimTimer
+	// so StartWeaponAnim is not blocked; Start (not Continue) forces a fresh anim.
+	pm->ps->weapAnimTimer = 0;
+	PM_StartWeaponAnim( WEAP_RELOAD1 );
 
 
 	// okay to reload while overheating without tacking the reload time onto the end of the

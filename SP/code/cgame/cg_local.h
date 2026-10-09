@@ -820,6 +820,9 @@ typedef struct {
 	qboolean codQkSawFire;               // codmod: saw WEAPON_FIRING / weaponTime during swing
 	qboolean codQkStayOnKnife;           // codmod: started already on knife — no switchback
 
+	qboolean codCrouchHeld;              // codmod: phase 5d — sticky togglecrouch state
+	qboolean codFlashlightOn;            // codmod: phase 5d — client-local flashlight
+
 	float landChange;                   // for landing hard
 	int landTime;
 
@@ -2248,6 +2251,11 @@ void CG_CodDrawDebugMenu( void );   // codmod: sectioned tune menu (cg_cod_menu.
 void CG_CodMenu_f( void );
 void CG_CodMenuDump_f( void );
 void CG_ToggleAds_f( void );           // codmod: phase 3.1 sticky ADS toggle
+void CG_ToggleCrouch_f( void );        // codmod: phase 5d sticky crouch
+void CG_ToggleFlashlight_f( void );    // codmod: phase 5d flashlight
+void CG_CodResetBinds_f( void );       // codmod: phase 5d full bind reset
+void CG_CodUpdateToggleCrouch( void ); // codmod: phase 5d auto-stand on jump
+void CG_CodAddFlashlight( void );      // codmod: phase 5d view dlight
 void CG_QuickKnife_f( void );          // codmod: phase 5.5 CoD-style quick knife
 float CG_CodAdsFrac( void );           // codmod: phase 3.5, raw 0..1, forced to 1 by cod_adsLock
 float CG_CodSprintFrac( void );        // codmod: phase 4, 0..1 visual sprint lower (eased)
