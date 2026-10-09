@@ -1906,6 +1906,13 @@ void CL_Vid_Restart_f( void ) {
 
 	vmCvar_t musicCvar;
 
+	// Wayland + MangoHud: fullscreen-only applies SIGSEGV if we destroy/recreate GL.
+	// Prefer an in-place SDL fullscreen toggle when nothing else is latched.
+	if( IN_ToggleFullscreenInPlace() )
+	{
+		return;
+	}
+
 	// RF, don't show percent bar, since the memory usage will just sit at the same level anyway
 	Cvar_Set( "com_expectedhunkusage", "-1" );
 

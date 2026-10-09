@@ -1134,6 +1134,7 @@ static void IN_ProcessEvents( void )
 					case SDL_WINDOWEVENT_RESIZED:
 						{
 							int width, height;
+							int dw, dh;
 
 							width = e.window.data1;
 							height = e.window.data2;
@@ -1146,6 +1147,24 @@ static void IN_ProcessEvents( void )
 
 							// check if size actually changed
 							if( cls.glconfig.vidWidth == width && cls.glconfig.vidHeight == height )
+							{
+								break;
+							}
+
+							// Wayland (and some compositors) emit RESIZED with ±1/±2 px
+							// noise vs the requested mode. Treating that as a real resize
+							// forces r_mode -1 with odd sizes (e.g. 1921x1201) which then
+							// vid_restart and can SIGSEGV under overlays like MangoHud.
+							dw = width - cls.glconfig.vidWidth;
+							dh = height - cls.glconfig.vidHeight;
+							if( dw < 0 ) dw = -dw;
+							if( dh < 0 ) dh = -dh;
+							if( dw <= 2 && dh <= 2 )
+							{
+								break;
+							}
+
+							if( width < 320 || height < 240 )
 							{
 								break;
 							}
@@ -1221,6 +1240,96 @@ void IN_Frame( void )
 		vidRestartTime = 0;
 		Cbuf_AddText( "vid_restart\n" );
 	}
+}
+
+/*
+===============
+IN_ToggleFullscreenInPlace
+
+Apply a pending r_fullscreen change without destroying the GL context.
+Needed on Wayland with overlays (MangoHud): vid_restart SIGSEGVs while
+recreating the window/context after a fullscreen toggle.
+Returns qtrue if the toggle was handled (caller should skip vid_restart).
+===============
+*/
+qboolean IN_ToggleFullscreenInPlace( void )
+{
+	const char *videoDriver;
+	int want, have;
+	int prevW, prevH, w, h;
+	int dw, dh;
+	Uint32 flag = 0;
+	qboolean fsPending;
+
+	if( !SDL_window )
+		return qfalse;
+
+	// Real mode/renderer changes still need a full restart. Peek only — Cvar_Get
+	// would apply latches and make these checks always false.
+	if( Cvar_LatchedPending( "r_mode" ) ||
+		Cvar_LatchedPending( "r_customwidth" ) ||
+		Cvar_LatchedPending( "r_customheight" ) ||
+		Cvar_LatchedPending( "cl_renderer" ) )
+		return qfalse;
+
+	fsPending = Cvar_LatchedPending( "r_fullscreen" );
+	want = Cvar_VariableLatchedInteger( "r_fullscreen" );
+	have = !!( SDL_GetWindowFlags( SDL_window ) & SDL_WINDOW_FULLSCREEN );
+
+	// Window already matches desired FS (e.g. EndFrame/Alt+Enter did it). Clear
+	// any leftover latch and skip the destructive GL recreate (SIGSEGV under MangoHud).
+	if( !!want == !!have )
+	{
+		if( !fsPending )
+			return qfalse;
+		Cvar_Set( "r_fullscreen", want ? "1" : "0" );
+		cls.glconfig.isFullscreen = want ? qtrue : qfalse;
+		Com_Printf( "Fullscreen already %s (skip vid_restart)\n", want ? "on" : "off" );
+		return qtrue;
+	}
+
+	videoDriver = SDL_GetCurrentVideoDriver();
+	if( want )
+	{
+		if( videoDriver && !Q_stricmp( videoDriver, "wayland" ) )
+			flag = SDL_WINDOW_FULLSCREEN_DESKTOP;
+		else
+			flag = SDL_WINDOW_FULLSCREEN;
+	}
+
+	prevW = cls.glconfig.vidWidth;
+	prevH = cls.glconfig.vidHeight;
+
+	if( SDL_SetWindowFullscreen( SDL_window, flag ) < 0 )
+	{
+		// Never fall through to vid_restart for a fullscreen-only apply: recreating
+		// the GL context under MangoHud/Wayland SIGSEGVs.
+		Com_Printf( "IN_ToggleFullscreenInPlace: SDL_SetWindowFullscreen failed: %s\n",
+			SDL_GetError() );
+		Cvar_Set( "r_fullscreen", have ? "1" : "0" );
+		return qtrue;
+	}
+
+	w = prevW;
+	h = prevH;
+	SDL_GetWindowSize( SDL_window, &w, &h );
+	dw = w - prevW;
+	dh = h - prevH;
+	if( w > 0 && h > 0 && ( abs( dw ) > 2 || abs( dh ) > 2 ) )
+	{
+		// Keep the in-place toggle; updating glconfig beats a MangoHud crash.
+		cls.glconfig.vidWidth = w;
+		cls.glconfig.vidHeight = h;
+		Com_Printf( "Fullscreen size tweak %dx%d -> %dx%d (in-place)\n",
+			prevW, prevH, w, h );
+	}
+
+	Cvar_Set( "r_fullscreen", want ? "1" : "0" );
+	cls.glconfig.isFullscreen = want ? qtrue : qfalse;
+
+	Com_Printf( "Fullscreen %s (in-place, no vid_restart)\n", want ? "enabled" : "disabled" );
+	IN_Restart();
+	return qtrue;
 }
 
 /*

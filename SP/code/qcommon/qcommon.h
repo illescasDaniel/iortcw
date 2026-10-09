@@ -569,6 +569,10 @@ float   Cvar_VariableValue( const char *var_name );
 int     Cvar_VariableIntegerValue( const char *var_name );
 // returns 0 if not defined or non numeric
 
+qboolean Cvar_LatchedPending( const char *var_name );
+int     Cvar_VariableLatchedInteger( const char *var_name );
+// peek latched value without applying it (Cvar_Get would apply)
+
 char    *Cvar_VariableString( const char *var_name );
 void    Cvar_VariableStringBuffer( const char *var_name, char *buffer, int bufsize );
 // returns an empty string if not defined
@@ -1104,6 +1108,7 @@ void IN_Init( void *windowData );
 void IN_Frame( void );
 void IN_Shutdown( void );
 void IN_Restart( void );
+qboolean IN_ToggleFullscreenInPlace( void );
 
 /*
 ==============================================================

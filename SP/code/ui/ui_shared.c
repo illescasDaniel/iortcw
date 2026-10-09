@@ -49,6 +49,8 @@ typedef struct scrollInfo_s {
 
 static scrollInfo_t scrollInfo;
 
+static void UI_RebuildVidModeMulti( itemDef_t *item );
+
 static void ( *captureFunc )( void *p ) = 0;
 static void *captureData = NULL;
 static itemDef_t *itemCapture = NULL;   // item that has the mouse captured ( if any )
@@ -2427,6 +2429,7 @@ const char *Item_Multi_Setting( itemDef_t *item ) {
 
 qboolean Item_Multi_HandleKey( itemDef_t *item, int key ) {
 	multiDef_t *multiPtr = (multiDef_t*)item->typeData;
+	UI_RebuildVidModeMulti( item );
 	if ( multiPtr ) {
 		if (item->cvar) {
 			int select = 0;
@@ -3604,6 +3607,8 @@ void Item_Multi_Paint( itemDef_t *item ) {
 	vec4_t newColor, lowLight;
 	const char *text = "";
 	menuDef_t *parent = (menuDef_t*)item->parent;
+
+	UI_RebuildVidModeMulti( item );
 
 	if ( item->window.flags & WINDOW_HASFOCUS ) {
 		lowLight[0] = 0.8 * parent->focusColor[0];
@@ -5854,44 +5859,176 @@ typedef struct vidmode_s
 {
 	const char *description;
 	int mode;
+	int width;
+	int height;
 } vidmode_t;
 
 vidmode_t r_vidModes[] =
 {
-	{ "320x240 (4:3)",          0 },
-	{ "400x300 (4:3)",          1 },
-	{ "512x384 (4:3)",          2 },
-	{ "640x480 (4:3)",          3 },
-	{ "800x600 (4:3)",          4 },
-	{ "960x720 (4:3)",          5 },
-	{ "1024x768 (4:3)",         6 },
-	{ "1152x864 (4:3)",         7 },
-	{ "1280x1024 (5:4)",        8 },
-	{ "1600x1200 (4:3)",        9 },
-	{ "2048x1536 (4:3)",       10 },
-	{ "856x480 (16:9)",        11 },
-	{ "640x360 (16:9)",        12 },
-	{ "640x400 (16:10)",       13 },
-	{ "800x450 (16:9)",        14 },
-	{ "800x500 (16:10)",       15 },
-	{ "1024x640 (16:10)",      16 },
-	{ "1024x576 (16:9)",       17 },
-	{ "1280x720 (16:9)",       18 },
-	{ "1280x768 (16:10)",      19 },
-	{ "1280x800 (16:10)",      20 },
-	{ "1280x960 (4:3)",        21 },
-	{ "1440x900 (16:10)",      22 },
-	{ "1600x900 (16:9)",       23 },
-	{ "1600x1000 (16:10)",     24 },
-	{ "1680x1050 (16:10)",     25 },
-	{ "1920x1080 (16:9)",      26 },
-	{ "1920x1200 (16:10)",     27 },
-	{ "1920x1440 (4:3)",       28 },
-	{ "2560x1600 (16:10)",     29 },
-	{ "Automatic (Native)",    -2 },
-	{ "Custom",                -1 }
+	{ "320x240 (4:3)",          0,  320,  240 },
+	{ "400x300 (4:3)",          1,  400,  300 },
+	{ "512x384 (4:3)",          2,  512,  384 },
+	{ "640x480 (4:3)",          3,  640,  480 },
+	{ "800x600 (4:3)",          4,  800,  600 },
+	{ "960x720 (4:3)",          5,  960,  720 },
+	{ "1024x768 (4:3)",         6, 1024,  768 },
+	{ "1152x864 (4:3)",         7, 1152,  864 },
+	{ "1280x1024 (5:4)",        8, 1280, 1024 },
+	{ "1600x1200 (4:3)",        9, 1600, 1200 },
+	{ "2048x1536 (4:3)",       10, 2048, 1536 },
+	{ "856x480 (16:9)",        11,  856,  480 },
+	{ "640x360 (16:9)",        12,  640,  360 },
+	{ "640x400 (16:10)",       13,  640,  400 },
+	{ "800x450 (16:9)",        14,  800,  450 },
+	{ "800x500 (16:10)",       15,  800,  500 },
+	{ "1024x640 (16:10)",      16, 1024,  640 },
+	{ "1024x576 (16:9)",       17, 1024,  576 },
+	{ "1280x720 (16:9)",       18, 1280,  720 },
+	{ "1280x768 (16:10)",      19, 1280,  768 },
+	{ "1280x800 (16:10)",      20, 1280,  800 },
+	{ "1280x960 (4:3)",        21, 1280,  960 },
+	{ "1440x900 (16:10)",      22, 1440,  900 },
+	{ "1600x900 (16:9)",       23, 1600,  900 },
+	{ "1600x1000 (16:10)",     24, 1600, 1000 },
+	{ "1680x1050 (16:10)",     25, 1680, 1050 },
+	{ "1920x1080 (16:9)",      26, 1920, 1080 },
+	{ "1920x1200 (16:10)",     27, 1920, 1200 },
+	{ "1920x1440 (4:3)",       28, 1920, 1440 },
+	{ "2560x1600 (16:10)",     29, 2560, 1600 },
+	{ "2560x1440 (16:9)",      30, 2560, 1440 },
+	{ "3840x2160 (16:9)",      31, 3840, 2160 },
+	{ "1366x768 (16:9)",       32, 1366,  768 },
+	{ "2560x1080 (21:9)",      33, 2560, 1080 },
+	{ "3440x1440 (21:9)",      34, 3440, 1440 },
+	{ "3840x1600 (21:9)",      35, 3840, 1600 },
+	{ "5120x1440 (32:9)",      36, 5120, 1440 },
+	{ "2880x1800 (16:10)",     37, 2880, 1800 },
+	{ "3200x1800 (16:9)",      38, 3200, 1800 },
+	{ "3840x1080 (32:9)",      39, 3840, 1080 },
+	{ "5120x2160 (21:9)",      40, 5120, 2160 },
+	{ "2048x1152 (16:9)",      41, 2048, 1152 },
+	{ "Automatic (Native)",    -2,    0,    0 },
+	{ "Custom",                -1,    0,    0 }
 };
 static int	s_numVidModes = ARRAY_LEN( r_vidModes );
+
+/*
+===============
+UI_FindVidMode
+
+Return table index for width/height, or -1.
+===============
+*/
+static int UI_FindVidMode( int width, int height ) {
+	int i;
+
+	for ( i = 0; i < s_numVidModes; i++ ) {
+		if ( r_vidModes[i].mode < 0 ) {
+			continue;
+		}
+		if ( r_vidModes[i].width == width && r_vidModes[i].height == height ) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+/*
+===============
+UI_AddVidModeEntry
+
+Append one r_mode multi entry if room remains.
+===============
+*/
+static void UI_AddVidModeEntry( multiDef_t *multiPtr, int tableIndex ) {
+	if ( multiPtr->count >= MAX_MULTI_CVARS ) {
+		return;
+	}
+	multiPtr->cvarList[multiPtr->count] = String_Alloc( r_vidModes[tableIndex].description );
+	multiPtr->cvarValue[multiPtr->count] = r_vidModes[tableIndex].mode;
+	multiPtr->count++;
+}
+
+/*
+===============
+UI_RebuildVidModeMulti
+
+Prefer SDL-detected r_availableModes when set so the click-cycle list matches the
+display; otherwise expose the full table. Always ends with Automatic + Custom.
+Skip work once this item's list is already expanded for the current availableModes.
+===============
+*/
+static void UI_RebuildVidModeMulti( itemDef_t *item ) {
+	int i;
+	multiDef_t *multiPtr;
+	char avail[MAX_STRING_CHARS];
+	qboolean used[ARRAY_LEN( r_vidModes )];
+	int addedFixed = 0;
+	static char ui_vidModeAvailCache[MAX_STRING_CHARS];
+
+	if ( !item || item->type != ITEM_TYPE_MULTI || !item->cvar || !item->typeData ) {
+		return;
+	}
+	if ( Q_stricmp( item->cvar, "r_mode" ) ) {
+		return;
+	}
+
+	multiPtr = (multiDef_t *)item->typeData;
+	avail[0] = '\0';
+	if ( DC && DC->getCVarString ) {
+		DC->getCVarString( "r_availableModes", avail, sizeof( avail ) );
+	}
+	// Seed .menu lists are short (~9). Skip rebuild once expanded for this avail string.
+	if ( multiPtr->count > 12 && !Q_stricmp( avail, ui_vidModeAvailCache ) ) {
+		return;
+	}
+	Q_strncpyz( ui_vidModeAvailCache, avail, sizeof( ui_vidModeAvailCache ) );
+
+	memset( used, 0, sizeof( used ) );
+	multiPtr->count = 0;
+
+	if ( avail[0] ) {
+		const char *p = avail;
+
+		while ( *p ) {
+			int w = 0, h = 0, n = 0, idx;
+
+			while ( *p == ' ' ) {
+				p++;
+			}
+			if ( !*p ) {
+				break;
+			}
+			if ( sscanf( p, "%dx%d%n", &w, &h, &n ) != 2 || n <= 0 ) {
+				break;
+			}
+			p += n;
+
+			idx = UI_FindVidMode( w, h );
+			if ( idx >= 0 && !used[idx] ) {
+				UI_AddVidModeEntry( multiPtr, idx );
+				used[idx] = qtrue;
+				addedFixed++;
+			}
+		}
+	}
+
+	if ( !addedFixed ) {
+		for ( i = 0; i < s_numVidModes; i++ ) {
+			if ( r_vidModes[i].mode < 0 ) {
+				continue;
+			}
+			UI_AddVidModeEntry( multiPtr, i );
+		}
+	}
+
+	for ( i = 0; i < s_numVidModes; i++ ) {
+		if ( r_vidModes[i].mode >= 0 ) {
+			continue;
+		}
+		UI_AddVidModeEntry( multiPtr, i );
+	}
+}
 
 /*
 ===============
@@ -5901,25 +6038,7 @@ Hacks to fix issues with menu scripts
 ===============
 */
 static void Item_ApplyHacks( itemDef_t *item ) {
-
-	// Add video modes to system menu
-	if ( item->type == ITEM_TYPE_MULTI && item->cvar && !Q_stricmp( item->cvar, "r_mode" ) ) {
-		int i;
-		multiDef_t *multiPtr = (multiDef_t*)item->typeData;;
-
-		DC->DPrint( "Found modelist with %d modes, extending list to %d modes\n", multiPtr->count, s_numVidModes );
-
-		multiPtr->count = 0;
-		for ( i = 0; i < s_numVidModes; i++ ) {
-			multiPtr->cvarList[multiPtr->count] = String_Alloc( r_vidModes[i].description );
-			multiPtr->cvarValue[multiPtr->count] = r_vidModes[i].mode;
-			multiPtr->count++;
-
-			if ( multiPtr->count >= MAX_MULTI_CVARS ) {
-				break;
-			}
-		}
-	}
+	UI_RebuildVidModeMulti( item );
 }
 
 /*

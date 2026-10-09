@@ -177,8 +177,14 @@ static void GLimp_DetectAvailableModes(void)
 
 	if( SDL_GetWindowDisplayMode( SDL_window, &windowMode ) < 0 || numSDLModes <= 0 )
 	{
-		ri.Printf( PRINT_WARNING, "Couldn't get window display mode, no resolutions detected: %s\n", SDL_GetError() );
-		return;
+		// Wayland windowed modes often have no exact display-mode match; fall
+		// back to the desktop mode so r_availableModes still populates.
+		if( SDL_GetDesktopDisplayMode( display, &windowMode ) < 0 || numSDLModes <= 0 )
+		{
+			ri.Printf( PRINT_WARNING, "Couldn't get window display mode, no resolutions detected: %s\n", SDL_GetError() );
+			return;
+		}
+		ri.Printf( PRINT_DEVELOPER, "Using desktop display mode for available-modes filter\n" );
 	}
 
 	modes = SDL_calloc( (size_t)numSDLModes, sizeof( SDL_Rect ) );
@@ -555,7 +561,16 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 
 	if( fullscreen )
 	{
-		flags |= SDL_WINDOW_FULLSCREEN;
+		const char *videoDriver = SDL_GetCurrentVideoDriver();
+
+		// Wayland (and overlays like MangoHud) are unreliable with exclusive
+		// fullscreen + GL context destroy/recreate. Desktop/borderless
+		// fullscreen is the stable path there.
+		if( videoDriver && !Q_stricmp( videoDriver, "wayland" ) )
+			flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+		else
+			flags |= SDL_WINDOW_FULLSCREEN;
+
 		glConfig.isFullscreen = qtrue;
 	}
 	else
@@ -689,7 +704,7 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 			continue;
 		}
 
-		if( fullscreen )
+		if( fullscreen && !( flags & SDL_WINDOW_FULLSCREEN_DESKTOP ) )
 		{
 			SDL_DisplayMode mode;
 
@@ -709,6 +724,19 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 			{
 				ri.Printf( PRINT_DEVELOPER, "SDL_SetWindowDisplayMode failed: %s\n", SDL_GetError( ) );
 				continue;
+			}
+		}
+
+		if( fullscreen && ( flags & SDL_WINDOW_FULLSCREEN_DESKTOP ) )
+		{
+			int w = glConfig.vidWidth, h = glConfig.vidHeight;
+
+			SDL_GetWindowSize( SDL_window, &w, &h );
+			if( w > 0 && h > 0 )
+			{
+				glConfig.vidWidth = w;
+				glConfig.vidHeight = h;
+				glConfig.windowAspect = (float)glConfig.vidWidth / (float)glConfig.vidHeight;
 			}
 		}
 
@@ -1226,7 +1254,7 @@ void GLimp_EndFrame( void )
 		int         fullscreen;
 		qboolean    needToToggle;
 
-		// Find out the current state
+		// Find out the current state (FULLSCREEN_DESKTOP also sets FULLSCREEN bit)
 		fullscreen = !!( SDL_GetWindowFlags( SDL_window ) & SDL_WINDOW_FULLSCREEN );
 
 		if( r_fullscreen->integer && ri.Cvar_VariableIntegerValue( "in_nograb" ) )
@@ -1241,19 +1269,45 @@ void GLimp_EndFrame( void )
 
 		if( needToToggle )
 		{
-			// Need the vid_restart here since r_fullscreen is only latched
-			if( fullscreen )
+			Uint32 flag = 0;
+			const char *videoDriver = SDL_GetCurrentVideoDriver();
+			int prevW = glConfig.vidWidth, prevH = glConfig.vidHeight;
+			int w = prevW, h = prevH;
+
+			if( r_fullscreen->integer )
 			{
-				Com_Printf( "Switching to windowed rendering\n" );
-				ri.Cmd_ExecuteText(EXEC_APPEND, "vid_restart\n");
+				if( videoDriver && !Q_stricmp( videoDriver, "wayland" ) )
+					flag = SDL_WINDOW_FULLSCREEN_DESKTOP;
+				else
+					flag = SDL_WINDOW_FULLSCREEN;
+			}
+
+			// In-place only: vid_restart after a FS toggle SIGSEGVs under MangoHud/Wayland.
+			if( SDL_window && SDL_SetWindowFullscreen( SDL_window, flag ) == 0 )
+			{
+				SDL_GetWindowSize( SDL_window, &w, &h );
+				glConfig.isFullscreen = r_fullscreen->integer ? qtrue : qfalse;
+				if( w > 0 && h > 0 && ( abs( w - prevW ) > 2 || abs( h - prevH ) > 2 ) )
+				{
+					glConfig.vidWidth = w;
+					glConfig.vidHeight = h;
+					ri.Printf( PRINT_ALL, "Switching %s rendering (%dx%d -> %dx%d, in-place)\n",
+						r_fullscreen->integer ? "to fullscreen" : "to windowed",
+						prevW, prevH, w, h );
+				}
+				else
+				{
+					ri.Printf( PRINT_ALL, "Switching %s rendering\n",
+						r_fullscreen->integer ? "to fullscreen" : "to windowed" );
+				}
+				ri.IN_Restart( );
 			}
 			else
 			{
-				Com_Printf( "Switching to fullscreen rendering\n" );
-				ri.Cmd_ExecuteText(EXEC_APPEND, "vid_restart\n");
+				ri.Printf( PRINT_ALL, "Fullscreen toggle failed (%s) — staying %s\n",
+					SDL_GetError(), fullscreen ? "fullscreen" : "windowed" );
+				ri.Cvar_Set( "r_fullscreen", fullscreen ? "1" : "0" );
 			}
-
-			ri.IN_Restart( );
 		}
 
 		r_fullscreen->modified = qfalse;
