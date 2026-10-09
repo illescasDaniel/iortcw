@@ -189,6 +189,7 @@ const codCvarDef_t bg_codCvars[] = {
 	// codmod: phase 5d flashlight (client-local view dlight)
 	{ "cod_flashlightEnable",   "1",    0,            CODOFS( flashlightEnable ),   1 },
 	{ "cod_flashlightIntensity","500",  0,            CODOFS( flashlightIntensity ), 0 },
+	{ "cod_flashlightMinDist",  "192",  0,            CODOFS( flashlightMinDist ),   0 },
 	{ "cod_flashlightR",        "1",    0,            CODOFS( flashlightR ),        0 },
 	{ "cod_flashlightG",        "0.95", 0,            CODOFS( flashlightG ),        0 },
 	{ "cod_flashlightB",        "0.85", 0,            CODOFS( flashlightB ),        0 },

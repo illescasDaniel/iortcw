@@ -233,6 +233,7 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_SECTION, "FLASHLIGHT", NULL, 0, 0, NULL },
 	{ COD_MI_BOOL,  "cod_flashlightEnable",   "cod_flashlightEnable",   1,     1,    NULL },
 	{ COD_MI_FLOAT, "cod_flashlightIntensity","cod_flashlightIntensity",25,    50,   NULL },
+	{ COD_MI_FLOAT, "cod_flashlightMinDist",  "cod_flashlightMinDist",  8,     32,   NULL },
 	{ COD_MI_FLOAT, "cod_flashlightR",        "cod_flashlightR",        0.05f, 0.1f, NULL },
 	{ COD_MI_FLOAT, "cod_flashlightG",        "cod_flashlightG",        0.05f, 0.1f, NULL },
 	{ COD_MI_FLOAT, "cod_flashlightB",        "cod_flashlightB",        0.05f, 0.1f, NULL },

@@ -2259,6 +2259,7 @@ void CG_ToggleFlashlight_f( void );    // codmod: phase 5d flashlight
 void CG_CodResetBinds_f( void );       // codmod: phase 5d full bind reset
 void CG_CodUpdateToggleCrouch( void ); // codmod: phase 5d auto-stand on jump
 void CG_CodAddFlashlight( void );      // codmod: phase 5d view dlight
+void CG_CodDrawFlashlightHudIcon( float weapX, float weapY, float weapW, float weapH ); // codmod: HUD on-indicator
 void CG_QuickKnife_f( void );          // codmod: phase 5.5 CoD-style quick knife
 float CG_CodAdsFrac( void );           // codmod: phase 3.5, raw 0..1, forced to 1 by cod_adsLock
 float CG_CodSprintFrac( void );        // codmod: phase 4, 0..1 visual sprint lower (eased)

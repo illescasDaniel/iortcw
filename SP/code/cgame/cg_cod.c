@@ -848,9 +848,8 @@ void CG_ToggleFlashlight_f( void ) {
 
 void CG_CodAddFlashlight( void ) {
 	vec3_t start, dir, end, lightPos;
-	vec4_t color;
 	trace_t tr;
-	float intensity, range, t, falloff;
+	float intensity, range, minDist, hitDist, closeScale, t, falloff, radius;
 	int i;
 
 	if ( !cg.codFlashlightOn ) {
@@ -870,48 +869,124 @@ void CG_CodAddFlashlight( void ) {
 	if ( intensity < 1.0f ) {
 		intensity = 500.0f;
 	}
-	// Beam length scales with intensity (default 500 → ~750 u).
-	range = intensity * 1.5f;
-	if ( range < 512.0f ) {
-		range = 512.0f;
+	range = intensity * 2.0f;
+	if ( range < 448.0f ) {
+		range = 448.0f;
 	}
-	if ( range > 1536.0f ) {
-		range = 1536.0f;
+	if ( range > 1600.0f ) {
+		range = 1600.0f;
 	}
 
-	// Origin slightly forward of the eye so the cone clears the near plane / gun mesh.
+	// cod_flashlightMinDist: hit distance where dlights reach full strength.
+	// Linear ramp 55% at contact → 100% at minDist (no hard floor that masked tuning).
+	minDist = bg_cod.flashlightMinDist;
+	if ( minDist < 48.0f ) {
+		minDist = 48.0f;
+	}
+	if ( minDist > 768.0f ) {
+		minDist = 768.0f;
+	}
+
 	VectorCopy( cg.refdef.vieworg, start );
 	VectorMA( start, 12.0f, cg.refdef.viewaxis[0], start );
 	VectorCopy( cg.refdef.viewaxis[0], dir );
 
-	color[0] = bg_cod.flashlightR;
-	color[1] = bg_cod.flashlightG;
-	color[2] = bg_cod.flashlightB;
-	color[3] = 0.28f;
-
-	// Proper spotlight cone + core + wall impact (engine CG_Spotlight). No map
-	// searchlight props, no camera flare, no built-in dlight (we force our own).
-	CG_Spotlight( &cg.predictedPlayerEntity, color, start, dir,
-				  16, range, 0, 7.0f,
-				  SL_NOMODEL | SL_NOFLARE | SL_NODLIGHT | SL_NOSTARTCAP | SL_LOCKTRACETORANGE );
-
-	// REF_FORCE_DLIGHT: wolfconfig often has r_dynamiclight 0 — without FORCE lights are dropped.
 	VectorMA( start, range, dir, end );
 	CG_Trace( &tr, start, NULL, NULL, end, cg.snap->ps.clientNum, MASK_SHOT );
+	hitDist = range * tr.fraction;
 
-	VectorMA( start, 20.0f, dir, lightPos );
-	trap_R_AddLightToScene( lightPos, intensity * 0.45f,
-							bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
-							REF_FORCE_DLIGHT );
+	t = hitDist / minDist;
+	if ( t > 1.0f ) {
+		t = 1.0f;
+	} else if ( t < 0.0f ) {
+		t = 0.0f;
+	}
+	closeScale = 0.55f + 0.45f * t;
 
-	for ( i = 1; i <= 4; i++ ) {
-		t = ( (float)i / 4.0f ) * tr.fraction;
-		falloff = 1.0f - t * 0.5f;
-		VectorMA( start, range * t, dir, lightPos );
-		trap_R_AddLightToScene( lightPos, intensity * 0.5f * falloff,
+	// Lighting only — no CG_Spotlight cone/core overlay (HUD icon shows on-state).
+	// REF_FORCE_DLIGHT: wolfconfig often has r_dynamiclight 0.
+
+	VectorMA( start, 16.0f, dir, lightPos );
+	if ( hitDist > 20.0f ) {
+		trap_R_AddLightToScene( lightPos, intensity * 0.14f * closeScale,
 								bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
 								REF_FORCE_DLIGHT );
 	}
+
+	if ( hitDist > 72.0f ) {
+		for ( i = 1; i <= 3; i++ ) {
+			t = ( (float)i / 3.0f ) * tr.fraction;
+			if ( t < 0.12f ) {
+				continue;
+			}
+			falloff = 1.0f - t * 0.55f;
+			radius = intensity * 0.22f * falloff * closeScale;
+			if ( radius < 28.0f ) {
+				continue;
+			}
+			VectorMA( start, range * t, dir, lightPos );
+			trap_R_AddLightToScene( lightPos, radius,
+									bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
+									REF_FORCE_DLIGHT );
+		}
+	}
+
+	// Always light the aimed surface (close walls included).
+	if ( tr.fraction < 1.0f ) {
+		VectorMA( start, hitDist - 6.0f, dir, lightPos );
+		if ( hitDist < 12.0f ) {
+			VectorMA( start, hitDist * 0.5f, dir, lightPos );
+		}
+		trap_R_AddLightToScene( lightPos, intensity * 0.42f * closeScale,
+								bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
+								REF_FORCE_DLIGHT );
+	} else {
+		VectorMA( start, range * 0.55f, dir, lightPos );
+		trap_R_AddLightToScene( lightPos, intensity * 0.2f,
+								bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
+								REF_FORCE_DLIGHT );
+	}
+}
+
+/*
+================
+CG_CodDrawFlashlightHudIcon
+
+codmod: small on-indicator next to the weapon icon (phase 5d). No world beam overlay.
+================
+*/
+void CG_CodDrawFlashlightHudIcon( float weapX, float weapY, float weapW, float weapH ) {
+	float x, y, s;
+	vec4_t body, tip;
+	float pulse;
+
+	if ( !cg.codFlashlightOn ) {
+		return;
+	}
+	if ( !( bg_cod.enable && bg_cod.flashlightEnable ) ) {
+		return;
+	}
+
+	s = weapH * 0.42f;
+	if ( s < 11.0f ) {
+		s = 11.0f;
+	}
+	x = weapX - s - 5.0f;
+	y = weapY + ( weapH - s ) * 0.5f;
+
+	pulse = 0.88f + 0.12f * (float)sin( (double)cg.time * 0.005 );
+	body[0] = 1.0f * pulse;
+	body[1] = 0.85f * pulse;
+	body[2] = 0.25f * pulse;
+	body[3] = 0.95f;
+	tip[0] = 1.0f;
+	tip[1] = 0.95f;
+	tip[2] = 0.55f;
+	tip[3] = 0.85f;
+
+	CG_FillRect( x + s * 0.05f, y + s * 0.32f, s * 0.42f, s * 0.36f, body );
+	CG_FillRect( x + s * 0.42f, y + s * 0.22f, s * 0.28f, s * 0.56f, body );
+	CG_FillRect( x + s * 0.68f, y + s * 0.12f, s * 0.28f, s * 0.76f, tip );
 }
 
 /*

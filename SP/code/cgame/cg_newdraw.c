@@ -299,6 +299,8 @@ static void CG_DrawPlayerWeaponIcon( rectDef_t *rect, qboolean drawHighlighted, 
 	size = weapIconDrawSize( realweap );
 
 	if ( !size ) {
+		// knife / hidden weapons: still show flashlight on-indicator at the icon slot
+		CG_CodDrawFlashlightHudIcon( rect->x, rect->y, rect->w * 0.5f, rect->h );
 		return;
 	}
 
@@ -349,35 +351,33 @@ static void CG_DrawPlayerWeaponIcon( rectDef_t *rect, qboolean drawHighlighted, 
 	if ( icon ) {
 		float x, y, w, h;
 
-		if ( size == 1 ) { // draw half width to match the icon asset
-
-			// start at left
-			x = rect->x - halfScale;
-			y = rect->y - halfScale;
-			w = rect->w / 2 + scale;
-			h = rect->h + scale;
-
-			switch ( align ) {
-			case ITEM_ALIGN_CENTER:
-				x += rect->w / 4;
-				break;
-			case ITEM_ALIGN_RIGHT:
-				x += rect->w / 2;
-				break;
-			case ITEM_ALIGN_LEFT:
-			default:
-				break;
-			}
-
+		// Icon TGA aspects: size 1 = square (64x64), size 2 = wide (128x64).
+		// Vanilla used w=rect->w/2 assuming a double-wide slot (so half-width == height).
+		// CoD HUD uses a near-square slot — keep native aspect instead of squashing.
+		h = rect->h + scale;
+		if ( size == 1 ) {
+			w = h; // 1:1
 		} else {
+			w = h * 2.0f; // 2:1
+		}
+		y = rect->y - halfScale;
+
+		switch ( align ) {
+		case ITEM_ALIGN_CENTER:
+			x = rect->x + ( rect->w - w ) * 0.5f - halfScale;
+			break;
+		case ITEM_ALIGN_RIGHT:
+			x = rect->x + rect->w - w - halfScale;
+			break;
+		case ITEM_ALIGN_LEFT:
+		default:
 			x = rect->x - halfScale;
-			y = rect->y - halfScale;
-			w = rect->w + scale;
-			h = rect->h + scale;
+			break;
 		}
 
-
 		CG_DrawPic( x, y, w, h, icon );
+		// codmod: flashlight on-indicator to the left of the weapon icon
+		CG_CodDrawFlashlightHudIcon( x, y, w, h );
 	}
 }
 
