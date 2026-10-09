@@ -142,11 +142,9 @@ PM_StartWeaponAnim
 ==============
 */
 static void PM_StartWeaponAnim( int anim ) {
-	if ( pm->ps->pm_type >= PM_DEAD ) {
-		return;
-	}
+	qboolean isAttack;
 
-	if ( pm->ps->weapAnimTimer > 0 ) {
+	if ( pm->ps->pm_type >= PM_DEAD ) {
 		return;
 	}
 
@@ -154,7 +152,39 @@ static void PM_StartWeaponAnim( int anim ) {
 		return;
 	}
 
+	isAttack = ( anim == WEAP_ATTACK1 || anim == WEAP_ATTACK2
+				 || anim == WEAP_ATTACK_LASTSHOT ) ? qtrue : qfalse;
+
+	// codmod: attack must always restart on fire. weapAnimTimer only blocks
+	// low-priority anims (IDLE via PM_ContinueWeaponAnim) so a quick
+	// click-release can't replace ATTACK with IDLE in the same predict batch
+	// — that was the random "gun doesn't recoil" on hip pistol taps.
+	if ( !isAttack && pm->ps->weapAnimTimer > 0 ) {
+		return;
+	}
+
 	pm->ps->weapAnim = ( ( pm->ps->weapAnim & ANIM_TOGGLEBIT ) ^ ANIM_TOGGLEBIT ) | anim;
+
+	if ( isAttack && !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable ) {
+		int lock = 300; // pistol attack ~6 frames @ 20 fps
+
+		switch ( pm->ps->weapon ) {
+		case WP_MAUSER:
+		case WP_GARAND:
+			lock = 750;
+			break;
+		case WP_MP40:
+		case WP_THOMPSON:
+		case WP_STEN:
+		case WP_FG42:
+		case WP_FG42SCOPE:
+			lock = 150;
+			break;
+		default:
+			break;
+		}
+		pm->ps->weapAnimTimer = lock;
+	}
 }
 
 static void PM_ContinueWeaponAnim( int anim ) {

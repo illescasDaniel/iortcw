@@ -1524,7 +1524,9 @@ qboolean CG_GetPartFramesFromWeap( centity_t *cent, refEntity_t *part, refEntity
 	}
 
 	// find part's start frame for this animation sequence
-	for ( i = 0; i < cent->pe.weap.animationNumber; i++ ) {
+	// codmod: mask ANIM_TOGGLEBIT — vanilla looped to 512+ on every other anim
+	// start (ET Legacy same fix). That skipped/broke barrel/slide frames on alt shots.
+	for ( i = 0; i < ( cent->pe.weap.animationNumber & ~ANIM_TOGGLEBIT ); i++ ) {
 		if ( wi->weapAnimations[i].moveSpeed & ( 1 << partid ) ) {     // this part has animation for this sequence
 			frameoffset += wi->weapAnimations[i].numFrames;
 		}
@@ -1604,10 +1606,17 @@ static void CG_RunWeapLerpFrame( clientInfo_t *ci, weaponInfo_t *wi, lerpFrame_t
 	if ( !lf->animation ) {
 		CG_ClearWeapLerpFrame( wi, lf, newAnimation );
 	} else if ( newAnimation != lf->animationNumber )   {
-		if ( ( newAnimation & ~ANIM_TOGGLEBIT ) == WEAP_RAISE ||
-			 ( newAnimation & ~ANIM_TOGGLEBIT ) == WEAP_ALTSWITCHFROM ||
-			 ( newAnimation & ~ANIM_TOGGLEBIT ) == WEAP_ALTSWITCHTO ) {
-			CG_ClearWeapLerpFrame( wi, lf, newAnimation );   // clear when switching to raise (since it should be out of view anyway)
+		int animId = newAnimation & ~ANIM_TOGGLEBIT;
+
+		// clear on raise/alt (vanilla) and on attack — otherwise a same-bit
+		// restart can blend from the held last frame and look like no kick
+		if ( animId == WEAP_RAISE ||
+			 animId == WEAP_ALTSWITCHFROM ||
+			 animId == WEAP_ALTSWITCHTO ||
+			 animId == WEAP_ATTACK1 ||
+			 animId == WEAP_ATTACK2 ||
+			 animId == WEAP_ATTACK_LASTSHOT ) {
+			CG_ClearWeapLerpFrame( wi, lf, newAnimation );
 		} else {
 			CG_SetWeapLerpFrameAnimation( wi, lf, newAnimation );
 		}
@@ -4823,6 +4832,28 @@ void CG_FireWeapon( centity_t *cent ) {
 	// RF, kick angles
 	if ( ent->number == cg.snap->ps.clientNum ) {
 		CG_WeaponFireRecoil( ent->weapon );
+
+		// codmod: force FP attack lerp on every shot. Predict can fire then
+		// IDLE in one batch so weapAnim is already IDLE when this runs —
+		// Clear against IDLE = no kick. Force ATTACK if needed, then clear
+		// on the predicted hands entity (event cent may be a different pe).
+		if ( bg_cod.enable && !cg.renderingThirdPerson
+			 && ent->weapon != WP_FLAMETHROWER
+			 && ent->weapon != WP_GRENADE_LAUNCHER
+			 && ent->weapon != WP_GRENADE_PINEAPPLE
+			 && ent->weapon != WP_DYNAMITE
+			 && ent->weapon != WP_KNIFE ) {
+			int anim = cg.predictedPlayerState.weapAnim & ~ANIM_TOGGLEBIT;
+
+			if ( anim != WEAP_ATTACK1 && anim != WEAP_ATTACK2
+				 && anim != WEAP_ATTACK_LASTSHOT ) {
+				anim = WEAP_ATTACK1;
+				cg.predictedPlayerState.weapAnim =
+					( ( cg.predictedPlayerState.weapAnim & ANIM_TOGGLEBIT ) ^ ANIM_TOGGLEBIT ) | anim;
+			}
+			CG_ClearWeapLerpFrame( weap, &cg.predictedPlayerEntity.pe.weap,
+								   cg.predictedPlayerState.weapAnim );
+		}
 	}
 
 	// lightning gun only does this this on initial press
