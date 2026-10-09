@@ -3815,8 +3815,10 @@ static void CG_Draw2D(stereoFrame_t stereoFrame) {
 		// don't draw any status if dead
 		if ( cg.snap->ps.stats[STAT_HEALTH] > 0 ) {
 
-			if(stereoFrame == STEREO_CENTER)
+			if(stereoFrame == STEREO_CENTER) {
 				CG_DrawCrosshair();
+				CG_CodDrawHitMarker();  // codmod: E9 (after crosshair so X sits on top)
+			}
 
 			if ( cg_drawStatus.integer ) {
 				if ( cg_fixedAspect.integer == 2 ) {

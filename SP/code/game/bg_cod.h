@@ -141,6 +141,14 @@ typedef struct {
 	float crosshairSprintAlpha;// post alpha at full sprint (dot stays)
 	int crosshairOutline;      // 1 = 1px black outline for contrast
 
+	// codmod: E9 hit markers — X flash + tick sounds on player→enemy damage
+	int hitMarkerEnable;       // master: count hits in SP + draw/sound in cgame
+	float hitMarkerTime;       // ms the X stays visible
+	float hitMarkerGap;        // half-gap from crosshair center to each tick (640)
+	float hitMarkerLength;     // diagonal tick length
+	float hitMarkerWidth;      // tick thickness
+	int hitMarkerSound;        // 1 = play body/headshot ticks
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;
@@ -177,8 +185,8 @@ extern const int bg_numCodCvars;
 
 // codmod: g_main.c / cg_main.c each keep a static vmCvar_t[BG_COD_MAX_CVARS] and pass it in.
 // Bump this if bg_codCvars ever grows past it -- BG_CodRegisterCvars() clamps defensively.
-// (phase 3–5b cvars; leave headroom for slide/prone.)
-#define BG_COD_MAX_CVARS 112
+// (phase 3–5c + E9; leave headroom for slide/prone.)
+#define BG_COD_MAX_CVARS 128
 
 void BG_CodRegisterCvars( vmCvar_t *cvars, int maxCvars );
 void BG_CodUpdateCvars( vmCvar_t *cvars, int maxCvars );

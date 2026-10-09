@@ -1234,3 +1234,174 @@ void CG_CodDrawCrosshair( const vec4_t hcolor ) {
 		CG_CodDrawCrosshairBar( cx - 1.0f, cy - 1.0f, 2.0f, 2.0f, dotColor );
 	}
 }
+
+/*
+================
+CG_CodTriggerHitMarker
+
+codmod: E9 — show X + play body/headshot tick. Same-frame debounce: a later headshot
+upgrade replaces a body tick; duplicate body ticks in one frame are ignored.
+================
+*/
+void CG_CodTriggerHitMarker( qboolean headshot ) {
+	sfxHandle_t sfx;
+
+	if ( !bg_cod.enable || !bg_cod.hitMarkerEnable ) {
+		return;
+	}
+
+	// Already flashed this frame: only upgrade body → headshot.
+	if ( cg.codHitMarkerTime == cg.time ) {
+		if ( !headshot || cg.codHitMarkerHeadshot ) {
+			return;
+		}
+	}
+
+	cg.codHitMarkerTime = cg.time;
+	cg.codHitMarkerHeadshot = headshot;
+
+	if ( !bg_cod.hitMarkerSound ) {
+		return;
+	}
+
+	sfx = 0;
+	if ( headshot && cgs.media.codHitMarkerHeadSound ) {
+		sfx = cgs.media.codHitMarkerHeadSound;
+	} else if ( cgs.media.codHitMarkerSound ) {
+		sfx = cgs.media.codHitMarkerSound;
+	}
+	if ( !sfx ) {
+		// Lazy re-register if init missed the pk3 (should not happen).
+		if ( headshot ) {
+			cgs.media.codHitMarkerHeadSound = trap_S_RegisterSound( "sound/codmod/hitmarker_head.wav" );
+			sfx = cgs.media.codHitMarkerHeadSound;
+		} else {
+			cgs.media.codHitMarkerSound = trap_S_RegisterSound( "sound/codmod/hitmarker.wav" );
+			sfx = cgs.media.codHitMarkerSound;
+		}
+	}
+	if ( sfx ) {
+		// CHAN_ANNOUNCER: weapon fire must not steal/cut the UI tick.
+		trap_S_StartLocalSound( sfx, CHAN_ANNOUNCER );
+	}
+}
+
+/*
+================
+CG_CodCheckHitMarker
+
+codmod: E9 — PERS_HITS path (knife/explosives + headshot upgrade). Bullet flesh hits
+also call CG_CodTriggerHitMarker from CG_Bullet for immediate feedback.
+================
+*/
+void CG_CodCheckHitMarker( playerState_t *ps, playerState_t *ops ) {
+	qboolean headshot;
+
+	if ( !ps || !ops ) {
+		return;
+	}
+	if ( ps->persistant[PERS_HITS] <= ops->persistant[PERS_HITS] ) {
+		return;
+	}
+
+	headshot = ( ps->persistant[PERS_GAUNTLET_FRAG_COUNT]
+				 > ops->persistant[PERS_GAUNTLET_FRAG_COUNT] ) ? qtrue : qfalse;
+	CG_CodTriggerHitMarker( headshot );
+}
+
+/*
+================
+CG_CodDrawHitMarkerDiag
+
+codmod: one short diagonal tick (axis-aligned square steps ≈ a 45° line).
+================
+*/
+static void CG_CodDrawHitMarkerDiag( float x0, float y0, float x1, float y1,
+									 float th, const vec4_t color ) {
+	float dx, dy, steps, t, x, y;
+	int n, k;
+
+	dx = x1 - x0;
+	dy = y1 - y0;
+	steps = (float)sqrt( dx * dx + dy * dy );
+	if ( steps < 1.0f ) {
+		return;
+	}
+	n = (int)( steps + 0.5f );
+	if ( n < 1 ) {
+		n = 1;
+	}
+	for ( k = 0; k <= n; k++ ) {
+		t = (float)k / (float)n;
+		x = x0 + dx * t;
+		y = y0 + dy * t;
+		CG_FillRect( x - th * 0.5f, y - th * 0.5f, th, th, color );
+	}
+}
+
+/*
+================
+CG_CodDrawHitMarker
+
+codmod: E9 — four short diagonal ticks forming an X around the crosshair.
+================
+*/
+void CG_CodDrawHitMarker( void ) {
+	float cx, cy, gap, len, th, age, dur, alpha;
+	vec4_t color;
+
+	if ( !bg_cod.enable || !bg_cod.hitMarkerEnable ) {
+		return;
+	}
+	if ( !cg.codHitMarkerTime ) {
+		return;
+	}
+
+	dur = bg_cod.hitMarkerTime;
+	if ( dur < 50.0f ) {
+		dur = 50.0f;
+	}
+	age = (float)( cg.time - cg.codHitMarkerTime );
+	if ( age < 0.0f || age >= dur ) {
+		return;
+	}
+
+	// Quick pop then fade (CoD-ish).
+	alpha = 1.0f - ( age / dur );
+	alpha = BG_CodSmoothstep( alpha );
+	if ( age < 40.0f ) {
+		alpha *= age / 40.0f;
+	}
+	if ( alpha <= 0.01f ) {
+		return;
+	}
+
+	cx = 320.0f + (float)cg_crosshairX.integer;
+	cy = 240.0f + (float)cg_crosshairY.integer;
+	gap = bg_cod.hitMarkerGap;
+	len = bg_cod.hitMarkerLength;
+	th = bg_cod.hitMarkerWidth;
+	if ( gap < 1.0f ) {
+		gap = 1.0f;
+	}
+	if ( len < 2.0f ) {
+		len = 2.0f;
+	}
+	if ( th < 1.0f ) {
+		th = 1.0f;
+	}
+
+	// White X; headshots get a slight warm tint.
+	if ( cg.codHitMarkerHeadshot ) {
+		VectorSet( color, 1.0f, 0.92f, 0.75f );
+	} else {
+		VectorSet( color, 1.0f, 1.0f, 1.0f );
+	}
+	color[3] = alpha;
+
+	// NW \  NE /  SW /  SE \  — gap keeps the center clear for the reticle.
+	CG_CodDrawHitMarkerDiag( cx - gap - len, cy - gap - len, cx - gap, cy - gap, th, color );
+	CG_CodDrawHitMarkerDiag( cx + gap + len, cy - gap - len, cx + gap, cy - gap, th, color );
+	CG_CodDrawHitMarkerDiag( cx - gap - len, cy + gap + len, cx - gap, cy + gap, th, color );
+	CG_CodDrawHitMarkerDiag( cx + gap + len, cy + gap + len, cx + gap, cy + gap, th, color );
+}

@@ -172,6 +172,14 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_crosshairSprintAlpha","0.35",0,            CODOFS( crosshairSprintAlpha ), 0 },
 	{ "cod_crosshairOutline",   "1",    0,            CODOFS( crosshairOutline ),   1 },
 
+	// codmod: E9 hit markers (CoD X flash + body/headshot ticks)
+	{ "cod_hitMarkerEnable",    "1",    0,            CODOFS( hitMarkerEnable ),    1 },
+	{ "cod_hitMarkerTime",      "250",  0,            CODOFS( hitMarkerTime ),      0 },
+	{ "cod_hitMarkerGap",       "6",    0,            CODOFS( hitMarkerGap ),       0 },
+	{ "cod_hitMarkerLength",    "7",    0,            CODOFS( hitMarkerLength ),    0 },
+	{ "cod_hitMarkerWidth",     "2",    0,            CODOFS( hitMarkerWidth ),     0 },
+	{ "cod_hitMarkerSound",     "1",    0,            CODOFS( hitMarkerSound ),     1 },
+
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
 	{ "cod_menuScale",          "0.7",  CVAR_ARCHIVE, CODOFS( menuScale ),          0 },

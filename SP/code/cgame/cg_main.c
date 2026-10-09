@@ -899,6 +899,10 @@ static void CG_RegisterSounds( void ) {
 
 	cgs.media.noAmmoSound = trap_S_RegisterSound( "sound/weapons/noammo.wav" );
 
+	// codmod: E9 hit marker ticks (shipped in mod/codmod/codmod_fx.pk3)
+	cgs.media.codHitMarkerSound = trap_S_RegisterSound( "sound/codmod/hitmarker.wav" );
+	cgs.media.codHitMarkerHeadSound = trap_S_RegisterSound( "sound/codmod/hitmarker_head.wav" );
+
 	cgs.media.talkSound = trap_S_RegisterSound( "sound/player/talk.wav" );
 	cgs.media.landSound = trap_S_RegisterSound( "sound/player/land1.wav" );
 

@@ -6124,6 +6124,13 @@ void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, 
 			CG_Bleed( end, fleshEntityNum );
 		}
 
+		// codmod: E9 — immediate UI hitmarker when *we* land a flesh bullet
+		// (world flesh scripts alone are easy to miss under gunfire).
+		if ( !wolfkick && cg.snap && sourceEntityNum == cg.snap->ps.clientNum
+			 && fleshEntityNum != cg.snap->ps.clientNum ) {
+			CG_CodTriggerHitMarker( qfalse );
+		}
+
 		// play the bullet hit flesh sound
 		// HACK, if this is not us getting hit, make it quieter
 		if ( fleshEntityNum == cg.snap->ps.clientNum ) {

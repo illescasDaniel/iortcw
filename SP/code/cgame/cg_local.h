@@ -1032,6 +1032,10 @@ typedef struct {
 
 	float rumbleScale;          //RUMBLE FX using new shakeCamera code
 
+	// codmod: E9 hit markers
+	int codHitMarkerTime;       // cg.time when last hit landed
+	qboolean codHitMarkerHeadshot;
+
 } cg_t;
 
 #define NUM_FUNNEL_SPRITES  21
@@ -1380,6 +1384,9 @@ typedef struct {
 
 	sfxHandle_t hitSound;
 	sfxHandle_t hitTeamSound;
+	// codmod: E9 CoD-style hit marker ticks (body vs headshot)
+	sfxHandle_t codHitMarkerSound;
+	sfxHandle_t codHitMarkerHeadSound;
 	sfxHandle_t impressiveSound;
 	sfxHandle_t excellentSound;
 	sfxHandle_t deniedSound;
@@ -2254,6 +2261,9 @@ void CG_CodThreatColor( float t, vec4_t out ); // codmod: phase 5c white→red r
 void CG_CodColorForHealth( vec4_t hcolor );    // codmod: phase 5c by health/maxHealth
 void CG_CodDrawLowHealthBlood( void );         // codmod: phase 5c persistent vignette
 void CG_CodDrawCrosshair( const vec4_t hcolor ); // codmod: CoD 4-post bloom reticle
+void CG_CodTriggerHitMarker( qboolean headshot );                  // codmod: E9
+void CG_CodCheckHitMarker( playerState_t *ps, playerState_t *ops ); // codmod: E9
+void CG_CodDrawHitMarker( void );                                  // codmod: E9
 
 //
 // cg_consolecmds.c

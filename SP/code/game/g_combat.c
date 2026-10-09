@@ -895,6 +895,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	int take;
 	int asave;
 	int knockback;
+	qboolean wasHeadshot = qfalse;  // codmod: E9 hit markers
 
 	if ( !targ->takedamage ) {
 		return;
@@ -1178,6 +1179,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 
 
 	if ( IsHeadShot( targ, attacker, dir, point, mod ) ) {
+		wasHeadshot = qtrue;    // codmod: E9
 		// JPW NERVE -- different headshot behavior in multiplayer
 		if ( g_gametype.integer != GT_SINGLE_PLAYER ) {
 			if ( take * 2 < 50 ) { // head shots, all weapons, do minimum 50 points damage
@@ -1295,6 +1297,19 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 
 	// do the damage
 	if ( take ) {
+		// codmod: E9 hit markers — SP never bumped PERS_HITS (MP-only above), so cgame
+		// never saw damage dealt. Count player→living-enemy hits; headshots also bump
+		// PERS_GAUNTLET_FRAG_COUNT (unused in SP) so the client can pick a different tick.
+		if ( bg_cod.enable && bg_cod.hitMarkerEnable
+			 && attacker && attacker->client && !attacker->aiCharacter
+			 && targ->client && targ->aiCharacter && targ != attacker
+			 && targ->health > 0 ) {
+			attacker->client->ps.persistant[PERS_HITS]++;
+			if ( wasHeadshot ) {
+				attacker->client->ps.persistant[PERS_GAUNTLET_FRAG_COUNT]++;
+			}
+		}
+
 		targ->health = targ->health - take;
 
 		// Ridah, can't gib with bullet weapons (except VENOM)

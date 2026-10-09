@@ -387,7 +387,12 @@ void CG_CheckLocalSounds( playerState_t *ps, playerState_t *ops ) {
 
 	// hit changes
 	if ( ps->persistant[PERS_HITS] > ops->persistant[PERS_HITS] ) {
-		trap_S_StartLocalSound( cgs.media.hitSound, CHAN_LOCAL_SOUND );
+		// codmod: E9 CoD hit markers (X + body/headshot tick). Fall back to vanilla beep.
+		if ( bg_cod.enable && bg_cod.hitMarkerEnable ) {
+			CG_CodCheckHitMarker( ps, ops );
+		} else {
+			trap_S_StartLocalSound( cgs.media.hitSound, CHAN_LOCAL_SOUND );
+		}
 	} else if ( ps->persistant[PERS_HITS] < ops->persistant[PERS_HITS] ) {
 		trap_S_StartLocalSound( cgs.media.hitTeamSound, CHAN_LOCAL_SOUND );
 	}

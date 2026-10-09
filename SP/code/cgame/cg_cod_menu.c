@@ -221,6 +221,14 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_FLOAT, "cod_crosshairSprintAlpha","cod_crosshairSprintAlpha",0.05f,0.1f, NULL },
 	{ COD_MI_BOOL,  "cod_crosshairOutline",   "cod_crosshairOutline",   1,     1,    NULL },
 
+	{ COD_MI_SECTION, "HIT MARKER", NULL, 0, 0, NULL },
+	{ COD_MI_BOOL,  "cod_hitMarkerEnable",    "cod_hitMarkerEnable",    1,     1,    NULL },
+	{ COD_MI_FLOAT, "cod_hitMarkerTime",      "cod_hitMarkerTime",      25,    50,   NULL },
+	{ COD_MI_FLOAT, "cod_hitMarkerGap",       "cod_hitMarkerGap",       0.5f,  1,    NULL },
+	{ COD_MI_FLOAT, "cod_hitMarkerLength",    "cod_hitMarkerLength",    0.5f,  1,    NULL },
+	{ COD_MI_FLOAT, "cod_hitMarkerWidth",     "cod_hitMarkerWidth",     0.25f, 1,    NULL },
+	{ COD_MI_BOOL,  "cod_hitMarkerSound",     "cod_hitMarkerSound",     1,     1,    NULL },
+
 	{ COD_MI_SECTION, "GAIT / SPRINT GUN", NULL, 0, 0, NULL },
 	{ COD_MI_FLOAT, "cod_sprintRaiseTime",    "cod_sprintRaiseTime",    10,   50,   NULL },
 	{ COD_MI_FLOAT, "cod_sprintGunPitch",     "cod_sprintGunPitch",     0.5f, 2,    NULL },
