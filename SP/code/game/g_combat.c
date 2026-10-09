@@ -721,6 +721,15 @@ qboolean IsHeadShot( gentity_t *targ, gentity_t *attacker, vec3_t dir, vec3_t po
 		if ( ( targ->r.svFlags & SVF_CASTAI ) && trap_GetTag( targ->s.number, "tag_head", &or ) ) {
 			VectorCopy( or.origin, head->r.currentOrigin );
 			VectorMA( head->r.currentOrigin, 6, or.axis[2], head->r.currentOrigin );    // tag is at base of neck
+		} else if ( !targ->aiCharacter && bg_cod.enable && bg_cod.proneEnable
+					&& ( targ->client->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+			// codmod: prone head box (phase 6b) — eye-ish height pushed forward along yaw
+			vec3_t forward;
+			head->r.currentOrigin[2] += bg_cod.proneViewHeight + 4.0f;
+			AngleVectors( targ->client->ps.viewangles, forward, NULL, NULL );
+			forward[2] = 0;
+			VectorNormalize( forward );
+			VectorMA( head->r.currentOrigin, 16.0f, forward, head->r.currentOrigin );
 		} else if ( targ->client->ps.pm_flags & PMF_DUCKED ) { // closer fake offset for 'head' box when crouching
 			head->r.currentOrigin[2] += targ->client->ps.crouchViewHeight + 8; // JPW NERVE 16 is kludge to get head height to match up
 		}

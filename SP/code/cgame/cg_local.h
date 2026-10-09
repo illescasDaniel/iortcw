@@ -815,6 +815,9 @@ typedef struct {
 
 	int codSlideStartTime;               // codmod: phase 6 — cg.time when PMF_COD_SLIDING rose
 
+	int codProneMovingTime;              // codmod: phase 6b — cg.time of last PRONE_MOVING edge
+	qboolean codProneWasMoving;          // codmod: previous frame's COD_SF_PRONE_MOVING
+
 	int codQkPrev;                       // codmod: phase 5.5 — weapon to restore after quickknife
 	int codQkState;                      // codmod: 0 idle, 1 switching, 2 swinging, 3 returning
 	int codQkStartTime;                  // codmod: cg.time when quickknife started

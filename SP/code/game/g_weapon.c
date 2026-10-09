@@ -1733,6 +1733,13 @@ void FireWeapon( gentity_t *ent ) {
 		aimSpreadScale = BG_CodFireSpreadScale( aimSpreadScale, ent->s.weapon, adsFrac );
 	}
 
+	// codmod: tighter spread while still and prone (phase 6b); stacks with ADS
+	if ( !ent->aiCharacter && bg_cod.enable && bg_cod.proneEnable
+		 && ( ent->client->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE )
+		 && !( ent->client->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE_MOVING ) ) {
+		aimSpreadScale *= bg_cod.proneSpreadScale;
+	}
+
 	// fire the specific weapon
 	switch ( ent->s.weapon ) {
 	case WP_KNIFE:
@@ -1815,6 +1822,11 @@ void FireWeapon( gentity_t *ent ) {
 		Bullet_Fire( ent, THOMPSON_SPREAD * aimSpreadScale, THOMPSON_DAMAGE );
 		break;
 	case WP_PANZERFAUST:
+		// codmod: block panzer while prone unless cod_pronePanzer (phase 6b)
+		if ( !ent->aiCharacter && bg_cod.enable && bg_cod.proneEnable && !bg_cod.pronePanzer
+			 && ( ent->client->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+			break;
+		}
 		ent->client->ps.classWeaponTime = level.time; // JPW NERVE
 		Weapon_RocketLauncher_Fire( ent, aimSpreadScale );
 		break;

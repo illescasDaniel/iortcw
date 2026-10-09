@@ -356,12 +356,20 @@ typedef enum {
 typedef char bg_cod_statIndexRangeCheck_t[ ( STAT_COD_STAM_DELAY < MAX_STATS ) ? 1 : -1 ];
 
 // codmod: ps->stats[STAT_COD_FLAGS] bits (phase 2+)
-#define COD_SF_SPRINTING 1
+#define COD_SF_SPRINTING    1
+#define COD_SF_PRONE        2   // phase 6b: prone stance (bbox + viewheight)
+#define COD_SF_PRONE_MOVING 4   // phase 6b: crawling (gun tilt / fire block)
+#define COD_SF_PRONE_HELD   8   // phase 6b: last-frame +prone latch (edge detect)
+#define COD_SF_CROUCH_HELD  16  // phase 6b: last-frame crouch latch (edge detect)
 
 // codmod: ADS input (phase 3.1). WBUTTON_EXTRA6 (q_shared.h) has no other users at
 // ioRTCW 438e7d4 (verified with grep) -- bound to "+wbutton6" (client/cl_input.c) and
 // aliased to "+ads"/"-ads" in mod/codmod/codmod.cfg, bound to MOUSE2 in codmod_binds.cfg.
 #define WBUTTON_COD_ADS WBUTTON_EXTRA6
+
+// codmod: prone input (phase 6b). WBUTTON_EXTRA7 (+wbutton7) — engine +prone/-prone
+// aliases in cl_input.c; bound to CTRL in codmod_binds.cfg.
+#define WBUTTON_COD_PRONE WBUTTON_EXTRA7
 
 
 // player_state->persistant[] indexes

@@ -586,7 +586,9 @@ void CL_CmdButtons( usercmd_t *cmd ) {
 		kb[KB_BUTTONS0 + i].wasPressed = qfalse;
 	}
 
-	for ( i = 0 ; i < 7 ; i++ ) {
+	// codmod: was i < 7, which never packed KB_WBUTTONS7 → WBUTTON_EXTRA7 (bit 128).
+	// ADS uses wbutton6 (bit 64); prone uses wbutton7 — both need the full 0..7 range.
+	for ( i = 0 ; i < 8 ; i++ ) {
 		if ( kb[KB_WBUTTONS0 + i].active || kb[KB_WBUTTONS0 + i].wasPressed ) {
 			cmd->wbuttons |= 1 << i;
 		}
@@ -1078,6 +1080,9 @@ void CL_InitInput( void ) {
 	// console `alias` command, so we register these here instead of using cfg aliases.
 	Cmd_AddCommand( "+ads", IN_Wbutton6Down );
 	Cmd_AddCommand( "-ads", IN_Wbutton6Up );
+	// codmod: +prone → +wbutton7 (WBUTTON_COD_PRONE, phase 6b)
+	Cmd_AddCommand( "+prone", IN_Wbutton7Down );
+	Cmd_AddCommand( "-prone", IN_Wbutton7Up );
 //----(SA) end
 
 	Cmd_AddCommand( "+mlook", IN_MLookDown );

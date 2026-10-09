@@ -609,6 +609,11 @@ static qboolean PM_CheckJump( void ) {
 		return qfalse;      // don't allow jump until all buttons are up
 	}
 
+	// codmod: no jump while prone (phase 6b); exit already consumed the press
+	if ( !pm->ps->aiChar && ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+		return qfalse;
+	}
+
 	if ( pm->cmd.upmove < 10 ) {
 		// not holding jump
 		return qfalse;
@@ -1097,7 +1102,13 @@ static void PM_WalkMove( void ) {
 			wishspeed = pm->ps->speed * pm_duckScale;
 		}
 		*/
-		if ( wishspeed > pm->ps->speed * pm->ps->crouchSpeedScale ) {
+		// codmod: prone crawl speed (phase 6b) — replace crouch clamp while prone
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.proneEnable
+			 && ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+			if ( wishspeed > pm->ps->speed * bg_cod.proneScale ) {
+				wishspeed = pm->ps->speed * bg_cod.proneScale;
+			}
+		} else if ( wishspeed > pm->ps->speed * pm->ps->crouchSpeedScale ) {
 			wishspeed = pm->ps->speed * pm->ps->crouchSpeedScale;
 		}
 	}
@@ -1738,6 +1749,15 @@ static void PM_CheckDuck( void ) {
 		return;
 	}
 
+	// codmod: prone owns bbox/viewheight (phase 6b). PM_CodCheckProne already set them.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.proneEnable
+		 && ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+		pm->ps->pm_flags |= PMF_DUCKED;
+		pm->maxs[2] = bg_cod.proneMaxsZ;
+		pm->ps->viewheight = (int)bg_cod.proneViewHeight;
+		return;
+	}
+
 	// codmod: force crouch bbox/view while sliding even if crouch is released (phase 6)
 	if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
 		pm->ps->pm_flags |= PMF_DUCKED;
@@ -1862,6 +1882,11 @@ static void PM_Footsteps( void ) {
 
 	if ( pm->ps->pm_flags & PMF_DUCKED ) {
 		bobmove = 0.5;  // ducked characters bob much faster
+		// codmod: slower bob, still no footsteps while prone (phase 6b; crouch anims until tier B)
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.proneEnable
+			 && ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+			bobmove *= bg_cod.proneBob;
+		}
 		if ( pm->ps->pm_flags & PMF_BACKWARDS_RUN ) {
 			animResult = BG_AnimScriptAnimation( pm->ps, pm->ps->aiState, ANIM_MT_WALKCRBK, qtrue );
 		} else {
@@ -3308,6 +3333,16 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
+	// codmod: no fire during prone transitions, or while crawling unless allowed (phase 6b)
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.proneEnable ) {
+		if ( pm->ps->stats[STAT_COD_STANCE] > 0 ) {
+			return;
+		}
+		if ( ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE_MOVING ) && !bg_cod.proneCrawlFire ) {
+			return;
+		}
+	}
+
 	// player is underwater - no fire
 	if ( pm->waterlevel == 3 ) {
 		if ( pm->ps->weapon != WP_KNIFE &&
@@ -3832,6 +3867,220 @@ static void PM_CodEndSlide( void ) {
 
 /*
 ================
+PM_CodClearProne
+
+codmod: drop all prone bits + stance timer (phase 6b).
+================
+*/
+static void PM_CodClearProne( void ) {
+	pm->ps->stats[STAT_COD_FLAGS] &= ~( COD_SF_PRONE | COD_SF_PRONE_MOVING );
+	pm->ps->stats[STAT_COD_STANCE] = 0;
+}
+
+/*
+================
+PM_CodCheckProne
+
+codmod: CoD4/ET-style prone stance (phase 6b, docs/phase-6b-prone.md). Port of ET
+PM_CheckProne ideas onto networked STAT_COD_* (no eFlags / pmoveExt). Player only.
+Call before PM_CheckDuck so the prone bbox wins.
+================
+*/
+static void PM_CodCheckProne( void ) {
+	int flags;
+	int stance;
+	qboolean pressed, crouchPressed, jumpPressed;
+	qboolean wantExit, forcedExit;
+	qboolean isProne;
+	trace_t trace;
+	float hspeed;
+	float standMaxZ, crouchMaxZ, proneMaxZ;
+	int downTime, upTime, cooldown;
+
+	flags = pm->ps->stats[STAT_COD_FLAGS];
+
+	if ( pm->ps->aiChar || !( bg_cod.enable && bg_cod.proneEnable ) ) {
+		if ( flags & ( COD_SF_PRONE | COD_SF_PRONE_MOVING | COD_SF_PRONE_HELD | COD_SF_CROUCH_HELD ) ) {
+			pm->ps->stats[STAT_COD_FLAGS] &= ~( COD_SF_PRONE | COD_SF_PRONE_MOVING
+												| COD_SF_PRONE_HELD | COD_SF_CROUCH_HELD );
+		}
+		if ( pm->ps->stats[STAT_COD_STANCE] ) {
+			pm->ps->stats[STAT_COD_STANCE] = 0;
+		}
+		return;
+	}
+
+	if ( pm->ps->pm_type == PM_DEAD ) {
+		PM_CodClearProne();
+		pm->ps->stats[STAT_COD_FLAGS] &= ~( COD_SF_PRONE_HELD | COD_SF_CROUCH_HELD );
+		return;
+	}
+
+	downTime = (int)bg_cod.proneDownTime;
+	upTime = (int)bg_cod.proneUpTime;
+	cooldown = (int)bg_cod.proneCooldown;
+	if ( downTime < 1 ) {
+		downTime = 1;
+	}
+	if ( upTime < 1 ) {
+		upTime = 1;
+	}
+	if ( cooldown < 0 ) {
+		cooldown = 0;
+	}
+
+	// timer tick: >0 transition ms left; <0 cooldown counting up to 0
+	stance = pm->ps->stats[STAT_COD_STANCE];
+	if ( stance > 0 ) {
+		stance -= pml.msec;
+		if ( stance <= 0 ) {
+			stance = -cooldown;
+		}
+	} else if ( stance < 0 ) {
+		stance += pml.msec;
+		if ( stance > 0 ) {
+			stance = 0;
+		}
+	}
+	pm->ps->stats[STAT_COD_STANCE] = stance;
+
+	pressed = ( ( pm->cmd.wbuttons & WBUTTON_COD_PRONE ) && !( flags & COD_SF_PRONE_HELD ) ) ? qtrue : qfalse;
+	crouchPressed = ( pm->cmd.upmove < 0 && !( flags & COD_SF_CROUCH_HELD ) ) ? qtrue : qfalse;
+	jumpPressed = ( pm->cmd.upmove > 0 && !( pm->ps->pm_flags & PMF_JUMP_HELD ) ) ? qtrue : qfalse;
+
+	if ( pm->cmd.wbuttons & WBUTTON_COD_PRONE ) {
+		flags |= COD_SF_PRONE_HELD;
+	} else {
+		flags &= ~COD_SF_PRONE_HELD;
+	}
+	if ( pm->cmd.upmove < 0 ) {
+		flags |= COD_SF_CROUCH_HELD;
+	} else {
+		flags &= ~COD_SF_CROUCH_HELD;
+	}
+
+	isProne = ( flags & COD_SF_PRONE ) ? qtrue : qfalse;
+	standMaxZ = pm->ps->maxs[2];
+	crouchMaxZ = pm->ps->crouchMaxZ;
+	proneMaxZ = bg_cod.proneMaxsZ;
+
+	forcedExit = qfalse;
+	if ( isProne ) {
+		if ( pm->ps->groundEntityNum == ENTITYNUM_NONE
+			 || pm->waterlevel >= 2
+			 || ( pm->ps->pm_flags & PMF_LADDER )
+			 || pml.ladder
+			 || pm->ps->pm_type != PM_NORMAL
+			 || ( pm->ps->eFlags & EF_VIEWING_CAMERA )
+			 || ( pm->ps->eFlags & EF_MG42_ACTIVE ) ) {
+			forcedExit = qtrue;
+		}
+	}
+
+	wantExit = qfalse;
+	if ( isProne && stance == 0 && ( pressed || jumpPressed || crouchPressed ) ) {
+		wantExit = qtrue;
+	}
+
+	// enter
+	if ( !isProne && pressed && stance == 0 ) {
+		qboolean canEnter = qtrue;
+
+		if ( pm->ps->groundEntityNum == ENTITYNUM_NONE
+			 || pm->waterlevel >= 2
+			 || ( pm->ps->pm_flags & PMF_LADDER )
+			 || ( pm->ps->eFlags & EF_MG42_ACTIVE )
+			 || ( pm->ps->eFlags & EF_VIEWING_CAMERA ) ) {
+			canEnter = qfalse;
+		}
+		if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+			if ( bg_cod.slideToProne ) {
+				PM_CodEndSlide();
+			} else {
+				canEnter = qfalse;
+			}
+		}
+
+		if ( canEnter ) {
+			pm->maxs[2] = proneMaxZ;
+			pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
+			if ( !trace.allsolid ) {
+				flags |= COD_SF_PRONE;
+				flags &= ~( COD_SF_SPRINTING | COD_SF_PRONE_MOVING );
+				pm->ps->stats[STAT_COD_STANCE] = downTime;
+				pm->ps->stats[STAT_COD_ADS] = 0;
+				pm->ps->leanf = 0;
+				pm->ps->velocity[0] = 0;
+				pm->ps->velocity[1] = 0;
+				pm->ps->pm_flags |= PMF_DUCKED;
+				isProne = qtrue;
+				stance = downTime;
+			}
+			pm->maxs[2] = standMaxZ; // CheckDuck / prone apply below will set real maxs
+		}
+	}
+
+	// exit
+	if ( isProne && ( wantExit || forcedExit ) ) {
+		qboolean standOk = qfalse;
+		qboolean crouchOk = qfalse;
+		int exitTime;
+
+		pm->maxs[2] = standMaxZ;
+		pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
+		standOk = !trace.allsolid ? qtrue : qfalse;
+
+		pm->maxs[2] = crouchMaxZ;
+		pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
+		crouchOk = !trace.allsolid ? qtrue : qfalse;
+
+		if ( standOk || crouchOk ) {
+			flags &= ~( COD_SF_PRONE | COD_SF_PRONE_MOVING );
+			exitTime = forcedExit ? 0 : upTime;
+			pm->ps->stats[STAT_COD_STANCE] = exitTime;
+			stance = exitTime;
+			isProne = qfalse;
+
+			if ( standOk && pm->cmd.upmove >= 0 ) {
+				pm->ps->pm_flags &= ~PMF_DUCKED;
+			} else {
+				pm->ps->pm_flags |= PMF_DUCKED;
+			}
+
+			// consume jump so PM_CheckJump does not also launch this frame
+			if ( jumpPressed ) {
+				pm->cmd.upmove = 0;
+			}
+		}
+		// else stay prone — nothing fits
+	}
+
+	// while prone: crawl hysteresis + force ducked bbox
+	if ( isProne ) {
+		hspeed = sqrt( pm->ps->velocity[0] * pm->ps->velocity[0]
+					   + pm->ps->velocity[1] * pm->ps->velocity[1] );
+		if ( ( pm->cmd.forwardmove || pm->cmd.rightmove ) && hspeed > 40.0f ) {
+			flags |= COD_SF_PRONE_MOVING;
+		} else if ( !( pm->cmd.forwardmove || pm->cmd.rightmove ) && hspeed < 20.0f ) {
+			flags &= ~COD_SF_PRONE_MOVING;
+		}
+
+		pm->ps->pm_flags |= PMF_DUCKED;
+		pm->maxs[2] = proneMaxZ;
+		pm->ps->viewheight = (int)bg_cod.proneViewHeight;
+	}
+
+	// lock movement during transitions
+	if ( pm->ps->stats[STAT_COD_STANCE] > 0 ) {
+		pm->cmd.forwardmove = 0;
+		pm->cmd.rightmove = 0;
+	}
+
+	pm->ps->stats[STAT_COD_FLAGS] = flags;
+}
+
+/*
+================
 PM_CodCheckSlideStart
 
 codmod: sprint + crouch press edge → tactical slide (phase 6). Uses COD_SF_SPRINTING from
@@ -4143,6 +4392,8 @@ static void PM_CodUpdateSprint( void ) {
 				 && ( bg_cod.sprintForwardOnly ? ( pm->cmd.forwardmove > 0 ) : moving )
 				 && !( pm->ps->pm_flags & PMF_DUCKED )
 				 && !( pm->ps->pm_flags & PMF_COD_SLIDING )
+				 && !( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE )
+				 && pm->ps->stats[STAT_COD_STANCE] <= 0
 				 && pm->waterlevel < 2
 				 && !( pm->cmd.buttons & BUTTON_WALKING )
 				 && !( pm->cmd.wbuttons & WBUTTON_COD_ADS )
@@ -4209,6 +4460,10 @@ void PM_UpdateLean( playerState_t *ps, usercmd_t *cmd, pmove_t *tpm ) {
 	}
 	// codmod: no lean while sliding (phase 6)
 	if ( ps->pm_flags & PMF_COD_SLIDING ) {
+		leaning = 0;
+	}
+	// codmod: no lean while prone (phase 6b)
+	if ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) {
 		leaning = 0;
 	}
 	// codmod: cod_leanAllowFire lets the player keep leaning while firing (phase 2.3.2)
@@ -4329,6 +4584,21 @@ void PM_UpdateViewAngles( playerState_t *ps, usercmd_t *cmd, void( trace ) ( tra
 		ps->viewangles[i] = SHORT2ANGLE( temp );
 	}
 
+	// codmod: clamp pitch while prone (phase 6b). ET ±40°; no yaw limit in tier A.
+	if ( !ps->aiChar && bg_cod.enable && bg_cod.proneEnable
+		 && ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+		float pitch = ps->viewangles[PITCH];
+		float up = bg_cod.pronePitchUp;
+		float down = bg_cod.pronePitchDown;
+
+		if ( pitch > down ) {
+			pitch = down;
+		} else if ( pitch < -up ) {
+			pitch = -up;
+		}
+		ps->viewangles[PITCH] = pitch;
+		ps->delta_angles[PITCH] = ANGLE2SHORT( pitch ) - cmd->angles[PITCH];
+	}
 
 	tpm.trace = trace;
 //	tpm.trace (&trace, start, tmins, tmaxs, end, ps->clientNum, MASK_PLAYERSOLID);
@@ -4853,6 +5123,7 @@ void PmoveSingle( pmove_t *pmove ) {
 	}
 
 	if ( ( pm->ps->pm_type == PM_SPECTATOR ) || ( pm->ps->pm_flags & PMF_LIMBO ) ) { // JPW NERVE for limbo mode chase
+		PM_CodCheckProne();
 		PM_CheckDuck();
 		PM_FlyMove();
 		PM_DropTimers();
@@ -4876,6 +5147,9 @@ void PmoveSingle( pmove_t *pmove ) {
 	// set watertype, and waterlevel
 	PM_SetWaterLevel();
 	pml.previous_waterlevel = pmove->waterlevel;
+
+	// codmod: prone before duck so prone bbox/viewheight win (phase 6b)
+	PM_CodCheckProne();
 
 	// set mins, maxs, and viewheight
 	PM_CheckDuck();

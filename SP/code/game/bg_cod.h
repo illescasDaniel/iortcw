@@ -176,6 +176,29 @@ typedef struct {
 	float slideRoll;           // degrees view roll × slide frac (cgame)
 	float slideFovKick;        // FOV *= 1 + kick × frac (cgame)
 
+	// codmod: Phase 6b prone (docs/phase-6b-prone.md)
+	int proneEnable;           // master: CTRL prone stance
+	float proneScale;          // × runSpeed while prone (crawl)
+	float proneViewHeight;     // eye height while prone (ET −8)
+	float proneMaxsZ;          // bbox top while prone (ET 16)
+	float proneDownTime;       // ms camera ease + move/fire lock going down
+	float proneUpTime;         // ms going up
+	float proneCooldown;       // ms after a transition before next toggle
+	float pronePitchUp;        // degrees look-up clamp while prone
+	float pronePitchDown;      // degrees look-down clamp while prone
+	int proneCrawlFire;        // 1 = allow fire while crawling
+	int proneCrawlADS;         // 1 = allow ADS while crawling
+	float proneSpreadScale;    // × aim spread while still and prone
+	float proneBob;            // × crouch bobmove while prone
+	int pronePanzer;           // 1 = allow panzer while prone
+	int proneLegs;             // 1 = ET legs/head boxes (unused in tier A)
+	int slideToProne;          // 1 = +prone ends slide into prone
+	float proneGunPitch;       // degrees crawl gun tilt (cgame)
+	float proneGunYaw;         // degrees
+	float proneGunDrop;        // u drop while crawling
+	float proneGunTime;        // ms ease into/out of crawl pose
+	float proneGunDip;         // u viewmodel dip × transition fraction
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;
@@ -218,8 +241,8 @@ extern const int bg_numCodCvars;
 
 // codmod: g_main.c / cg_main.c each keep a static vmCvar_t[BG_COD_MAX_CVARS] and pass it in.
 // Bump this if bg_codCvars ever grows past it -- BG_CodRegisterCvars() clamps defensively.
-// (phase 3–6 + E9; leave headroom for prone.)
-#define BG_COD_MAX_CVARS 160
+// (phase 3–6b + E9; leave headroom for extras.)
+#define BG_COD_MAX_CVARS 192
 
 void BG_CodRegisterCvars( vmCvar_t *cvars, int maxCvars );
 void BG_CodUpdateCvars( vmCvar_t *cvars, int maxCvars );

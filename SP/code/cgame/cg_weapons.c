@@ -1878,6 +1878,51 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 		}
 	}
 
+	// codmod: prone crawl gun tilt + transition dip (phase 6b)
+	if ( bg_cod.enable && bg_cod.proneEnable ) {
+		playerState_t *ps = &cg.predictedPlayerState;
+		qboolean moving = ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE_MOVING ) ? qtrue : qfalse;
+		float gunTime = bg_cod.proneGunTime;
+		float crawlE = 0.0f;
+		float transE = 0.0f;
+
+		if ( moving != cg.codProneWasMoving ) {
+			cg.codProneMovingTime = cg.time;
+			cg.codProneWasMoving = moving;
+		}
+		if ( gunTime < 1.0f ) {
+			gunTime = 1.0f;
+		}
+		crawlE = (float)( cg.time - cg.codProneMovingTime ) / gunTime;
+		if ( crawlE < 0.0f ) {
+			crawlE = 0.0f;
+		} else if ( crawlE > 1.0f ) {
+			crawlE = 1.0f;
+		}
+		crawlE = BG_CodSmoothstep( crawlE );
+		if ( !moving ) {
+			crawlE = 1.0f - crawlE;
+		}
+		if ( crawlE > 0.0f ) {
+			angles[PITCH] += bg_cod.proneGunPitch * crawlE;
+			angles[YAW] += bg_cod.proneGunYaw * crawlE;
+			origin[2] -= bg_cod.proneGunDrop * crawlE;
+		}
+
+		if ( ps->stats[STAT_COD_STANCE] > 0 ) {
+			float dur = ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE )
+						? bg_cod.proneDownTime : bg_cod.proneUpTime;
+			if ( dur < 1.0f ) {
+				dur = 1.0f;
+			}
+			transE = (float)ps->stats[STAT_COD_STANCE] / dur;
+			if ( transE > 1.0f ) {
+				transE = 1.0f;
+			}
+			origin[2] -= bg_cod.proneGunDip * transE;
+		}
+	}
+
 	// RF, subtract the kickAngles
 	VectorMA( angles, -1.0, cg.kickAngles, angles );
 

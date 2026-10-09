@@ -1575,7 +1575,10 @@ void Cmd_Activate_f( gentity_t *ent ) {
 		} else if ( ( Q_stricmp( traceEnt->classname, "misc_mg42" ) == 0 ) /*&& activatetime > oldactivatetime + 1000*/ && traceEnt->active == qfalse )         {
 			if ( !ent->active && traceEnt->takedamage ) {  // not a dead gun
 				// RF, dont allow activating MG42 if crouching
-				if ( !( ent->client->ps.pm_flags & PMF_DUCKED ) && !infront( traceEnt, ent ) ) {
+				// codmod: also block while prone (PMF_DUCKED is set, but keep explicit) (phase 6b)
+				if ( !( ent->client->ps.pm_flags & PMF_DUCKED )
+					 && !( ent->client->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE )
+					 && !infront( traceEnt, ent ) ) {
 					gclient_t   *cl;
 					cl = &level.clients[ ent->s.clientNum ];
 

@@ -651,13 +651,14 @@ static void CG_OffsetFirstPersonView( void ) {
 	origin[2] += cg.predictedPlayerState.viewheight;
 
 	// smooth out duck height changes
-	// codmod: cod_duckTime/cod_duckEase (phase 2.2), ~30% faster than vanilla by default,
-	// with an optional ease-out curve. cg.codDuckDuration is stashed so phase 4b (prone)
-	// can reuse this same curve with a different duration.
+	// codmod: cod_duckTime/cod_duckEase (phase 2.2); prone uses proneDown/UpTime set in
+	// CG_TransitionPlayerState when viewheight crosses proneViewHeight (phase 6b).
 	if ( bg_cod.enable ) {
-		cg.codDuckDuration = (int)bg_cod.duckTime;
 		if ( cg.codDuckDuration < 1 ) {
-			cg.codDuckDuration = 1;
+			cg.codDuckDuration = (int)bg_cod.duckTime;
+			if ( cg.codDuckDuration < 1 ) {
+				cg.codDuckDuration = 1;
+			}
 		}
 
 		timeDelta = cg.time - cg.duckTime;

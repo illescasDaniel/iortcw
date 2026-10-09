@@ -210,6 +210,30 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_slideRoll",          "4",    0,            CODOFS( slideRoll ),          0 },
 	{ "cod_slideFovKick",       "0.05", 0,            CODOFS( slideFovKick ),       0 },
 
+	// codmod: Phase 6b prone (docs/phase-6b-prone.md + reference-values.md)
+	{ "cod_proneEnable",        "1",    0,            CODOFS( proneEnable ),        1 },
+	// was 0.15 (CoD4 → 30 u/s); playtest locked 0.55 → 110 u/s (crouch is 130)
+	{ "cod_proneScale",         "0.55", 0,            CODOFS( proneScale ),         0 },
+	{ "cod_proneViewHeight",    "-8",   0,            CODOFS( proneViewHeight ),    0 },
+	{ "cod_proneMaxsZ",         "16",   0,            CODOFS( proneMaxsZ ),         0 },
+	{ "cod_proneDownTime",      "350",  0,            CODOFS( proneDownTime ),      0 },
+	{ "cod_proneUpTime",        "350",  0,            CODOFS( proneUpTime ),        0 },
+	{ "cod_proneCooldown",      "400",  0,            CODOFS( proneCooldown ),      0 },
+	{ "cod_pronePitchUp",       "40",   0,            CODOFS( pronePitchUp ),       0 },
+	{ "cod_pronePitchDown",     "40",   0,            CODOFS( pronePitchDown ),     0 },
+	{ "cod_proneCrawlFire",     "0",    0,            CODOFS( proneCrawlFire ),     1 },
+	{ "cod_proneCrawlADS",      "0",    0,            CODOFS( proneCrawlADS ),      1 },
+	{ "cod_proneSpreadScale",   "0.5",  0,            CODOFS( proneSpreadScale ),   0 },
+	{ "cod_proneBob",           "0.2",  0,            CODOFS( proneBob ),           0 },
+	{ "cod_pronePanzer",        "0",    0,            CODOFS( pronePanzer ),        1 },
+	{ "cod_proneLegs",          "0",    0,            CODOFS( proneLegs ),          1 },
+	{ "cod_slideToProne",       "0",    0,            CODOFS( slideToProne ),       1 },
+	{ "cod_proneGunPitch",      "25",   0,            CODOFS( proneGunPitch ),      0 },
+	{ "cod_proneGunYaw",        "15",   0,            CODOFS( proneGunYaw ),        0 },
+	{ "cod_proneGunDrop",       "4",    0,            CODOFS( proneGunDrop ),       0 },
+	{ "cod_proneGunTime",       "200",  0,            CODOFS( proneGunTime ),       0 },
+	{ "cod_proneGunDip",        "6",    0,            CODOFS( proneGunDip ),        0 },
+
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
 	{ "cod_menuScale",          "0.7",  CVAR_ARCHIVE, CODOFS( menuScale ),          0 },
@@ -444,6 +468,16 @@ qboolean BG_CodCanADS( const playerState_t *ps ) {
 	// codmod: no ADS while sliding unless cod_slideAllowADS (phase 6)
 	if ( ( ps->pm_flags & PMF_COD_SLIDING ) && !bg_cod.slideAllowADS ) {
 		return qfalse;
+	}
+
+	// codmod: no ADS during prone transitions; crawling blocked unless cod_proneCrawlADS (6b)
+	if ( bg_cod.proneEnable ) {
+		if ( ps->stats[STAT_COD_STANCE] > 0 ) {
+			return qfalse;
+		}
+		if ( ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE_MOVING ) && !bg_cod.proneCrawlADS ) {
+			return qfalse;
+		}
 	}
 
 	return qtrue;

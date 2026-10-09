@@ -617,6 +617,12 @@ static const char *CG_CodStateName( void ) {
 	if ( ps->pm_flags & PMF_COD_SLIDING ) {
 		return "SLIDE";
 	}
+	if ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) {
+		if ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE_MOVING ) {
+			return "CRAWL";
+		}
+		return "PRONE";
+	}
 	if ( ps->pm_flags & PMF_DUCKED ) {
 		return "CROUCH";
 	}
@@ -738,6 +744,15 @@ void CG_CodDrawDebugHud( void ) {
 		y += SMALLCHAR_HEIGHT;
 	} else if ( ps->stats[STAT_COD_SLIDE] < 0 ) {
 		Com_sprintf( line, sizeof( line ), "slide cooldown %d ms", -ps->stats[STAT_COD_SLIDE] );
+		CG_DrawSmallStringColor( 4, y, line, color );
+		y += SMALLCHAR_HEIGHT;
+	}
+
+	// codmod: prone stance timer (phase 6b)
+	if ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE
+		 || ps->stats[STAT_COD_STANCE] != 0 ) {
+		Com_sprintf( line, sizeof( line ), "stance %d  viewh %d",
+					 ps->stats[STAT_COD_STANCE], ps->viewheight );
 		CG_DrawSmallStringColor( 4, y, line, color );
 		y += SMALLCHAR_HEIGHT;
 	}

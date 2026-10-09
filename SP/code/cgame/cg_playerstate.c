@@ -553,6 +553,23 @@ void CG_TransitionPlayerState( playerState_t *ps, playerState_t *ops ) {
 	if ( ps->viewheight != ops->viewheight ) {
 		cg.duckChange = ps->viewheight - ops->viewheight;
 		cg.duckTime = cg.time;
+		// codmod: prone transitions use proneDown/UpTime; crouch keeps duckTime (phase 6b)
+		if ( bg_cod.enable && bg_cod.proneEnable
+			 && ( ops->viewheight == (int)bg_cod.proneViewHeight
+				  || ps->viewheight == (int)bg_cod.proneViewHeight ) ) {
+			if ( ps->viewheight < ops->viewheight ) {
+				cg.codDuckDuration = (int)bg_cod.proneDownTime;
+			} else {
+				cg.codDuckDuration = (int)bg_cod.proneUpTime;
+			}
+		} else if ( bg_cod.enable ) {
+			cg.codDuckDuration = (int)bg_cod.duckTime;
+		} else {
+			cg.codDuckDuration = DUCK_TIME;
+		}
+		if ( cg.codDuckDuration < 1 ) {
+			cg.codDuckDuration = 1;
+		}
 	}
 }
 

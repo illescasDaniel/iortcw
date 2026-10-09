@@ -2470,6 +2470,13 @@ static void CG_DrawCrosshair( void ) {
 		return;
 	}
 
+	// codmod: hide crosshair while prone-crawling (fire blocked) (phase 6b)
+	if ( bg_cod.enable && bg_cod.proneEnable
+		 && ( cg.snap->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE_MOVING )
+		 && !bg_cod.proneCrawlFire ) {
+		return;
+	}
+
 	// no crosshair when looking at exits
 	if ( cg.snap->ps.serverCursorHint >= HINT_EXIT && cg.snap->ps.serverCursorHint <= HINT_NOEXIT_FAR ) {
 		return;
@@ -2684,6 +2691,13 @@ static void CG_DrawCrosshair3D( void ) {
 
 	// no crosshair while leaning
 	if ( cg.snap->ps.leanf && !codLeanFire ) {
+		return;
+	}
+
+	// codmod: hide crosshair while prone-crawling (phase 6b)
+	if ( bg_cod.enable && bg_cod.proneEnable
+		 && ( cg.snap->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE_MOVING )
+		 && !bg_cod.proneCrawlFire ) {
 		return;
 	}
 
