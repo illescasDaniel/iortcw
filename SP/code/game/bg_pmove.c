@@ -3450,7 +3450,9 @@ static void PM_Weapon( void ) {
 			}
 
 			if ( reloadingW ) {
-				PM_ContinueWeaponAnim( WEAP_RELOAD1 );      //----(SA)
+				// codmod: full reload start (phase 5d follow-up) — ContinueWeaponAnim alone
+				// could skip/skim the FP reload when the attack weapAnimTimer was still set.
+				PM_BeginWeaponReload( pm->ps->weapon );
 			} else {
 				PM_ContinueWeaponAnim( WEAP_IDLE1 );
 				pm->ps->weaponTime += 500;

@@ -4842,7 +4842,9 @@ void CG_FireWeapon( centity_t *cent ) {
 		// IDLE in one batch so weapAnim is already IDLE when this runs —
 		// Clear against IDLE = no kick. Force ATTACK if needed, then clear
 		// on the predicted hands entity (event cent may be a different pe).
+		// Do NOT stomp an in-progress reload (empty-clip auto-reload race).
 		if ( bg_cod.enable && !cg.renderingThirdPerson
+			 && cg.predictedPlayerState.weaponstate != WEAPON_RELOADING
 			 && ent->weapon != WP_FLAMETHROWER
 			 && ent->weapon != WP_GRENADE_LAUNCHER
 			 && ent->weapon != WP_GRENADE_PINEAPPLE
@@ -4850,14 +4852,18 @@ void CG_FireWeapon( centity_t *cent ) {
 			 && ent->weapon != WP_KNIFE ) {
 			int anim = cg.predictedPlayerState.weapAnim & ~ANIM_TOGGLEBIT;
 
-			if ( anim != WEAP_ATTACK1 && anim != WEAP_ATTACK2
-				 && anim != WEAP_ATTACK_LASTSHOT ) {
-				anim = WEAP_ATTACK1;
-				cg.predictedPlayerState.weapAnim =
-					( ( cg.predictedPlayerState.weapAnim & ANIM_TOGGLEBIT ) ^ ANIM_TOGGLEBIT ) | anim;
+			if ( anim == WEAP_RELOAD1 || anim == WEAP_RELOAD2 || anim == WEAP_RELOAD3 ) {
+				// late EV_FIRE from last round — leave reload alone
+			} else {
+				if ( anim != WEAP_ATTACK1 && anim != WEAP_ATTACK2
+					 && anim != WEAP_ATTACK_LASTSHOT ) {
+					anim = WEAP_ATTACK1;
+					cg.predictedPlayerState.weapAnim =
+						( ( cg.predictedPlayerState.weapAnim & ANIM_TOGGLEBIT ) ^ ANIM_TOGGLEBIT ) | anim;
+				}
+				CG_ClearWeapLerpFrame( weap, &cg.predictedPlayerEntity.pe.weap,
+									   cg.predictedPlayerState.weapAnim );
 			}
-			CG_ClearWeapLerpFrame( weap, &cg.predictedPlayerEntity.pe.weap,
-								   cg.predictedPlayerState.weapAnim );
 		}
 	}
 

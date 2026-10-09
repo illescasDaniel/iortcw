@@ -122,7 +122,8 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_weaponEnable",       "1",    0,            CODOFS( weaponEnable ),       1 },
 	{ "cod_pistolTapFire",      "1",    0,            CODOFS( pistolTapFire ),      1 },
 	{ "cod_pistolTapThreshold", "150",  0,            CODOFS( pistolTapThreshold ), 0 },
-	{ "cod_pistolNextShot",     "120",  0,            CODOFS( pistolNextShot ),     0 },
+	// codmod: 200 ms — between vanilla 400 and the earlier 120 click-spam default
+	{ "cod_pistolNextShot",     "200",  0,            CODOFS( pistolNextShot ),     0 },
 	{ "cod_pistolFireDelay",    "0",    0,            CODOFS( pistolFireDelay ),    0 },
 	{ "cod_autoFireScale",      "1",    0,            CODOFS( autoFireScale ),      0 },
 	// codmod: CoD fire modes — hold sprays MP40/Thompson/Sten/FG42/Venom/flame only.
@@ -187,7 +188,7 @@ const codCvarDef_t bg_codCvars[] = {
 
 	// codmod: phase 5d flashlight (client-local view dlight)
 	{ "cod_flashlightEnable",   "1",    0,            CODOFS( flashlightEnable ),   1 },
-	{ "cod_flashlightIntensity","350",  0,            CODOFS( flashlightIntensity ), 0 },
+	{ "cod_flashlightIntensity","500",  0,            CODOFS( flashlightIntensity ), 0 },
 	{ "cod_flashlightR",        "1",    0,            CODOFS( flashlightR ),        0 },
 	{ "cod_flashlightG",        "0.95", 0,            CODOFS( flashlightG ),        0 },
 	{ "cod_flashlightB",        "0.85", 0,            CODOFS( flashlightB ),        0 },

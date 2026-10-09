@@ -765,13 +765,17 @@ codmod: client-local view flashlight (phase 5d). RTCW SP has no player lamp.
 void CG_ToggleFlashlight_f( void ) {
 	if ( !( bg_cod.enable && bg_cod.flashlightEnable ) ) {
 		cg.codFlashlightOn = qfalse;
+		CG_Printf( "Flashlight disabled (cod_flashlightEnable 0).\n" );
 		return;
 	}
 	cg.codFlashlightOn = !cg.codFlashlightOn;
+	CG_Printf( "Flashlight %s\n", cg.codFlashlightOn ? "ON" : "OFF" );
 }
 
 void CG_CodAddFlashlight( void ) {
-	vec3_t origin;
+	vec3_t start, end, lightPos;
+	trace_t tr;
+	float intensity;
 
 	if ( !cg.codFlashlightOn ) {
 		return;
@@ -786,10 +790,26 @@ void CG_CodAddFlashlight( void ) {
 		return;
 	}
 
-	// Slightly forward of the eye so the light is not buried in the head hull.
-	VectorMA( cg.refdef.vieworg, 16.0f, cg.refdef.viewaxis[0], origin );
-	trap_R_AddLightToScene( origin, bg_cod.flashlightIntensity,
-							bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB, 0 );
+	intensity = bg_cod.flashlightIntensity;
+	if ( intensity < 1.0f ) {
+		intensity = 350.0f;
+	}
+
+	// Trace ahead so the beam lights walls (point light at the eye alone is easy to miss).
+	// REF_FORCE_DLIGHT: wolfconfig often has r_dynamiclight 0 — without FORCE the light is dropped.
+	VectorCopy( cg.refdef.vieworg, start );
+	VectorMA( start, 768.0f, cg.refdef.viewaxis[0], end );
+	CG_Trace( &tr, start, NULL, NULL, end, cg.snap->ps.clientNum, MASK_SHOT );
+	VectorMA( start, 32.0f + 200.0f * tr.fraction, cg.refdef.viewaxis[0], lightPos );
+
+	trap_R_AddLightToScene( lightPos, intensity * ( 0.55f + 0.45f * tr.fraction ),
+							bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
+							REF_FORCE_DLIGHT );
+	// Soft fill near the view so close geometry is lit too.
+	VectorMA( start, 24.0f, cg.refdef.viewaxis[0], lightPos );
+	trap_R_AddLightToScene( lightPos, intensity * 0.35f,
+							bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
+							REF_FORCE_DLIGHT );
 }
 
 /*
