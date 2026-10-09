@@ -44,9 +44,9 @@ If you have questions concerning this license or the applicable additional terms
 #include "cg_public.h"
 
 // codmod: per-weapon iron-sight ADS alignment (phase 3.5). Cgame-only and NOT const --
-// the alignment tooling (cod_adsTune, cg_cod.c) overwrites the fine-bias fields live.
-// Primary pose comes from tag_flash auto-align (CoD-style: rear sight on screen center);
-// the six bias fields are small manual corrections on top.
+// the alignment tooling (cod_adsTune, cg_cod.c) overwrites all 9 fields live (absolute
+// while adsTune). Primary pose comes from tag_flash auto-align (CoD-style: rear sight
+// on screen center); geometry + fine bias correct the hold.
 typedef struct {
 	float sightHeight;         // u above the bore (tag_flash up) to the rear sight
 	float barrelBack;          // u back from tag_flash along the bore to the rear sight
@@ -2256,6 +2256,7 @@ void CG_CodDump_f( void );
 void CG_CodDrawDebugMenu( void );   // codmod: sectioned tune menu (cg_cod_menu.c)
 void CG_CodMenu_f( void );
 void CG_CodMenuDump_f( void );
+void CG_CodMenu_OnShutdown( void ); // codmod: restore stolen arrow binds
 void CG_ToggleAds_f( void );           // codmod: phase 3.1 sticky ADS toggle
 void CG_ToggleCrouch_f( void );        // codmod: phase 5d sticky crouch
 void CG_ToggleFlashlight_f( void );    // codmod: phase 5d flashlight
@@ -2268,9 +2269,13 @@ float CG_CodAdsFrac( void );           // codmod: phase 3.5, raw 0..1, forced to
 float CG_CodSprintFrac( void );        // codmod: phase 4, 0..1 visual sprint lower (eased)
 float CG_CodSlideFrac( void );         // codmod: phase 6, 0..1 eased slide camera/gun frac
 float CG_CodGaitBobAmp( void );        // codmod: phase 4, walk/jog/sprint bob amplitude scale
+void CG_CodTuneLog( const char *filename, const char *line ); // codmod: shared tune log append
 void CG_CodUpdateAdsTune( void );      // codmod: phase 3.5 alignment tooling
 void CG_CodAdsTuneLoad_f( void );      // codmod: phase 3.5 alignment tooling
 void CG_CodAdsTuneDump_f( void );      // codmod: phase 3.5 alignment tooling
+void CG_CodAdsTuneSave_f( void );      // codmod: append SAVE to codmod_ads_tune.log
+void CG_CodAdsTuneStart_f( void );     // codmod: adsLock+adsTune + checklist
+void CG_CodAdsTuneNext_f( void );      // codmod: cycle next iron-sight weapon + load
 void CG_CodUpdateScopeHold( void );    // codmod: phase 3.8
 void CG_CodUpdateQuickKnife( void );   // codmod: phase 5.5
 void CG_CodThreatColor( float t, vec4_t out ); // codmod: phase 5c white→red ramp
@@ -2509,6 +2514,8 @@ qboolean    trap_Key_IsDown( int keynum );
 int         trap_Key_GetCatcher( void );
 void        trap_Key_SetCatcher( int catcher );
 int         trap_Key_GetKey( const char *binding );
+void        trap_Key_GetBindingBuf( int keynum, char *buf, int buflen ); // codmod
+void        trap_Key_SetBinding( int keynum, const char *binding );      // codmod
 
 void CG_S_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t velocity, sfxHandle_t sfx, int volume );
 void CG_S_AddRangedLoopingSound( int entityNum, const vec3_t origin, const vec3_t velocity, sfxHandle_t sfx, int range );

@@ -63,11 +63,13 @@ typedef struct {
 	float adsYaw;           // degrees, global ADS angle bias (neg = clockwise from above)
 	float adsRoll;          // degrees, global ADS angle bias (pos ≈ clockwise looking forward)
 	float adsRight;         // u, whole-weapon horizontal shift along view right/left (cgame)
-	int adsCrosshair;       // 0=keep hip crosshair, 1=ADS center dot (default), 2=hide while ADS
+	int adsCrosshair;       // 0=keep hip crosshair, 1=ADS center dot, 2=hide while ADS
+	int adsCrosshairForce;  // debug: always draw full crosshair even while ADS (iron-sight tune)
 	float scopeSwitchTime;  // ms, rifle<->scope weapon-change time when >0 (phase 3.8); 0 = vanilla 250ms
 
 	int adsLock;      // debug: cgame treats ADS as fully in, visual only (alignment tooling)
-	int adsTune;      // debug: live-overwrite cg_codAdsView fine-bias from the Tune* cvars below
+	int adsTune;      // debug: live-overwrite cg_codAdsView (all 9 fields) from the Tune* cvars below
+	float adsTuneHeight, adsTuneBarrel, adsTuneDist; // u, cgame-only geometry (absolute while adsTune)
 	float adsTuneFwd, adsTuneRight, adsTuneUp;      // u, cgame-only fine bias
 	float adsTunePitch, adsTuneYaw, adsTuneRoll;    // degrees, cgame-only fine bias
 	float adsTuneFov;                               // fovScale preview while tuning, cgame-only

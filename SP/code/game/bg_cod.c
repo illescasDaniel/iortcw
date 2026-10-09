@@ -70,26 +70,28 @@ const codCvarDef_t bg_codCvars[] = {
 	// codmod: FOV zoom magnifies the RF_DEPTHHACK viewmodel; push it forward while ADS so
 	// it doesn't fill the screen from the hip. Used as a fine bias on top of tag_flash align.
 	{ "cod_adsGunFovComp",      "2",    0,            CODOFS( adsGunFovComp ),      0 },
-	// codmod: CoD-style iron-sight auto-align defaults (cgame). Per-weapon table can override.
-	// Luger tune from codmod_tune.log (2026-10-08, final session).
-	{ "cod_adsSightHeight",     "2.5",  0,            CODOFS( adsSightHeight ),     0 },
-	{ "cod_adsBarrelBack",      "13",   0,            CODOFS( adsBarrelBack ),      0 },
-	{ "cod_adsSightDist",       "20",   0,            CODOFS( adsSightDist ),       0 },
-	// codmod: RTCW viewmodels are built for hip-fire; tag_flash "straight" can still look
-	// diagonally held. Applied before sight centering (Luger in-game tune).
-	{ "cod_adsPitch",           "-1",   0,            CODOFS( adsPitch ),           0 },
-	{ "cod_adsYaw",             "-3.5", 0,            CODOFS( adsYaw ),             0 },
-	{ "cod_adsRoll",            "6.5",  0,            CODOFS( adsRoll ),            0 },
-	// codmod: whole-weapon horizontal shift (viewaxis[1]); tune in /cod_menu.
-	{ "cod_adsRight",           "1",    0,            CODOFS( adsRight ),           0 },
-	// codmod: 1 = center dot while ADS (interim); 2 = hide (once all weapons are tuned).
-	{ "cod_adsCrosshair",       "1",    0,            CODOFS( adsCrosshair ),       1 },
+	// codmod: optional master offset on top of absolute per-weapon cg_codAdsView (baked 2026-10-09).
+	// Defaults 0 so table rows are the pose; re-tune with /cod_adsTuneStart.
+	{ "cod_adsSightHeight",     "0",    0,            CODOFS( adsSightHeight ),     0 },
+	{ "cod_adsBarrelBack",      "0",    0,            CODOFS( adsBarrelBack ),      0 },
+	{ "cod_adsSightDist",       "0",    0,            CODOFS( adsSightDist ),       0 },
+	{ "cod_adsPitch",           "0",    0,            CODOFS( adsPitch ),           0 },
+	{ "cod_adsYaw",             "0",    0,            CODOFS( adsYaw ),             0 },
+	{ "cod_adsRoll",            "0",    0,            CODOFS( adsRoll ),            0 },
+	{ "cod_adsRight",           "0",    0,            CODOFS( adsRight ),           0 },
+	// 2 = hide hip crosshair while ADS (iron sights baked); tune tooling kept for re-tune.
+	{ "cod_adsCrosshair",       "2",    0,            CODOFS( adsCrosshair ),       1 },
+	// Debug: force full crosshair while ADS so iron sights can be aligned to screen center.
+	{ "cod_adsCrosshairForce",  "0",    0,            CODOFS( adsCrosshairForce ),  1 },
 	{ "cod_scopeSwitchTime",    "0",    0,            CODOFS( scopeSwitchTime ),    0 },
 
 	// codmod: Phase 3.5 alignment tooling -- see docs/phase-3-ads.md "Alignment tooling".
 	// Dev-only, so these stay un-archived like the rest of the tunables.
 	{ "cod_adsLock",            "0",    0,            CODOFS( adsLock ),            1 },
 	{ "cod_adsTune",            "0",    0,            CODOFS( adsTune ),            1 },
+	{ "cod_adsTuneHeight",      "0",    0,            CODOFS( adsTuneHeight ),      0 },
+	{ "cod_adsTuneBarrel",      "0",    0,            CODOFS( adsTuneBarrel ),      0 },
+	{ "cod_adsTuneDist",        "0",    0,            CODOFS( adsTuneDist ),        0 },
 	{ "cod_adsTuneFwd",         "0",    0,            CODOFS( adsTuneFwd ),         0 },
 	{ "cod_adsTuneRight",       "0",    0,            CODOFS( adsTuneRight ),       0 },
 	{ "cod_adsTuneUp",          "0",    0,            CODOFS( adsTuneUp ),          0 },

@@ -37,6 +37,14 @@ static qboolean cg_codMenuOpen;
 static int cg_codMenuCursor;
 static int cg_codMenuScroll;
 
+// codmod: while the tune menu is open, steal arrow keys from movement/turn binds
+// so UP/DN/LEFT/RIGHT only drive the menu. Restored on close (or map change).
+static qboolean cg_codMenuArrowsStolen;
+static char cg_codMenuArrowBinds[4][128];
+static const int cg_codMenuArrowKeys[4] = {
+	K_UPARROW, K_DOWNARROW, K_LEFTARROW, K_RIGHTARROW
+};
+
 /*
 ================
 CG_CodMenu_Log
@@ -46,18 +54,7 @@ codmod_tune.log under the mod homepath for agent-side tuning review.
 ================
 */
 static void CG_CodMenu_Log( const char *line ) {
-	fileHandle_t f;
-	char buf[512];
-	int len;
-
-	CG_Printf( "%s\n", line );
-
-	Com_sprintf( buf, sizeof( buf ), "%s\n", line );
-	len = (int)strlen( buf );
-	if ( trap_FS_FOpenFile( COD_MENU_LOG_FILE, &f, FS_APPEND ) >= 0 && f ) {
-		trap_FS_Write( buf, len, f );
-		trap_FS_FCloseFile( f );
-	}
+	CG_CodTuneLog( COD_MENU_LOG_FILE, line );
 }
 
 static const char *CG_CodMenu_CvarDefault( const char *name ) {
@@ -116,6 +113,10 @@ static void CG_CodMenu_Adjust( const codMenuItem_t *item, float dir, qboolean fa
 
 	// float
 	v = atof( cur ) + dir * step;
+	// Snap to the step grid so 0.1 increments stay clean (avoid 0.30000001).
+	if ( step > 0.0f ) {
+		v = (float)( (int)( v / step + ( v >= 0.0f ? 0.5f : -0.5f ) ) ) * step;
+	}
 	// codmod: keep menu scale in a usable range (also clamped when drawing)
 	if ( item->cvar && !Q_stricmp( item->cvar, "cod_menuScale" ) ) {
 		if ( v < COD_MENU_SCALE_MIN ) {
@@ -158,6 +159,22 @@ static void CG_CodMenu_ActionToggleHud( void ) {
 		v = 0;
 	}
 	CG_CodMenu_SetValue( "cod_debugHud", va( "%d", v ) );
+}
+
+static void CG_CodMenu_ActionAdsTuneStart( void ) {
+	CG_CodAdsTuneStart_f();
+}
+
+static void CG_CodMenu_ActionAdsTuneNext( void ) {
+	CG_CodAdsTuneNext_f();
+}
+
+static void CG_CodMenu_ActionAdsTuneSave( void ) {
+	CG_CodAdsTuneSave_f();
+}
+
+static void CG_CodMenu_ActionAdsTuneLoad( void ) {
+	CG_CodAdsTuneLoad_f();
 }
 
 // codmod: every tunable, grouped for the overlay. Keep in sync with bg_codCvars.
@@ -321,25 +338,33 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_FLOAT, "cod_scopeSwitchTime",    "cod_scopeSwitchTime",    10,   50,   NULL },
 
 	{ COD_MI_SECTION, "ADS IRON SIGHTS", NULL, 0, 0, NULL },
-	{ COD_MI_FLOAT, "cod_adsSightHeight",     "cod_adsSightHeight",     0.5f, 2,    NULL },
-	{ COD_MI_FLOAT, "cod_adsBarrelBack",      "cod_adsBarrelBack",      0.5f, 2,    NULL },
-	{ COD_MI_FLOAT, "cod_adsSightDist",       "cod_adsSightDist",       0.5f, 2,    NULL },
-	{ COD_MI_FLOAT, "cod_adsPitch",           "cod_adsPitch",           0.5f, 2,    NULL },
-	{ COD_MI_FLOAT, "cod_adsYaw",             "cod_adsYaw",             0.5f, 2,    NULL },
-	{ COD_MI_FLOAT, "cod_adsRoll",            "cod_adsRoll",            0.5f, 2,    NULL },
-	{ COD_MI_FLOAT, "cod_adsRight",           "cod_adsRight",           0.25f, 1,   NULL },
+	{ COD_MI_FLOAT, "cod_adsSightHeight",     "cod_adsSightHeight",     0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsBarrelBack",      "cod_adsBarrelBack",      0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsSightDist",       "cod_adsSightDist",       0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsPitch",           "cod_adsPitch",           0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsYaw",             "cod_adsYaw",             0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsRoll",            "cod_adsRoll",            0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsRight",           "cod_adsRight",           0.1f, 0.5f, NULL },
 	{ COD_MI_INT,   "cod_adsCrosshair",       "cod_adsCrosshair",       1,    1,    NULL },
+	{ COD_MI_BOOL,  "cod_adsCrosshairForce",  "cod_adsCrosshairForce",  1,    1,    NULL },
 
 	{ COD_MI_SECTION, "ADS TUNE (per-weapon live)", NULL, 0, 0, NULL },
 	{ COD_MI_BOOL,  "cod_adsLock",            "cod_adsLock",            1,    1,    NULL },
 	{ COD_MI_BOOL,  "cod_adsTune",            "cod_adsTune",            1,    1,    NULL },
-	{ COD_MI_FLOAT, "cod_adsTuneFwd",         "cod_adsTuneFwd",         0.25f, 1,   NULL },
-	{ COD_MI_FLOAT, "cod_adsTuneRight",       "cod_adsTuneRight",       0.25f, 1,   NULL },
-	{ COD_MI_FLOAT, "cod_adsTuneUp",          "cod_adsTuneUp",          0.25f, 1,   NULL },
-	{ COD_MI_FLOAT, "cod_adsTunePitch",       "cod_adsTunePitch",       0.5f, 2,    NULL },
-	{ COD_MI_FLOAT, "cod_adsTuneYaw",         "cod_adsTuneYaw",         0.5f, 2,    NULL },
-	{ COD_MI_FLOAT, "cod_adsTuneRoll",        "cod_adsTuneRoll",        0.5f, 2,    NULL },
-	{ COD_MI_FLOAT, "cod_adsTuneFov",         "cod_adsTuneFov",         0.05f, 0.1f, NULL },
+	{ COD_MI_FLOAT, "cod_adsTuneHeight",      "cod_adsTuneHeight",      0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsTuneBarrel",      "cod_adsTuneBarrel",      0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsTuneDist",        "cod_adsTuneDist",        0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsTuneFwd",         "cod_adsTuneFwd",         0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsTuneRight",       "cod_adsTuneRight",       0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsTuneUp",          "cod_adsTuneUp",          0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsTunePitch",       "cod_adsTunePitch",       0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsTuneYaw",         "cod_adsTuneYaw",         0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsTuneRoll",        "cod_adsTuneRoll",        0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsTuneFov",         "cod_adsTuneFov",         0.1f, 0.5f, NULL },
+	{ COD_MI_ACTION, "ADS tune START",        NULL, 0, 0, CG_CodMenu_ActionAdsTuneStart },
+	{ COD_MI_ACTION, "ADS tune NEXT weapon",  NULL, 0, 0, CG_CodMenu_ActionAdsTuneNext },
+	{ COD_MI_ACTION, "ADS tune LOAD",         NULL, 0, 0, CG_CodMenu_ActionAdsTuneLoad },
+	{ COD_MI_ACTION, "ADS tune SAVE",         NULL, 0, 0, CG_CodMenu_ActionAdsTuneSave },
 
 	{ COD_MI_SECTION, "DEBUG / ACTIONS", NULL, 0, 0, NULL },
 	{ COD_MI_INT,   "cod_debugHud",           "cod_debugHud",           1,    1,    NULL },
@@ -523,10 +548,53 @@ static qboolean CG_CodMenu_Edge( int *state, qboolean down ) {
 
 /*
 ================
+CG_CodMenu_StealArrows / CG_CodMenu_RestoreArrows
+
+codmod: save + clear UPARROW/DOWNARROW/LEFTARROW/RIGHTARROW bindings while the menu
+is open (they default to +forward/+back/+left/+right and move the player). Also
+release any held move/turn so a held arrow does not stick after unbind.
+================
+*/
+static void CG_CodMenu_StealArrows( void ) {
+	int i;
+
+	if ( cg_codMenuArrowsStolen ) {
+		return;
+	}
+
+	for ( i = 0; i < 4; i++ ) {
+		trap_Key_GetBindingBuf( cg_codMenuArrowKeys[i],
+								cg_codMenuArrowBinds[i],
+								sizeof( cg_codMenuArrowBinds[i] ) );
+		trap_Key_SetBinding( cg_codMenuArrowKeys[i], "" );
+	}
+	cg_codMenuArrowsStolen = qtrue;
+
+	// Clear stuck +forward/+back/+left/+right from a held arrow at open time.
+	trap_SendConsoleCommand( "-forward; -back; -left; -right\n" );
+}
+
+static void CG_CodMenu_RestoreArrows( void ) {
+	int i;
+
+	if ( !cg_codMenuArrowsStolen ) {
+		return;
+	}
+
+	for ( i = 0; i < 4; i++ ) {
+		trap_Key_SetBinding( cg_codMenuArrowKeys[i], cg_codMenuArrowBinds[i] );
+		cg_codMenuArrowBinds[i][0] = 0;
+	}
+	cg_codMenuArrowsStolen = qfalse;
+}
+
+/*
+================
 CG_CodMenu_HandleInput
 
-codmod: poll keys while the menu is open (no KEYCATCH -- gameplay/mouse-look keep working
-so you can ADS-tune and adjust at the same time).
+codmod: poll keys while the menu is open (no KEYCATCH -- WASD/mouse-look keep working
+so you can ADS-tune and adjust at the same time). Arrow keys are unbound from
+movement for the duration of the menu (see StealArrows).
 ================
 */
 static void CG_CodMenu_HandleInput( void ) {
@@ -626,6 +694,7 @@ static void CG_CodMenu_HandleInput( void ) {
 	}
 	if ( CG_CodMenu_Edge( &stEsc, esc ) ) {
 		cg_codMenuOpen = qfalse;
+		CG_CodMenu_RestoreArrows();
 		CG_CodMenu_Log( "codmenu: closed" );
 	}
 }
@@ -718,13 +787,27 @@ void CG_CodMenu_f( void ) {
 			cg_codMenuCursor = CG_CodMenu_NextSelectable( cg_codMenuCursor, 1 );
 		}
 		CG_CodMenu_EnsureCursorVisible();
+		CG_CodMenu_StealArrows();
 		CG_CodMenu_Log( "codmenu: opened" );
-		CG_Printf( "^2codmenu: UP/DN select, LEFT/RIGHT adjust, F5 dump, Esc close\n" );
+		CG_Printf( "^2codmenu: UP/DN select, LEFT/RIGHT adjust (0.1), F5 dump, Esc close\n" );
 	} else {
+		CG_CodMenu_RestoreArrows();
 		CG_CodMenu_Log( "codmenu: closed" );
 	}
 }
 
 void CG_CodMenuDump_f( void ) {
 	CG_CodMenu_DumpAll();
+}
+
+/*
+================
+CG_CodMenu_OnShutdown
+
+codmod: restore stolen arrow binds if the menu was open across a map change / cgame unload.
+================
+*/
+void CG_CodMenu_OnShutdown( void ) {
+	cg_codMenuOpen = qfalse;
+	CG_CodMenu_RestoreArrows();
 }

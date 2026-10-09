@@ -447,6 +447,15 @@ int trap_Key_GetKey( const char *binding ) {
 	return syscall( CG_KEY_GETKEY, binding );
 }
 
+// codmod: used by /cod_menu to steal arrow keys from movement binds
+void trap_Key_GetBindingBuf( int keynum, char *buf, int buflen ) {
+	syscall( CG_KEY_GETBINDINGBUF, keynum, buf, buflen );
+}
+
+void trap_Key_SetBinding( int keynum, const char *binding ) {
+	syscall( CG_KEY_SETBINDING, keynum, binding );
+}
+
 
 int trap_PC_AddGlobalDefine( char *define ) {
 	return syscall( CG_PC_ADD_GLOBAL_DEFINE, define );

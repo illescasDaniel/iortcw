@@ -851,6 +851,20 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		re.AddSpotLightToScene( VMA( 1 ), VMF( 2 ), VMF( 3 ), VMF( 4 ), VMF( 5 ), VMA( 6 ), VMF( 7 ), args[8] );
 		return 0;
 
+	// codmod: key bind get/set for /cod_menu arrow steal
+	case CG_KEY_GETBINDINGBUF: {
+		char *value = Key_GetBinding( args[1] );
+		if ( value ) {
+			Q_strncpyz( VMA( 2 ), value, args[3] );
+		} else {
+			*( (char *)VMA( 2 ) ) = 0;
+		}
+		return 0;
+	}
+	case CG_KEY_SETBINDING:
+		Key_SetBinding( args[1], VMA( 2 ) );
+		return 0;
+
 	default:
 		Com_Error( ERR_DROP, "Bad cgame system trap: %ld", (long int) args[0] );
 	}

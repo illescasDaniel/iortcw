@@ -11,23 +11,67 @@
 // CoD -- no new models required. Table fields:
 //   sightHeight / barrelBack / sightDist  -- geometry of the sight line (0 sightDist => cvar)
 //   fwd/right/up/pitch/yaw/roll           -- fine bias after auto-align (tune these live)
-// Not const: cod_adsTune overwrites the fine-bias fields while tuning.
+// Not const: cod_adsTune overwrites all 9 fields while tuning (absolute pose).
 codAdsView_t cg_codAdsView[WP_NUM_WEAPONS] = {
-	// Geometry biases are 0 -- live defaults live in cod_adsSightHeight / BarrelBack /
-	// SightDist cvars so console tuning works. Nonzero here = extra per-weapon bias.
+	// Absolute iron-sight poses baked from codmod_ads_tune.log (2026-10-09, final pass).
+	// Global iron-sight cvars default to 0 (optional master offset). Re-tune anytime
+	// with /cod_adsTuneStart → Save (tooling kept).
 	//                          sightH  barrelB  sightD   fwd   right  up   pitch yaw roll
-	[WP_LUGER]          = { 0, 0, 0,   0, 0, 0,  0, 0, 0 },
-	[WP_SILENCER]       = { 0, 2, 0,   0, 0, 0,  0, 0, 0 },
-	[WP_COLT]           = { 0, 0, 0,   0, 0, 0,  0, 0, 0 },
+	[WP_LUGER]          = { 2.3f, 13.0f, 20.0f,   0.0f,  1.1f,  0.0f,  -1.0f, -3.7f,  6.5f },
+	[WP_SILENCER]       = { 2.2f, 23.5f, 21.5f,   0.0f,  0.8f,  0.0f,  -0.9f, -3.6f,  6.1f },
+	[WP_COLT]           = { 2.5f, 13.0f, 20.0f,   0.0f,  1.1f,  0.0f,  -1.0f, -1.5f, -0.3f },
 
-	[WP_MP40]           = { 0.5f, 4, 2,   0, 0, 0,  0, 0, 0 },
-	[WP_THOMPSON]       = { 0.5f, 4, 2,   0, 0, 0,  0, 0, 0 },
-	[WP_STEN]           = { 0.3f, 3, 2,   0, 0, 0,  0, 0, 0 },
+	[WP_MP40]           = { 3.0f, 15.7f, 22.0f,   0.0f,  0.2f,  0.3f,  -4.2f,  0.7f,  4.0f },
+	[WP_THOMPSON]       = { 3.0f,  8.0f, 22.0f,   0.0f,  0.0f,  0.8f,  -5.0f,  0.3f,  0.0f },
+	[WP_STEN]           = { 3.1f, 17.5f, 23.0f,   0.5f,  0.3f, -2.1f,  -6.3f,  3.8f, -2.4f },
 
-	[WP_MAUSER]         = { 1.0f, 12, 4,   0, 0, 0,  0, 0, 0 },
-	[WP_GARAND]         = { 1.0f, 12, 4,   0, 0, 0,  0, 0, 0 },
-	[WP_FG42]           = { 0.5f,  8, 3,   0, 0, 0,  0, 0, 0 },
+	[WP_MAUSER]         = { 3.5f, 27.5f, 24.0f,  -0.5f,  1.0f,  2.0f,   1.9f, -2.4f, -1.5f },
+	[WP_GARAND]         = { 3.5f, 25.0f, 24.0f,   0.0f,  0.6f,  1.2f,   0.0f, -0.6f,  1.0f },
+	[WP_FG42]           = { 3.0f, 21.0f, 23.0f,   0.0f, -0.1f,  0.0f,  -1.0f,  0.5f, -1.5f },
 };
+
+// codmod: ADS-capable iron-sight weapons for the tune session (scopes excluded).
+static const int cg_codAdsTuneWeapons[] = {
+	WP_LUGER, WP_SILENCER, WP_COLT,
+	WP_MP40, WP_THOMPSON, WP_STEN,
+	WP_MAUSER, WP_GARAND, WP_FG42
+};
+static const int cg_codAdsTuneWeaponCount =
+	(int)( sizeof( cg_codAdsTuneWeapons ) / sizeof( cg_codAdsTuneWeapons[0] ) );
+
+// Bitmask: weapon table row has been converted to absolute (global+bias folded in) this map.
+static unsigned int cg_codAdsTuneAbsMask;
+
+#define COD_ADS_TUNE_LOG_FILE "codmod_ads_tune.log"
+
+static const char *CG_CodWeaponName( int weapon );
+
+/*
+================
+CG_CodTuneLog
+
+codmod: append one line to a file under fs_homepath/fs_game and echo to the console.
+Shared by the tune menu (codmod_tune.log) and ADS SAVE/DUMP (codmod_ads_tune.log).
+================
+*/
+void CG_CodTuneLog( const char *filename, const char *line ) {
+	fileHandle_t f;
+	char buf[512];
+	int len;
+
+	if ( !filename || !filename[0] || !line ) {
+		return;
+	}
+
+	CG_Printf( "%s\n", line );
+
+	Com_sprintf( buf, sizeof( buf ), "%s\n", line );
+	len = (int)strlen( buf );
+	if ( trap_FS_FOpenFile( filename, &f, FS_APPEND ) >= 0 && f ) {
+		trap_FS_Write( buf, len, f );
+		trap_FS_FCloseFile( f );
+	}
+}
 
 /*
 ================
@@ -282,12 +326,18 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	weapon = &cg_weapons[weaponNum];
 	ads = &cg_codAdsView[weaponNum];
 
-	// codmod: live cvars are the knobs (set/seta in console). Per-weapon table values are
-	// ADDED as a bias on top -- previously a nonzero table entry replaced the cvar entirely,
-	// so `seta cod_adsSightHeight` looked like a no-op on the Luger.
-	sightHeight = bg_cod.adsSightHeight + ads->sightHeight;
-	barrelBack  = bg_cod.adsBarrelBack  + ads->barrelBack;
-	sightDist   = bg_cod.adsSightDist   + ads->sightDist;
+	// codmod: normally live cvars are the knobs and table values are ADDED as a bias.
+	// While cod_adsTune is on for the selected weapon, the table holds an absolute pose
+	// (globals already folded in) so tweaking one gun cannot shift another mid-session.
+	if ( bg_cod.adsTune && weaponNum == cg.weaponSelect ) {
+		sightHeight = ads->sightHeight;
+		barrelBack  = ads->barrelBack;
+		sightDist   = ads->sightDist;
+	} else {
+		sightHeight = bg_cod.adsSightHeight + ads->sightHeight;
+		barrelBack  = bg_cod.adsBarrelBack  + ads->barrelBack;
+		sightDist   = bg_cod.adsSightDist   + ads->sightDist;
+	}
 
 	// codmod: too small = looking inside the mesh; too large = floating mid-screen arms.
 	// Pistol defaults from codmod_tune.log (Dist 20 / Height 2.5 / Yaw -3.5 / Roll 6.5).
@@ -343,9 +393,15 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 
 		// Mesh hold bias BEFORE sight centering -- applying yaw/roll after translate left the
 		// sights off-axis and kept ADS looking diagonal vs CoD.
-		alignedAngles[PITCH] += bg_cod.adsPitch + ads->pitch;
-		alignedAngles[YAW]   += bg_cod.adsYaw   + ads->yaw;
-		alignedAngles[ROLL]  += bg_cod.adsRoll  + ads->roll;
+		if ( bg_cod.adsTune && weaponNum == cg.weaponSelect ) {
+			alignedAngles[PITCH] += ads->pitch;
+			alignedAngles[YAW]   += ads->yaw;
+			alignedAngles[ROLL]  += ads->roll;
+		} else {
+			alignedAngles[PITCH] += bg_cod.adsPitch + ads->pitch;
+			alignedAngles[YAW]   += bg_cod.adsYaw   + ads->yaw;
+			alignedAngles[ROLL]  += bg_cod.adsRoll  + ads->roll;
+		}
 
 		// Pass 2: at the biased orientation, put the rear sight on the optical axis.
 		VectorCopy( alignedOrigin, hand.origin );
@@ -371,19 +427,56 @@ void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, f
 	}
 
 	// Position-only fine bias. Angle bias is already in alignedAngles.
-	// cod_adsRight shifts the whole gun horizontally (plus per-weapon ads->right).
-	VectorMA( handOrigin, ads->fwd   * e, cg.refdef.viewaxis[0], handOrigin );
-	VectorMA( handOrigin, ( bg_cod.adsRight + ads->right ) * e, cg.refdef.viewaxis[1], handOrigin );
-	VectorMA( handOrigin, ads->up    * e, cg.refdef.viewaxis[2], handOrigin );
+	// cod_adsRight shifts the whole gun horizontally (plus per-weapon ads->right),
+	// except while adsTune (table right is already absolute).
+	VectorMA( handOrigin, ads->fwd * e, cg.refdef.viewaxis[0], handOrigin );
+	if ( bg_cod.adsTune && weaponNum == cg.weaponSelect ) {
+		VectorMA( handOrigin, ads->right * e, cg.refdef.viewaxis[1], handOrigin );
+	} else {
+		VectorMA( handOrigin, ( bg_cod.adsRight + ads->right ) * e, cg.refdef.viewaxis[1], handOrigin );
+	}
+	VectorMA( handOrigin, ads->up * e, cg.refdef.viewaxis[2], handOrigin );
+}
+
+/*
+================
+CG_CodAdsTuneEnsureAbsolute
+
+codmod: fold global iron-sight cvars into the per-weapon table once per weapon per map
+so adsTune can treat the row as an absolute pose without double-counting globals.
+================
+*/
+static void CG_CodAdsTuneEnsureAbsolute( int weapon ) {
+	codAdsView_t *ads;
+	unsigned int bit;
+
+	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS || weapon >= 32 ) {
+		return;
+	}
+
+	bit = 1u << weapon;
+	if ( cg_codAdsTuneAbsMask & bit ) {
+		return;
+	}
+
+	ads = &cg_codAdsView[weapon];
+	ads->sightHeight += bg_cod.adsSightHeight;
+	ads->barrelBack  += bg_cod.adsBarrelBack;
+	ads->sightDist   += bg_cod.adsSightDist;
+	ads->pitch       += bg_cod.adsPitch;
+	ads->yaw         += bg_cod.adsYaw;
+	ads->roll        += bg_cod.adsRoll;
+	ads->right       += bg_cod.adsRight;
+	cg_codAdsTuneAbsMask |= bit;
 }
 
 /*
 ================
 CG_CodUpdateAdsTune
 
-codmod: cod_adsTune 1 live-overwrites the current weapon's cg_codAdsView entry from the
-cod_adsTuneFwd/Right/Up/Pitch/Yaw/Roll cvars every frame (phase 3.5 alignment tooling).
-Called once per real frame from CG_DrawActiveFrame (cg_view.c).
+codmod: cod_adsTune 1 live-overwrites the current weapon's cg_codAdsView entry from all
+cod_adsTune* cvars every frame (geometry + fine bias). Called once per real frame from
+CG_DrawActiveFrame (cg_view.c).
 ================
 */
 void CG_CodUpdateAdsTune( void ) {
@@ -394,12 +487,21 @@ void CG_CodUpdateAdsTune( void ) {
 		return;
 	}
 
-	weapon = cg.predictedPlayerState.weapon;
+	// Use weaponSelect (not predicted weapon) so Next/Load stay in sync during switch anims.
+	weapon = cg.weaponSelect;
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		return;
 	}
 
+	// Tune* cvars are already absolute; mark the row so later loads do not re-fold globals.
+	if ( weapon < 32 ) {
+		cg_codAdsTuneAbsMask |= ( 1u << weapon );
+	}
+
 	ads = &cg_codAdsView[weapon];
+	ads->sightHeight = bg_cod.adsTuneHeight;
+	ads->barrelBack  = bg_cod.adsTuneBarrel;
+	ads->sightDist   = bg_cod.adsTuneDist;
 	ads->fwd   = bg_cod.adsTuneFwd;
 	ads->right = bg_cod.adsTuneRight;
 	ads->up    = bg_cod.adsTuneUp;
@@ -412,35 +514,64 @@ void CG_CodUpdateAdsTune( void ) {
 ================
 CG_CodAdsTuneLoad_f
 
-codmod: "cod_adsTuneLoad" console command (phase 3.5 alignment tooling). Copies the
-current weapon's cg_codAdsView entry (and its resolved fovScale) into the cod_adsTune*
-cvars, so tuning a weapon that already has values starts from them instead of from zero.
+codmod: "cod_adsTuneLoad" — copies the current weapon's effective iron-sight pose into
+cod_adsTune* cvars. While adsTune is on, folds globals into the table once per weapon
+so the knobs match what you currently see. While adsTune is off, seeds from
+global+table without mutating the table.
 ================
 */
 void CG_CodAdsTuneLoad_f( void ) {
 	int weapon;
 	codAdsView_t *ads;
+	const char *name;
+	float height, barrel, dist, fwd, right, up, pitch, yaw, roll;
 
-	weapon = cg.predictedPlayerState.weapon;
+	weapon = cg.weaponSelect;
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		CG_Printf( "cod_adsTuneLoad: no weapon selected\n" );
 		return;
 	}
 
 	ads = &cg_codAdsView[weapon];
-	trap_Cvar_Set( "cod_adsTuneFwd", va( "%g", ads->fwd ) );
-	trap_Cvar_Set( "cod_adsTuneRight", va( "%g", ads->right ) );
-	trap_Cvar_Set( "cod_adsTuneUp", va( "%g", ads->up ) );
-	trap_Cvar_Set( "cod_adsTunePitch", va( "%g", ads->pitch ) );
-	trap_Cvar_Set( "cod_adsTuneYaw", va( "%g", ads->yaw ) );
-	trap_Cvar_Set( "cod_adsTuneRoll", va( "%g", ads->roll ) );
+	if ( bg_cod.adsTune ) {
+		CG_CodAdsTuneEnsureAbsolute( weapon );
+		height = ads->sightHeight;
+		barrel = ads->barrelBack;
+		dist   = ads->sightDist;
+		fwd    = ads->fwd;
+		right  = ads->right;
+		up     = ads->up;
+		pitch  = ads->pitch;
+		yaw    = ads->yaw;
+		roll   = ads->roll;
+	} else {
+		height = bg_cod.adsSightHeight + ads->sightHeight;
+		barrel = bg_cod.adsBarrelBack  + ads->barrelBack;
+		dist   = bg_cod.adsSightDist   + ads->sightDist;
+		fwd    = ads->fwd;
+		right  = bg_cod.adsRight + ads->right;
+		up     = ads->up;
+		pitch  = bg_cod.adsPitch + ads->pitch;
+		yaw    = bg_cod.adsYaw   + ads->yaw;
+		roll   = bg_cod.adsRoll  + ads->roll;
+	}
+
+	trap_Cvar_Set( "cod_adsTuneHeight", va( "%g", height ) );
+	trap_Cvar_Set( "cod_adsTuneBarrel", va( "%g", barrel ) );
+	trap_Cvar_Set( "cod_adsTuneDist", va( "%g", dist ) );
+	trap_Cvar_Set( "cod_adsTuneFwd", va( "%g", fwd ) );
+	trap_Cvar_Set( "cod_adsTuneRight", va( "%g", right ) );
+	trap_Cvar_Set( "cod_adsTuneUp", va( "%g", up ) );
+	trap_Cvar_Set( "cod_adsTunePitch", va( "%g", pitch ) );
+	trap_Cvar_Set( "cod_adsTuneYaw", va( "%g", yaw ) );
+	trap_Cvar_Set( "cod_adsTuneRoll", va( "%g", roll ) );
 	trap_Cvar_Set( "cod_adsTuneFov", va( "%g", BG_CodAdsFovScale( weapon ) ) );
 
-	CG_Printf( "cod_adsTuneLoad: loaded weapon %d\n", weapon );
+	name = CG_CodWeaponName( weapon );
+	CG_Printf( "cod_adsTuneLoad: loaded %s (%d)\n", name ? name : "?", weapon );
 }
 
-// codmod: weapon enum -> name, for CG_CodAdsTuneDump_f's pasteable output (phase 3.5).
-// Only the ADS-relevant weapons are named; anything else just prints its numeric index.
+// Only the ADS-relevant weapons are named; anything else returns NULL.
 static const char *CG_CodWeaponName( int weapon ) {
 	switch ( weapon ) {
 	case WP_LUGER:        return "WP_LUGER";
@@ -461,39 +592,184 @@ static const char *CG_CodWeaponName( int weapon ) {
 
 /*
 ================
+CG_CodAdsTuneFormatCLine
+
+codmod: pasteable cg_codAdsView initializer for one weapon.
+================
+*/
+static void CG_CodAdsTuneFormatCLine( int weapon, const codAdsView_t *ads, char *out, int outSize ) {
+	const char *name;
+
+	name = CG_CodWeaponName( weapon );
+	if ( name ) {
+		Com_sprintf( out, outSize,
+					 "[%s] = { %gf, %gf, %gf,  %gf, %gf, %gf,  %gf, %gf, %gf },",
+					 name,
+					 ads->sightHeight, ads->barrelBack, ads->sightDist,
+					 ads->fwd, ads->right, ads->up,
+					 ads->pitch, ads->yaw, ads->roll );
+	} else {
+		Com_sprintf( out, outSize,
+					 "[%d] = { %gf, %gf, %gf,  %gf, %gf, %gf,  %gf, %gf, %gf },",
+					 weapon,
+					 ads->sightHeight, ads->barrelBack, ads->sightDist,
+					 ads->fwd, ads->right, ads->up,
+					 ads->pitch, ads->yaw, ads->roll );
+	}
+}
+
+/*
+================
 CG_CodAdsTuneDump_f
 
-codmod: "cod_adsTuneDump" console command (phase 3.5 alignment tooling). Prints a
-ready-to-paste C initializer line for the current weapon's cg_codAdsView entry.
+codmod: "cod_adsTuneDump" — prints a pasteable C initializer and appends it to
+codmod_ads_tune.log (no SAVE marker; recoverable scratch dump).
 ================
 */
 void CG_CodAdsTuneDump_f( void ) {
 	int weapon;
 	codAdsView_t *ads;
-	const char *name;
+	char line[256];
 
-	weapon = cg.predictedPlayerState.weapon;
+	weapon = cg.weaponSelect;
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		CG_Printf( "cod_adsTuneDump: no weapon selected\n" );
 		return;
 	}
 
+	if ( bg_cod.adsTune ) {
+		CG_CodAdsTuneEnsureAbsolute( weapon );
+	}
+
+	ads = &cg_codAdsView[weapon];
+	CG_CodAdsTuneFormatCLine( weapon, ads, line, sizeof( line ) );
+	CG_CodTuneLog( COD_ADS_TUNE_LOG_FILE, line );
+}
+
+/*
+================
+CG_CodAdsTuneSave_f
+
+codmod: "cod_adsTuneSave" — append a machine-parseable SAVE + C initializer for the
+current weapon to codmod_ads_tune.log. Latest SAVE per weapon wins at bake time.
+================
+*/
+void CG_CodAdsTuneSave_f( void ) {
+	int weapon;
+	codAdsView_t *ads;
+	const char *name;
+	char saveLine[512];
+	char cLine[256];
+	float fov;
+
+	weapon = cg.weaponSelect;
+	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
+		CG_Printf( "cod_adsTuneSave: no weapon selected\n" );
+		return;
+	}
+
+	if ( bg_cod.adsTune ) {
+		CG_CodAdsTuneEnsureAbsolute( weapon );
+	}
+
 	ads = &cg_codAdsView[weapon];
 	name = CG_CodWeaponName( weapon );
+	fov = bg_cod.adsTune ? bg_cod.adsTuneFov : BG_CodAdsFovScale( weapon );
 
-	if ( name ) {
-		CG_Printf( "[%s] = { %gf, %gf, %gf,  %gf, %gf, %gf,  %gf, %gf, %gf },\n",
-				   name,
-				   ads->sightHeight, ads->barrelBack, ads->sightDist,
-				   ads->fwd, ads->right, ads->up,
-				   ads->pitch, ads->yaw, ads->roll );
-	} else {
-		CG_Printf( "[%d] = { %gf, %gf, %gf,  %gf, %gf, %gf,  %gf, %gf, %gf },\n",
-				   weapon,
-				   ads->sightHeight, ads->barrelBack, ads->sightDist,
-				   ads->fwd, ads->right, ads->up,
-				   ads->pitch, ads->yaw, ads->roll );
+	Com_sprintf( saveLine, sizeof( saveLine ),
+				 "ads_tune SAVE weapon=%s id=%d height=%g barrel=%g dist=%g fwd=%g right=%g up=%g pitch=%g yaw=%g roll=%g fov=%g",
+				 name ? name : "?",
+				 weapon,
+				 ads->sightHeight, ads->barrelBack, ads->sightDist,
+				 ads->fwd, ads->right, ads->up,
+				 ads->pitch, ads->yaw, ads->roll,
+				 fov );
+	CG_CodTuneLog( COD_ADS_TUNE_LOG_FILE, saveLine );
+
+	CG_CodAdsTuneFormatCLine( weapon, ads, cLine, sizeof( cLine ) );
+	CG_CodTuneLog( COD_ADS_TUNE_LOG_FILE, cLine );
+}
+
+/*
+================
+CG_CodAdsTunePrintChecklist
+
+codmod: print the 9 iron-sight weapons for the tune session.
+================
+*/
+static void CG_CodAdsTunePrintChecklist( void ) {
+	int i, w;
+	const char *name;
+
+	CG_Printf( "ads_tune checklist (%d iron-sight weapons):\n", cg_codAdsTuneWeaponCount );
+	for ( i = 0; i < cg_codAdsTuneWeaponCount; i++ ) {
+		w = cg_codAdsTuneWeapons[i];
+		name = CG_CodWeaponName( w );
+		CG_Printf( "  %d) %s (id %d)\n", i + 1, name ? name : "?", w );
 	}
+}
+
+/*
+================
+CG_CodAdsTuneStart_f
+
+codmod: "cod_adsTuneStart" — enable adsLock + adsTune, load current weapon, print
+checklist. Run `give all` (cheats) so every ADS weapon is available.
+================
+*/
+void CG_CodAdsTuneStart_f( void ) {
+	cg_codAdsTuneAbsMask = 0;
+
+	trap_Cvar_Set( "cod_adsLock", "1" );
+	trap_Cvar_Set( "cod_adsCrosshairForce", "1" ); // full reticle while ADS for center align
+	trap_Cvar_Set( "cod_adsTune", "0" ); // load effective before overwrite starts
+	CG_CodAdsTuneLoad_f();
+	trap_Cvar_Set( "cod_adsTune", "1" );
+
+	CG_Printf( "cod_adsTuneStart: adsLock=1 adsTune=1 adsCrosshairForce=1\n" );
+	CG_CodAdsTunePrintChecklist();
+	CG_Printf( "Next: /give all   then tune each gun and /cod_adsTuneSave\n" );
+	CG_Printf( "Cycle: /cod_adsTuneNext   Log: run/home/codmod/codmod_ads_tune.log\n" );
+	CG_Printf( "Crosshair stays on while ADS (cod_adsCrosshairForce). Set 0 when done.\n" );
+	CG_CodTuneLog( COD_ADS_TUNE_LOG_FILE, "ads_tune START session" );
+}
+
+/*
+================
+CG_CodAdsTuneNext_f
+
+codmod: "cod_adsTuneNext" — cycle to the next of the 9 ADS weapons and TuneLoad.
+================
+*/
+void CG_CodAdsTuneNext_f( void ) {
+	int cur, i, idx, next, last;
+
+	if ( !cg.snap ) {
+		return;
+	}
+
+	cur = cg.weaponSelect;
+	idx = 0;
+	for ( i = 0; i < cg_codAdsTuneWeaponCount; i++ ) {
+		if ( cg_codAdsTuneWeapons[i] == cur ) {
+			idx = i;
+			break;
+		}
+	}
+
+	next = cg_codAdsTuneWeapons[( idx + 1 ) % cg_codAdsTuneWeaponCount];
+	last = cg.weaponSelect;
+
+	if ( !( COM_BitCheck( cg.predictedPlayerState.weapons, next ) ) ) {
+		CG_Printf( "cod_adsTuneNext: %s not owned — run /give all\n",
+				   CG_CodWeaponName( next ) ? CG_CodWeaponName( next ) : "?" );
+		return;
+	}
+
+	CG_FinishWeaponChange( last, next );
+	CG_CodAdsTuneLoad_f();
+	CG_Printf( "cod_adsTuneNext: now %s — tweak then /cod_adsTuneSave\n",
+			   CG_CodWeaponName( next ) ? CG_CodWeaponName( next ) : "?" );
 }
 
 // codmod: phase 3.8 scope-hold edge/queue tracking. File-static is fine -- CG_DrawActiveFrame
@@ -1345,6 +1621,11 @@ void CG_CodDrawCrosshair( const vec4_t hcolor ) {
 	ps = &cg.predictedPlayerState;
 	ads = ( bg_cod.enable && bg_cod.adsEnable ) ? CG_CodAdsFrac() : 0.0f;
 	ads = BG_CodSmoothstep( ads );
+
+	// Debug: keep the full reticle while ADS so iron sights can be aligned to center.
+	if ( bg_cod.adsCrosshairForce ) {
+		ads = 0.0f;
+	}
 
 	// adsCrosshair 2: hide everything once mostly ADS (same gate as the interim path).
 	if ( bg_cod.adsCrosshair >= 2 && ads > 0.5f ) {
