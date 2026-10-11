@@ -1301,6 +1301,23 @@ void CL_SetCGameTime( void ) {
 	// messages from the demo file until the cgame definately
 	// has valid snapshots to interpolate between
 
+	// cl_benchDemo: measure real-time frame durations; serverTime is left alone
+	// so playback runs at normal speed (unlike timedemo's fixed 50 ms steps).
+	if ( cl_benchDemo->integer && !cl_timedemo->integer ) {
+		long long now = Sys_Microseconds();
+
+		if ( !clc.benchStartUs ) {
+			clc.benchStartUs = now;
+		} else if ( now - clc.benchStartUs >= BENCH_WARMUP_US ) {
+			if ( !clc.benchMeasureUs ) {
+				clc.benchMeasureUs = now;
+			} else if ( clc.benchFrames < MAX_BENCH_FRAMES ) {
+				clc.benchDurations[ clc.benchFrames++ ] = (int)( now - clc.benchLastUs );
+			}
+		}
+		clc.benchLastUs = now;
+	}
+
 	// a timedemo will always use a deterministic set of time samples
 	// no matter what speed machine it is run on,
 	// while a normal demo may have different time samples

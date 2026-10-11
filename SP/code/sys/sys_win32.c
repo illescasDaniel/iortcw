@@ -235,6 +235,18 @@ char *Sys_GogPath( void )
 Sys_Milliseconds
 ================
 */
+long long Sys_Microseconds( void )
+{
+	static LARGE_INTEGER freq;
+	LARGE_INTEGER now;
+
+	if ( !freq.QuadPart ) {
+		QueryPerformanceFrequency( &freq );
+	}
+	QueryPerformanceCounter( &now );
+	return now.QuadPart * 1000000LL / freq.QuadPart;
+}
+
 int sys_timeBase;
 int Sys_Milliseconds (void)
 {

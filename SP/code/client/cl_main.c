@@ -81,6 +81,7 @@ cvar_t  *cl_shownet = NULL;     // NERVE - SMF - This is referenced in msg.c and
 cvar_t  *cl_showSend;
 cvar_t  *cl_timedemo;
 cvar_t	*cl_timedemoLog;
+cvar_t	*cl_benchDemo;
 cvar_t	*cl_autoRecordDemo;
 cvar_t	*cl_aviFrameRate;
 cvar_t	*cl_aviMotionJpeg;
@@ -875,6 +876,91 @@ static float CL_DemoFrameDurationSDev( void )
 	return sqrt( variance );
 }
 
+static int QDECL CL_BenchCmp( const void *a, const void *b ) {
+	return *(const int *)a - *(const int *)b;
+}
+
+/*
+=================
+CL_ReportBenchDemo
+
+Frame-time statistics for a cl_benchDemo run (real-time demo playback).
+=================
+*/
+static void CL_ReportBenchDemo( void ) {
+	static int sorted[MAX_BENCH_FRAMES];
+	int n = clc.benchFrames;
+	int i, slow, hitches = 0;
+	double total = 0, slowSum = 0, seconds, avgFps, low1Fps;
+	double median, p95, p99, maxMs;
+	char summary[256], line[512], head[512];
+	fileHandle_t f;
+
+	if ( n < 10 ) {
+		Com_Printf( "codmod bench: too few frames (%d), demo too short?\n", n );
+		Cvar_Set( "cl_benchSummary", "no result (demo too short)" );
+		return;
+	}
+
+	Com_Memcpy( sorted, clc.benchDurations, n * sizeof( int ) );
+	qsort( sorted, n, sizeof( int ), CL_BenchCmp );
+
+	for ( i = 0; i < n; i++ ) {
+		total += sorted[i];
+	}
+	median = sorted[n / 2] / 1000.0;
+	p95 = sorted[(int)( n * 0.95 )] / 1000.0;
+	p99 = sorted[(int)( n * 0.99 )] / 1000.0;
+	maxMs = sorted[n - 1] / 1000.0;
+	for ( i = 0; i < n; i++ ) {
+		if ( sorted[i] > median * 3000.0 ) {
+			hitches++;
+		}
+	}
+
+	// 1% low: average of the slowest 1% of frames, as FPS
+	slow = n / 100;
+	if ( slow < 1 ) {
+		slow = 1;
+	}
+	for ( i = n - slow; i < n; i++ ) {
+		slowSum += sorted[i];
+	}
+	low1Fps = 1000000.0 / ( slowSum / slow );
+	seconds = total / 1000000.0;
+	avgFps = n / seconds;
+
+	Com_sprintf( summary, sizeof( summary ), "%.0f fps avg | 1%% low %.0f | P99 %.1f ms | %d frames",
+				 avgFps, low1Fps, p99, n );
+	Cvar_Set( "cl_benchSummary", summary );
+
+	Com_sprintf( line, sizeof( line ),
+				 "frames=%d seconds=%.2f avg_fps=%.1f low1_fps=%.1f median_ms=%.3f p95_ms=%.3f p99_ms=%.3f max_ms=%.2f hitches=%d",
+				 n, seconds, avgFps, low1Fps, median, p95, p99, maxMs, hitches );
+	Com_Printf( "codmod bench: %s\n", line );
+
+	Com_sprintf( head, sizeof( head ), "res=%dx%d msaa=%s swap=%s maxfps=%s renderer=%s",
+				 cls.glconfig.vidWidth, cls.glconfig.vidHeight,
+				 Cvar_VariableString( "r_ext_framebuffer_multisample" ),
+				 Cvar_VariableString( "r_swapInterval" ),
+				 Cvar_VariableString( "com_maxfps" ),
+				 Cvar_VariableString( "cl_renderer" ) );
+	Com_Printf( "codmod bench cfg: %s\n", head );
+	if ( Cvar_VariableIntegerValue( "r_swapInterval" ) != 0 || Cvar_VariableIntegerValue( "com_maxfps" ) != 0 ) {
+		Com_Printf( S_COLOR_YELLOW "codmod bench: WARNING vsync/fps cap active, FPS is limited (want r_swapInterval 0, com_maxfps 0)\n" );
+	}
+
+	f = FS_FOpenFileWrite( "benchmarks/last_frametimes.txt" );
+	if ( f ) {
+		FS_Printf( f, "# %s\n# %s\n# microseconds per frame, in order\n", line, head );
+		for ( i = 0; i < n; i++ ) {
+			FS_Printf( f, "%d\n", clc.benchDurations[i] );
+		}
+		FS_FCloseFile( f );
+		Com_Printf( "benchmarks/last_frametimes.txt written\n" );
+	}
+}
+
 /*
 =================
 CL_DemoCompleted
@@ -883,6 +969,10 @@ CL_DemoCompleted
 void CL_DemoCompleted( void )
 {
 	char buffer[ MAX_STRING_CHARS ];
+
+	if ( cl_benchDemo && cl_benchDemo->integer && !cl_timedemo->integer ) {
+		CL_ReportBenchDemo();
+	}
 
 	if( cl_timedemo && cl_timedemo->integer )
 	{
@@ -3675,6 +3765,8 @@ void CL_Init( void ) {
 
 	cl_timedemo = Cvar_Get( "timedemo", "0", 0 );
 	cl_timedemoLog = Cvar_Get ("cl_timedemoLog", "", CVAR_ARCHIVE);
+	cl_benchDemo = Cvar_Get( "cl_benchDemo", "0", CVAR_TEMP );
+	Cvar_Get( "cl_benchSummary", "", CVAR_TEMP );
 	cl_autoRecordDemo = Cvar_Get ("cl_autoRecordDemo", "0", CVAR_ARCHIVE);
 	cl_aviFrameRate = Cvar_Get ("cl_aviFrameRate", "25", CVAR_ARCHIVE);
 	cl_aviMotionJpeg = Cvar_Get ("cl_aviMotionJpeg", "1", CVAR_ARCHIVE);
