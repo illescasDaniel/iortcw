@@ -609,9 +609,17 @@ static qboolean PM_CheckJump( void ) {
 		return qfalse;      // don't allow jump until all buttons are up
 	}
 
-	// codmod: no jump while prone (phase 6b); exit already consumed the press
-	if ( !pm->ps->aiChar && ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
-		return qfalse;
+	// codmod: no jump while prone or during prone stand-up/down (phase 6b).
+	// Jump-to-stand must not launch after the exit frame — hold JUMP_HELD until release.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.proneEnable ) {
+		if ( ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE )
+			 || pm->ps->stats[STAT_COD_STANCE] > 0 ) {
+			if ( pm->cmd.upmove >= 10 ) {
+				pm->ps->pm_flags |= PMF_JUMP_HELD;
+				pm->cmd.upmove = 0;
+			}
+			return qfalse;
+		}
 	}
 
 	if ( pm->cmd.upmove < 10 ) {
@@ -1771,6 +1779,14 @@ static void PM_CheckDuck( void ) {
 			pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
 			if ( !trace.allsolid ) {
 				pm->ps->pm_flags &= ~PMF_DUCKED;
+				// codmod: crouch → stand via jump must not also hop. Latch JUMP_HELD so
+				// CheckJump ignores this press until the jump key is released.
+				if ( !pm->ps->aiChar && bg_cod.enable ) {
+					pm->ps->pm_flags |= PMF_JUMP_HELD;
+					if ( pm->cmd.upmove > 0 ) {
+						pm->cmd.upmove = 0;
+					}
+				}
 			}
 		}
 	}
@@ -3978,12 +3994,13 @@ static void PM_CodCheckProne( void ) {
 	}
 
 	wantExit = qfalse;
-	if ( isProne && stance == 0 && ( pressed || jumpPressed || crouchPressed ) ) {
+	// Allow exit during cooldown (stance < 0) so taps aren't eaten after stand-up.
+	if ( isProne && stance <= 0 && ( pressed || jumpPressed || crouchPressed ) ) {
 		wantExit = qtrue;
 	}
 
-	// enter
-	if ( !isProne && pressed && stance == 0 ) {
+	// enter — allow during cooldown so re-prone isn't delayed after a quick stand
+	if ( !isProne && pressed && stance <= 0 ) {
 		qboolean canEnter = qtrue;
 
 		if ( pm->ps->groundEntityNum == ENTITYNUM_NONE
@@ -4047,9 +4064,10 @@ static void PM_CodCheckProne( void ) {
 				pm->ps->pm_flags |= PMF_DUCKED;
 			}
 
-			// consume jump so PM_CheckJump does not also launch this frame
+			// Consume jump until release so stand-up does not also launch.
 			if ( jumpPressed ) {
 				pm->cmd.upmove = 0;
+				pm->ps->pm_flags |= PMF_JUMP_HELD;
 			}
 		}
 		// else stay prone — nothing fits

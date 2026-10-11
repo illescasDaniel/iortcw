@@ -218,6 +218,9 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_FLOAT, "cod_ammoScale",          "cod_ammoScale",          0.25f, 1,    NULL },
 	{ COD_MI_BOOL,  "cod_interactHint",       "cod_interactHint",       1,     1,    NULL },
 	{ COD_MI_BOOL,  "cod_padGlyphs",          "cod_padGlyphs",          1,     1,    NULL },
+	{ COD_MI_FLOAT, "cod_padSensX",           "cod_padSensX",           0.05f, 0.1f, NULL },
+	{ COD_MI_FLOAT, "cod_padSensY",           "cod_padSensY",           0.05f, 0.1f, NULL },
+	{ COD_MI_BOOL,  "cod_padAutoAim",         "cod_padAutoAim",         1,     1,    NULL },
 
 	{ COD_MI_SECTION, "HUD", NULL, 0, 0, NULL },
 	{ COD_MI_BOOL,  "cod_hudEnable",          "cod_hudEnable",          1,     1,    NULL },

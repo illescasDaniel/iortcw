@@ -1525,9 +1525,9 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.sizeCursor = trap_R_RegisterShaderNoMip( "ui/assets/sizecursor.tga" );
 	cgs.media.selectCursor = trap_R_RegisterShaderNoMip( "ui/assets/selectcursor.tga" );
 
-	// codmod: pad interact glyphs (Xbox-like / PlayStation-like, original art)
-	cgs.media.padXboxDpadUp = trap_R_RegisterShaderNoMip( "ui/glyphs/pad_xbox_dpad_up" );
-	cgs.media.padPsDpadUp = trap_R_RegisterShaderNoMip( "ui/glyphs/pad_ps_dpad_up" );
+	// codmod: pad interact glyphs — hold X / Square (CoD-style use)
+	cgs.media.padXboxX = trap_R_RegisterShaderNoMip( "ui/glyphs/pad_xbox_x" );
+	cgs.media.padPsSquare = trap_R_RegisterShaderNoMip( "ui/glyphs/pad_ps_square" );
 
 	CG_LoadingString( " - game media done" );
 

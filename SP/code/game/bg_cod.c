@@ -40,7 +40,7 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_sprintForwardOnly",  "1",    0,            CODOFS( sprintForwardOnly ),  1 },
 	{ "cod_sprintJumpCost",     "2000", 0,            CODOFS( sprintJumpCost ),     0 },
 
-	{ "cod_duckTime",           "70",   0,            CODOFS( duckTime ),           0 },
+	{ "cod_duckTime",           "160",  0,            CODOFS( duckTime ),           0 },
 	{ "cod_duckEase",           "1",    0,            CODOFS( duckEase ),           1 },
 	{ "cod_duckGunDip",         "1",    0,            CODOFS( duckGunDip ),         1 },
 
@@ -159,6 +159,11 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_interactHint",       "1",    0,            CODOFS( interactHint ),       1 },
 	{ "cod_padGlyphs",          "1",    0,            CODOFS( padGlyphs ),          1 },
 
+	// Controller look: half of engine stick default on X; Y lower (typical FPS).
+	{ "cod_padSensX",           "0.5",  CVAR_ARCHIVE, CODOFS( padSensX ),           0 },
+	{ "cod_padSensY",           "0.35", CVAR_ARCHIVE, CODOFS( padSensY ),           0 },
+	{ "cod_padAutoAim",         "0",    CVAR_ARCHIVE, CODOFS( padAutoAim ),         1 },
+
 	// codmod: Phase 5c CoD HUD (docs/phase-5c-hud.md)
 	{ "cod_hudEnable",          "1",    0,            CODOFS( hudEnable ),          1 },
 	{ "cod_hudAmmoStyle",       "1",    0,            CODOFS( hudAmmoStyle ),       1 },
@@ -219,9 +224,9 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_proneScale",         "0.55", 0,            CODOFS( proneScale ),         0 },
 	{ "cod_proneViewHeight",    "-8",   0,            CODOFS( proneViewHeight ),    0 },
 	{ "cod_proneMaxsZ",         "16",   0,            CODOFS( proneMaxsZ ),         0 },
-	{ "cod_proneDownTime",      "350",  0,            CODOFS( proneDownTime ),      0 },
-	{ "cod_proneUpTime",        "350",  0,            CODOFS( proneUpTime ),        0 },
-	{ "cod_proneCooldown",      "400",  0,            CODOFS( proneCooldown ),      0 },
+	{ "cod_proneDownTime",      "250",  0,            CODOFS( proneDownTime ),      0 },
+	{ "cod_proneUpTime",        "250",  0,            CODOFS( proneUpTime ),        0 },
+	{ "cod_proneCooldown",      "100",  0,            CODOFS( proneCooldown ),      0 },
 	{ "cod_pronePitchUp",       "40",   0,            CODOFS( pronePitchUp ),       0 },
 	{ "cod_pronePitchDown",     "40",   0,            CODOFS( pronePitchDown ),     0 },
 	{ "cod_proneCrawlFire",     "0",    0,            CODOFS( proneCrawlFire ),     1 },

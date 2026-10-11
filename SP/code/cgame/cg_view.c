@@ -1632,6 +1632,10 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 
 	// codmod: toggle crouch auto-stand on jump (phase 5d)
 	CG_CodUpdateToggleCrouch();
+	// codmod: pad hold Circle/B → prone
+	CG_CodUpdateCrouchProne();
+	// codmod: pad tap Square/X reload / hold interact
+	CG_CodUpdateReloadUse();
 
 	if ( cg.weaponSelect == WP_FG42SCOPE || cg.weaponSelect == WP_SNOOPERSCOPE || cg.weaponSelect == WP_SNIPERRIFLE ) {
 		float spd;
@@ -1761,6 +1765,9 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	DEBUGTIME
 
 	// let the client system know what our weapon, holdable item and zoom settings are
+	// codmod: pad aim assist writes cod_padAimSlow / pull cvars for CL_JoystickMove.
+	CG_CodPadAimAssist();
+
 	trap_SetUserCmdValue( cg.weaponSelect, cg.holdableSelect, cg.zoomSensitivity, cg.cld );
 
 	// actually issue the rendering calls

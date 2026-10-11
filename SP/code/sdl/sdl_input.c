@@ -29,6 +29,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 #include "../client/client.h"
 #include "../sys/sys_local.h"
@@ -524,7 +529,156 @@ struct
 	unsigned int oldaxes;
 	int oldaaxes[MAX_JOYSTICK_AXIS];
 	unsigned int oldhats;
+	// codmod: filtered stick state (EMA). [0]=LX [1]=LY [2]=RX [3]=RY in -1..1
+	float filt[4];
+	qboolean filtInit;
 } stick_state;
+
+// Axial snap half-angle (deg): look stick locks to pure H/V inside this band.
+#define COD_PAD_AXIAL_SNAP_DEG     12.0f
+// Cardinal snap half-angle (deg): move stick snaps to N/E/S/W inside this band.
+#define COD_PAD_CARDINAL_SNAP_DEG  22.0f
+// EMA blend toward new sample each frame (higher = snappier, lower = smoother).
+#define COD_PAD_SMOOTH_ALPHA       0.42f
+
+/*
+===============
+IN_CodApplyRadialDeadzone
+
+in: -1..1 stick; out: deadzone-shaped -1..1 (same shape as engine threshold ramp).
+===============
+*/
+static void IN_CodApplyRadialDeadzone( float *x, float *y, float threshold )
+{
+	float mag, f;
+
+	mag = (float)sqrt( (double)( ( *x ) * ( *x ) + ( *y ) * ( *y ) ) );
+	if ( mag < 1e-6f ) {
+		*x = 0.0f;
+		*y = 0.0f;
+		return;
+	}
+	if ( mag <= threshold ) {
+		*x = 0.0f;
+		*y = 0.0f;
+		return;
+	}
+	f = ( mag - threshold ) / ( 1.0f - threshold );
+	if ( f > 1.0f ) {
+		f = 1.0f;
+	}
+	*x = ( *x / mag ) * f;
+	*y = ( *y / mag ) * f;
+}
+
+/*
+===============
+IN_CodSmoothStick
+
+Exponential moving average on a stick pair.
+===============
+*/
+static void IN_CodSmoothStick( int filtIndex, float *x, float *y )
+{
+	float a = COD_PAD_SMOOTH_ALPHA;
+
+	if ( !stick_state.filtInit ) {
+		stick_state.filt[0] = stick_state.filt[1] = 0.0f;
+		stick_state.filt[2] = stick_state.filt[3] = 0.0f;
+		stick_state.filtInit = qtrue;
+	}
+	stick_state.filt[filtIndex]     = stick_state.filt[filtIndex] * ( 1.0f - a ) + ( *x ) * a;
+	stick_state.filt[filtIndex + 1] = stick_state.filt[filtIndex + 1] * ( 1.0f - a ) + ( *y ) * a;
+	*x = stick_state.filt[filtIndex];
+	*y = stick_state.filt[filtIndex + 1];
+}
+
+/*
+===============
+IN_CodAxialSnap
+
+Look-stick axial deadzones: near-horizontal zeros Y; near-vertical zeros X.
+===============
+*/
+static void IN_CodAxialSnap( float *x, float *y )
+{
+	float ax, ay, ang, snap;
+
+	ax = fabs( *x );
+	ay = fabs( *y );
+	if ( ax < 1e-5f && ay < 1e-5f ) {
+		return;
+	}
+	ang = (float)( atan2( (double)ay, (double)ax ) * ( 180.0 / M_PI ) ); // 0 = horizontal, 90 = vertical
+	snap = COD_PAD_AXIAL_SNAP_DEG;
+	if ( ang < snap ) {
+		*y = 0.0f; // lock to horizontal
+	} else if ( ang > ( 90.0f - snap ) ) {
+		*x = 0.0f; // lock to vertical
+	}
+}
+
+/*
+===============
+IN_CodCardinalSnap
+
+Move-stick cardinal locking: widen pure forward/back/strafe cones.
+===============
+*/
+static void IN_CodCardinalSnap( float *x, float *y )
+{
+	float mag, ang, snap, sector;
+
+	mag = (float)sqrt( (double)( ( *x ) * ( *x ) + ( *y ) * ( *y ) ) );
+	if ( mag < 1e-5f ) {
+		return;
+	}
+	// atan2(x, -y): 0 = forward (up on stick / -Y), 90 = right, etc.
+	ang = (float)( atan2( (double)( *x ), (double)( -( *y ) ) ) * ( 180.0 / M_PI ) );
+	snap = COD_PAD_CARDINAL_SNAP_DEG;
+	sector = ang;
+	if ( sector < 0.0f ) {
+		sector += 360.0f;
+	}
+	if ( sector < snap || sector > ( 360.0f - snap ) ) {
+		*x = 0.0f;
+		*y = -mag; // forward
+	} else if ( fabs( sector - 90.0f ) < snap ) {
+		*x = mag;
+		*y = 0.0f; // right
+	} else if ( fabs( sector - 180.0f ) < snap ) {
+		*x = 0.0f;
+		*y = mag; // back
+	} else if ( fabs( sector - 270.0f ) < snap ) {
+		*x = -mag;
+		*y = 0.0f; // left
+	}
+}
+
+/*
+===============
+IN_CodStickToAxisInt
+
+Convert filtered -1..1 stick axis to signed 0..32767 engine axis units.
+===============
+*/
+static int IN_CodStickToAxisInt( float v )
+{
+	int a;
+
+	if ( v > 1.0f ) {
+		v = 1.0f;
+	} else if ( v < -1.0f ) {
+		v = -1.0f;
+	}
+	a = (int)( v * 32767.0f );
+	if ( a > 32767 ) {
+		a = 32767;
+	} else if ( a < -32767 ) {
+		a = -32767;
+	}
+	return a;
+}
 
 
 /*
@@ -547,6 +701,7 @@ static void IN_InitJoystick( void )
 	stick = NULL;
 	gamepad = NULL;
 	memset(&stick_state, '\0', sizeof (stick_state));
+	stick_state.filtInit = qfalse;
 	Cvar_Get( "in_gamepadFamily", "none", CVAR_ROM );
 	Cvar_Set( "in_gamepadFamily", "none" );
 	Cvar_Get( "in_lastInput", "kb", CVAR_ROM );
@@ -777,88 +932,96 @@ static void IN_GamepadMove( void )
 		}
 	}
 
-	// check axes
-	for (i = 0; i < SDL_CONTROLLER_AXIS_MAX; i++)
+	// --- codmod: read sticks, deadzone, smooth, cardinal/axial snap, then emit ---
 	{
-		int axis = SDL_GameControllerGetAxis(gamepad, SDL_CONTROLLER_AXIS_LEFTX + i);
-		int oldAxis = stick_state.oldaaxes[i];
+		float lx, ly, rx, ry;
+		float thr = in_joystickThreshold->value;
+		int axesOut[SDL_CONTROLLER_AXIS_MAX];
 
-		// Smoothly ramp from dead zone to maximum value
-		float f = ((float)abs(axis) / 32767.0f - in_joystickThreshold->value) / (1.0f - in_joystickThreshold->value);
+		lx = SDL_GameControllerGetAxis( gamepad, SDL_CONTROLLER_AXIS_LEFTX ) / 32767.0f;
+		ly = SDL_GameControllerGetAxis( gamepad, SDL_CONTROLLER_AXIS_LEFTY ) / 32767.0f;
+		rx = SDL_GameControllerGetAxis( gamepad, SDL_CONTROLLER_AXIS_RIGHTX ) / 32767.0f;
+		ry = SDL_GameControllerGetAxis( gamepad, SDL_CONTROLLER_AXIS_RIGHTY ) / 32767.0f;
 
-		if (f < 0.0f)
-			f = 0.0f;
+		IN_CodApplyRadialDeadzone( &lx, &ly, thr );
+		IN_CodApplyRadialDeadzone( &rx, &ry, thr );
+		IN_CodSmoothStick( 0, &lx, &ly );
+		IN_CodSmoothStick( 2, &rx, &ry );
+		IN_CodCardinalSnap( &lx, &ly ); // movement
+		IN_CodAxialSnap( &rx, &ry );    // look
 
-		axis = (int)(32767 * ((axis < 0) ? -f : f));
+		axesOut[SDL_CONTROLLER_AXIS_LEFTX] = IN_CodStickToAxisInt( lx );
+		axesOut[SDL_CONTROLLER_AXIS_LEFTY] = IN_CodStickToAxisInt( ly );
+		axesOut[SDL_CONTROLLER_AXIS_RIGHTX] = IN_CodStickToAxisInt( rx );
+		axesOut[SDL_CONTROLLER_AXIS_RIGHTY] = IN_CodStickToAxisInt( ry );
 
-		if (axis != oldAxis)
+		// Triggers: keep existing linear deadzone ramp (no snap/smooth).
+		for ( i = SDL_CONTROLLER_AXIS_TRIGGERLEFT; i < SDL_CONTROLLER_AXIS_MAX; i++ ) {
+			int raw = SDL_GameControllerGetAxis( gamepad, (SDL_GameControllerAxis)i );
+			float f = ( (float)abs( raw ) / 32767.0f - thr ) / ( 1.0f - thr );
+			if ( f < 0.0f ) {
+				f = 0.0f;
+			}
+			axesOut[i] = (int)( 32767 * ( ( raw < 0 ) ? -f : f ) );
+		}
+
+		for ( i = 0; i < SDL_CONTROLLER_AXIS_MAX; i++ )
 		{
-			const int negMap[SDL_CONTROLLER_AXIS_MAX] = { K_PAD0_LEFTSTICK_LEFT,  K_PAD0_LEFTSTICK_UP,   K_PAD0_RIGHTSTICK_LEFT,  K_PAD0_RIGHTSTICK_UP, 0, 0 };
-			const int posMap[SDL_CONTROLLER_AXIS_MAX] = { K_PAD0_LEFTSTICK_RIGHT, K_PAD0_LEFTSTICK_DOWN, K_PAD0_RIGHTSTICK_RIGHT, K_PAD0_RIGHTSTICK_DOWN, K_PAD0_LEFTTRIGGER, K_PAD0_RIGHTTRIGGER };
+			int axis = axesOut[i];
+			int oldAxis = stick_state.oldaaxes[i];
 
-			qboolean posAnalog = qfalse, negAnalog = qfalse;
-			int negKey = negMap[i];
-			int posKey = posMap[i];
-
-			if (in_joystickUseAnalog->integer)
+			if ( axis != oldAxis )
 			{
-				int posAxis = 0, posSign = 0, negAxis = 0, negSign = 0;
+				const int negMap[SDL_CONTROLLER_AXIS_MAX] = { K_PAD0_LEFTSTICK_LEFT,  K_PAD0_LEFTSTICK_UP,   K_PAD0_RIGHTSTICK_LEFT,  K_PAD0_RIGHTSTICK_UP, 0, 0 };
+				const int posMap[SDL_CONTROLLER_AXIS_MAX] = { K_PAD0_LEFTSTICK_RIGHT, K_PAD0_LEFTSTICK_DOWN, K_PAD0_RIGHTSTICK_RIGHT, K_PAD0_RIGHTSTICK_DOWN, K_PAD0_LEFTTRIGGER, K_PAD0_RIGHTTRIGGER };
 
-				// get axes and axes signs for keys if available
-				posAnalog = KeyToAxisAndSign(posKey, &posAxis, &posSign);
-				negAnalog = KeyToAxisAndSign(negKey, &negAxis, &negSign);
+				qboolean posAnalog = qfalse, negAnalog = qfalse;
+				int negKey = negMap[i];
+				int posKey = posMap[i];
 
-				// positive to negative/neutral -> keyup if axis hasn't yet been set
-				if (posAnalog && !translatedAxesSet[posAxis] && oldAxis > 0 && axis <= 0)
+				if ( in_joystickUseAnalog->integer )
 				{
-					translatedAxes[posAxis] = 0;
-					translatedAxesSet[posAxis] = qtrue;
+					int posAxis = 0, posSign = 0, negAxis = 0, negSign = 0;
+
+					posAnalog = KeyToAxisAndSign( posKey, &posAxis, &posSign );
+					negAnalog = KeyToAxisAndSign( negKey, &negAxis, &negSign );
+
+					if ( posAnalog && !translatedAxesSet[posAxis] && oldAxis > 0 && axis <= 0 )
+					{
+						translatedAxes[posAxis] = 0;
+						translatedAxesSet[posAxis] = qtrue;
+					}
+					if ( negAnalog && !translatedAxesSet[negAxis] && oldAxis < 0 && axis >= 0 )
+					{
+						translatedAxes[negAxis] = 0;
+						translatedAxesSet[negAxis] = qtrue;
+					}
+					if ( posAnalog && axis > 0 )
+					{
+						translatedAxes[posAxis] = axis * posSign;
+						translatedAxesSet[posAxis] = qtrue;
+					}
+					if ( negAnalog && axis < 0 )
+					{
+						translatedAxes[negAxis] = -axis * negSign;
+						translatedAxesSet[negAxis] = qtrue;
+					}
 				}
 
-				// negative to positive/neutral -> keyup if axis hasn't yet been set
-				if (negAnalog && !translatedAxesSet[negAxis] && oldAxis < 0 && axis >= 0)
-				{
-					translatedAxes[negAxis] = 0;
-					translatedAxesSet[negAxis] = qtrue;
-				}
+				if ( !posAnalog && posKey && oldAxis > 0 && axis <= 0 )
+					Com_QueueEvent( in_eventTime, SE_KEY, posKey, qfalse, 0, NULL );
+				if ( !negAnalog && negKey && oldAxis < 0 && axis >= 0 )
+					Com_QueueEvent( in_eventTime, SE_KEY, negKey, qfalse, 0, NULL );
+				if ( !posAnalog && posKey && oldAxis <= 0 && axis > 0 )
+					Com_QueueEvent( in_eventTime, SE_KEY, posKey, qtrue, 0, NULL );
+				if ( !negAnalog && negKey && oldAxis >= 0 && axis < 0 )
+					Com_QueueEvent( in_eventTime, SE_KEY, negKey, qtrue, 0, NULL );
 
-				// negative/neutral to positive -> keydown
-				if (posAnalog && axis > 0)
-				{
-					translatedAxes[posAxis] = axis * posSign;
-					translatedAxesSet[posAxis] = qtrue;
+				if ( axis != 0 ) {
+					padActivity = qtrue;
 				}
-
-				// positive/neutral to negative -> keydown
-				if (negAnalog && axis < 0)
-				{
-					translatedAxes[negAxis] = -axis * negSign;
-					translatedAxesSet[negAxis] = qtrue;
-				}
+				stick_state.oldaaxes[i] = axis;
 			}
-
-			// keyups first so they get overridden by keydowns later
-
-			// positive to negative/neutral -> keyup
-			if (!posAnalog && posKey && oldAxis > 0 && axis <= 0)
-				Com_QueueEvent(in_eventTime, SE_KEY, posKey, qfalse, 0, NULL);
-
-			// negative to positive/neutral -> keyup
-			if (!negAnalog && negKey && oldAxis < 0 && axis >= 0)
-				Com_QueueEvent(in_eventTime, SE_KEY, negKey, qfalse, 0, NULL);
-
-			// negative/neutral to positive -> keydown
-			if (!posAnalog && posKey && oldAxis <= 0 && axis > 0)
-				Com_QueueEvent(in_eventTime, SE_KEY, posKey, qtrue, 0, NULL);
-
-			// positive/neutral to negative -> keydown
-			if (!negAnalog && negKey && oldAxis >= 0 && axis < 0)
-				Com_QueueEvent(in_eventTime, SE_KEY, negKey, qtrue, 0, NULL);
-
-			if ( axis != 0 ) {
-				padActivity = qtrue;
-			}
-			stick_state.oldaaxes[i] = axis;
 		}
 	}
 

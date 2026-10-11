@@ -126,6 +126,11 @@ typedef struct {
 	int interactHint;          // cgame: "Press <key> to interact" next to cursor hint
 	int padGlyphs;             // cgame: draw pad button glyphs on interact hints
 
+	// codmod: controller look + aim assist (pad only)
+	float padSensX;            // stick look scale (1 = engine j_* default; 0.5 = half)
+	float padSensY;            // vertical scale (default lower than X)
+	int padAutoAim;            // 1 = stronger ADS chest pull (friction/magnetism always on for pads)
+
 	// codmod: Phase 5c CoD on-screen HUD (docs/phase-5c-hud.md)
 	int hudEnable;             // master: clip/reserve ammo, no bars, low-HP blood/crosshair
 	int hudAmmoStyle;          // 1 = clip/reserve string; 0 = vanilla split

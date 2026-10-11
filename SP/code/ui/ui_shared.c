@@ -3004,6 +3004,42 @@ void  Menus_Activate( menuDef_t *menu ) {
 		Item_RunScript( &item, menu->onOpen );
 	}
 
+	// codmod: auto-select the first focusable item so pad/keyboard nav has a start point.
+	{
+		int i;
+		qboolean focused = qfalse;
+
+		for ( i = 0; i < menu->itemCount; i++ ) {
+			if ( menu->items[i]->window.flags & WINDOW_HASFOCUS ) {
+				focused = qtrue;
+				break;
+			}
+		}
+		if ( !focused ) {
+			menu->cursorItem = -1;
+			for ( i = 0; i < menu->itemCount; i++ ) {
+				itemDef_t *it = menu->items[i];
+				if ( !it || ( it->window.flags & WINDOW_DECORATION ) ) {
+					continue;
+				}
+				if ( !( it->window.flags & WINDOW_VISIBLE ) ) {
+					continue;
+				}
+				if ( it->type == ITEM_TYPE_OWNERDRAW || it->type == ITEM_TYPE_MODEL
+					 || it->type == ITEM_TYPE_MENUMODEL ) {
+					continue;
+				}
+				// Skip pure labels (TEXT with no action).
+				if ( it->type == ITEM_TYPE_TEXT && !it->action ) {
+					continue;
+				}
+				if ( Item_SetFocus( it, it->window.rect.x + 1, it->window.rect.y + 1 ) ) {
+					break;
+				}
+			}
+		}
+	}
+
 	if ( menu->soundName && *menu->soundName ) {
 //		DC->stopBackgroundTrack();					// you don't want to do this since it will reset s_rawend
 		DC->startBackgroundTrack( menu->soundName, menu->soundName, 0 );
@@ -4592,6 +4628,35 @@ void Item_Paint( itemDef_t *item ) {
 
 	// paint the rect first..
 	Window_Paint( &item->window, parent->fadeAmount, parent->fadeClamp, parent->fadeCycle );
+
+	// codmod: pad-only focus outline (mouse/kb already have the cursor).
+	if ( ( item->window.flags & WINDOW_HASFOCUS )
+		 && !( item->window.flags & WINDOW_DECORATION )
+		 && item->type != ITEM_TYPE_OWNERDRAW
+		 && item->type != ITEM_TYPE_MODEL
+		 && item->type != ITEM_TYPE_MENUMODEL
+		 && DC->getCVarString ) {
+		char lastIn[16];
+
+		DC->getCVarString( "in_lastInput", lastIn, sizeof( lastIn ) );
+		if ( !Q_stricmp( lastIn, "pad" ) ) {
+			vec4_t outline;
+			const float pad = 3.0f;
+
+			Vector4Copy( parent->focusColor, outline );
+			if ( outline[3] < 0.35f ) {
+				outline[0] = 1.0f;
+				outline[1] = 0.75f;
+				outline[2] = 0.0f;
+				outline[3] = 1.0f;
+			} else {
+				outline[3] = 1.0f;
+			}
+			DC->drawRect( item->window.rect.x - pad, item->window.rect.y - pad,
+						  item->window.rect.w + pad * 2.0f,
+						  item->window.rect.h + pad * 2.0f, 1, outline );
+		}
+	}
 
 	if ( debugMode ) {
 		vec4_t color;

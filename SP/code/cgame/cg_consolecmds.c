@@ -426,6 +426,10 @@ static consoleCommand_t commands[] = {
 	{ "cod_dump", CG_CodDump_f },   // codmod: phase 2.0, see cg_cod.c
 	{ "toggleads", CG_ToggleAds_f }, // codmod: phase 3.1 sticky ADS toggle
 	{ "togglecrouch", CG_ToggleCrouch_f }, // codmod: phase 5d sticky crouch (bind c)
+	{ "+crouchprone", CG_CrouchProneDown_f }, // codmod: pad Circle/B tap crouch / hold prone
+	{ "-crouchprone", CG_CrouchProneUp_f },
+	{ "+reloaduse", CG_ReloadUseDown_f },     // codmod: pad Square/X tap reload / hold interact
+	{ "-reloaduse", CG_ReloadUseUp_f },
 	{ "toggleflashlight", CG_ToggleFlashlight_f }, // codmod: phase 5d flashlight (bind l)
 	{ "cod_resetbinds", CG_CodResetBinds_f }, // codmod: phase 5d full bind reset
 	{ "quickknife", CG_QuickKnife_f }, // codmod: phase 5.5 CoD-style quick knife (bind v)

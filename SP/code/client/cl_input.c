@@ -438,12 +438,41 @@ CL_JoystickMove
 */
 void CL_JoystickMove( usercmd_t *cmd ) {
 	float anglespeed;
+	float padSensX, padSensY, aimSlowYaw, aimSlowPitch, pullYaw, pullPitch;
+	qboolean looking;
 
 	float yaw     = j_yaw->value     * cl.joystickAxis[j_yaw_axis->integer];
 	float right   = j_side->value    * cl.joystickAxis[j_side_axis->integer];
 	float forward = j_forward->value * cl.joystickAxis[j_forward_axis->integer];
 	float pitch   = j_pitch->value   * cl.joystickAxis[j_pitch_axis->integer];
 	float up      = j_up->value      * cl.joystickAxis[j_up_axis->integer];
+
+	// codmod: pad look scales (defaults: X half of engine, Y lower than X).
+	padSensX = Cvar_VariableValue( "cod_padSensX" );
+	padSensY = Cvar_VariableValue( "cod_padSensY" );
+	if ( padSensX <= 0.0f ) {
+		padSensX = 0.5f;
+	}
+	if ( padSensY <= 0.0f ) {
+		padSensY = 0.35f;
+	}
+	yaw *= padSensX;
+	pitch *= padSensY;
+
+	// Target friction (per-axis) + auto-aim pull from cgame (pad only).
+	aimSlowYaw = Cvar_VariableValue( "cod_padAimSlowYaw" );
+	aimSlowPitch = Cvar_VariableValue( "cod_padAimSlowPitch" );
+	if ( aimSlowYaw <= 0.0f || aimSlowYaw > 1.0f ) {
+		aimSlowYaw = Cvar_VariableValue( "cod_padAimSlow" );
+		if ( aimSlowYaw <= 0.0f || aimSlowYaw > 1.0f ) {
+			aimSlowYaw = 1.0f;
+		}
+	}
+	if ( aimSlowPitch <= 0.0f || aimSlowPitch > 1.0f ) {
+		aimSlowPitch = aimSlowYaw;
+	}
+	yaw *= aimSlowYaw;
+	pitch *= aimSlowPitch;
 
 	if ( !( kb[KB_SPEED].active ^ cl_run->integer ) ) {
 		cmd->buttons |= BUTTON_WALKING;
@@ -471,6 +500,18 @@ void CL_JoystickMove( usercmd_t *cmd ) {
 	}
 
 	cmd->upmove = ClampChar( cmd->upmove + (int)up );
+
+	// Auto-aim angle pull (degrees this frame). Applied even if stick is centered
+	// so ADS near an enemy still tracks the chest.
+	pullYaw = Cvar_VariableValue( "cod_padAimPullYaw" );
+	pullPitch = Cvar_VariableValue( "cod_padAimPullPitch" );
+	looking = ( cl.joystickAxis[j_yaw_axis->integer] != 0
+				|| cl.joystickAxis[j_pitch_axis->integer] != 0
+				|| pullYaw != 0.0f || pullPitch != 0.0f );
+	if ( looking ) {
+		cl.viewangles[YAW] += pullYaw;
+		cl.viewangles[PITCH] += pullPitch;
+	}
 }
 
 /*

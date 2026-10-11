@@ -527,7 +527,7 @@ static void CG_DrawCursorhint( rectDef_t *rect ) {
 	trap_R_SetColor( NULL );
 
 	// codmod: label above the cursor-hint icon (phase 5b). Keyboard shows "Press F…";
-	// pad last-input shows D-pad Up glyph (Xbox-like / PS-like) + "to interact".
+	// pad last-input shows hold X / Square glyph (CoD-style use) + "Hold … to interact".
 	// Breakable props are look-only (shoot to destroy) — short status, not a use prompt.
 	if ( bg_cod.enable && bg_cod.vitalsEnable && bg_cod.interactHint ) {
 		const char *hintText = NULL;
@@ -570,10 +570,10 @@ static void CG_DrawCursorhint( rectDef_t *rect ) {
 				trap_Cvar_VariableStringBuffer( "in_gamepadFamily", family, sizeof( family ) );
 				if ( !Q_stricmp( lastIn, "pad" ) && Q_stricmp( family, "none" ) ) {
 					usePadGlyph = qtrue;
-					if ( !Q_stricmp( family, "ps" ) && cgs.media.padPsDpadUp ) {
-						padGlyph = cgs.media.padPsDpadUp;
-					} else if ( cgs.media.padXboxDpadUp ) {
-						padGlyph = cgs.media.padXboxDpadUp; // xbox + generic
+					if ( !Q_stricmp( family, "ps" ) && cgs.media.padPsSquare ) {
+						padGlyph = cgs.media.padPsSquare;
+					} else if ( cgs.media.padXboxX ) {
+						padGlyph = cgs.media.padXboxX; // xbox + generic
 					}
 					if ( !padGlyph ) {
 						usePadGlyph = qfalse;
@@ -581,7 +581,7 @@ static void CG_DrawCursorhint( rectDef_t *rect ) {
 				}
 			}
 			if ( usePadGlyph ) {
-				hintText = "to interact";
+				hintText = "Hold to interact";
 			} else {
 				hintText = "Press F to interact";
 			}

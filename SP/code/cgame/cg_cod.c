@@ -1097,6 +1097,118 @@ void CG_ToggleCrouch_f( void ) {
 	}
 }
 
+// CoD hold time: tap crouch, hold ~0.4s → prone (pad Circle/B via +crouchprone).
+#define COD_CROUCH_HOLD_PRONE_MS 400
+
+static void CG_CodPulseProne( void ) {
+	cg.codPronePulse = 2;
+}
+
+void CG_CrouchProneDown_f( void ) {
+	playerState_t *ps;
+
+	cg.codCrouchProneDown = qtrue;
+	cg.codCrouchProneStart = cg.time;
+	cg.codCrouchProneWentProne = qfalse;
+	cg.codCrouchProneExitProne = qfalse;
+	cg.codCrouchProneWasCrouched = qfalse;
+
+	if ( !bg_cod.enable ) {
+		CG_ToggleCrouch_f();
+		return;
+	}
+
+	ps = &cg.predictedPlayerState;
+	if ( bg_cod.proneEnable && ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+		CG_CodPulseProne();
+		cg.codCrouchProneExitProne = qtrue;
+		return;
+	}
+
+	// Remember stance at press. Do NOT crouch yet — tap crouches on release;
+	// hold goes straight to prone (no crouch-then-prone).
+	cg.codCrouchProneWasCrouched = cg.codCrouchHeld;
+}
+
+void CG_CrouchProneUp_f( void ) {
+	if ( !cg.codCrouchProneDown ) {
+		return;
+	}
+	cg.codCrouchProneDown = qfalse;
+
+	if ( cg.codCrouchProneExitProne || cg.codCrouchProneWentProne ) {
+		return;
+	}
+
+	// Tap: toggle crouch (stand→crouch or crouch→stand).
+	if ( cg.codCrouchProneWasCrouched && cg.codCrouchHeld ) {
+		cg.codCrouchHeld = qfalse;
+		trap_SendConsoleCommand( "-movedown\n" );
+	} else if ( !cg.codCrouchProneWasCrouched && !cg.codCrouchHeld ) {
+		cg.codCrouchHeld = qtrue;
+		trap_SendConsoleCommand( "+movedown\n" );
+	}
+}
+
+void CG_CodUpdateCrouchProne( void ) {
+	playerState_t *ps;
+
+	if ( cg.codPronePulse > 0 ) {
+		if ( cg.codPronePulse == 2 ) {
+			trap_SendConsoleCommand( "+prone\n" );
+		} else if ( cg.codPronePulse == 1 ) {
+			trap_SendConsoleCommand( "-prone\n" );
+		}
+		cg.codPronePulse--;
+	}
+
+	if ( !cg.codCrouchProneDown || cg.codCrouchProneWentProne || cg.codCrouchProneExitProne ) {
+		return;
+	}
+	if ( !( bg_cod.enable && bg_cod.proneEnable ) ) {
+		return;
+	}
+	if ( cg.time - cg.codCrouchProneStart < COD_CROUCH_HOLD_PRONE_MS ) {
+		return;
+	}
+
+	ps = &cg.predictedPlayerState;
+	if ( ps->pm_flags & PMF_COD_SLIDING ) {
+		return;
+	}
+	if ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) {
+		cg.codCrouchProneWentProne = qtrue;
+		return;
+	}
+	if ( ps->stats[STAT_COD_STANCE] > 0 ) {
+		return;
+	}
+	if ( ps->groundEntityNum == ENTITYNUM_NONE ) {
+		return;
+	}
+
+	// Hold from crouch: clear sticky crouch so prone owns the stance.
+	if ( cg.codCrouchHeld ) {
+		cg.codCrouchHeld = qfalse;
+		trap_SendConsoleCommand( "-movedown\n" );
+	}
+	CG_CodPulseProne();
+	cg.codCrouchProneWentProne = qtrue;
+}
+
+static qboolean CG_CodJumpKeyHeld( void ) {
+	int k;
+
+	if ( trap_Key_IsDown( K_SPACE ) || trap_Key_IsDown( K_PAD0_A ) ) {
+		return qtrue;
+	}
+	k = trap_Key_GetKey( "+moveup" );
+	if ( k >= 0 && trap_Key_IsDown( k ) ) {
+		return qtrue;
+	}
+	return qfalse;
+}
+
 void CG_CodUpdateToggleCrouch( void ) {
 	static qboolean wasSliding;
 	qboolean sliding;
@@ -1113,11 +1225,53 @@ void CG_CodUpdateToggleCrouch( void ) {
 	if ( !cg.codCrouchHeld ) {
 		return;
 	}
-	// Default jump is SPACE; clear sticky crouch so jump works.
-	if ( trap_Key_IsDown( K_SPACE ) ) {
+	// Jump (SPACE / pad A / +moveup) clears sticky crouch so the player stands (and can jump).
+	if ( CG_CodJumpKeyHeld() ) {
 		cg.codCrouchHeld = qfalse;
 		trap_SendConsoleCommand( "-movedown\n" );
 	}
+}
+
+// CoD: tap Square/X = reload; hold = interact (+activate).
+#define COD_RELOAD_USE_HOLD_MS 250
+
+void CG_ReloadUseDown_f( void ) {
+	cg.codReloadUseDown = qtrue;
+	cg.codReloadUseStart = cg.time;
+	cg.codReloadUseActivated = qfalse;
+}
+
+void CG_ReloadUseUp_f( void ) {
+	if ( !cg.codReloadUseDown ) {
+		return;
+	}
+	cg.codReloadUseDown = qfalse;
+	if ( cg.codReloadUseActivated ) {
+		trap_SendConsoleCommand( "-activate\n" );
+		return;
+	}
+	// Tap → reload
+	cg.codReloadPulse = 2;
+}
+
+void CG_CodUpdateReloadUse( void ) {
+	if ( cg.codReloadPulse > 0 ) {
+		if ( cg.codReloadPulse == 2 ) {
+			trap_SendConsoleCommand( "+reload\n" );
+		} else if ( cg.codReloadPulse == 1 ) {
+			trap_SendConsoleCommand( "-reload\n" );
+		}
+		cg.codReloadPulse--;
+	}
+
+	if ( !cg.codReloadUseDown || cg.codReloadUseActivated ) {
+		return;
+	}
+	if ( cg.time - cg.codReloadUseStart < COD_RELOAD_USE_HOLD_MS ) {
+		return;
+	}
+	trap_SendConsoleCommand( "+activate\n" );
+	cg.codReloadUseActivated = qtrue;
 }
 
 /*
@@ -1929,4 +2083,216 @@ void CG_CodDrawHitMarker( void ) {
 	CG_CodDrawHitMarkerDiag( cx + gap + len, cy - gap - len, cx + gap, cy - gap, th, color );
 	CG_CodDrawHitMarkerDiag( cx - gap - len, cy + gap + len, cx - gap, cy + gap, th, color );
 	CG_CodDrawHitMarkerDiag( cx + gap + len, cy + gap + len, cx + gap, cy + gap, th, color );
+}
+
+/*
+=================
+CG_CodPadAimAssist
+
+Controller-only. Always-on target friction when last input is pad (LOS required).
+Optional Auto-Aim (cod_padAutoAim) snaps onto the closest visible enemy while ADS
+only — hipfire never snaps/locks.
+
+Writes ROM cvars for CL_JoystickMove:
+  cod_padAimSlowYaw / SlowPitch — per-axis look multipliers (friction)
+  cod_padAimPullYaw / Pitch     — degrees this frame (magnetism / auto-aim)
+=================
+*/
+void CG_CodPadAimAssist( void ) {
+	char lastIn[16];
+	int i;
+	float bestScore;
+	float maxAng;
+	centity_t *best;
+	vec3_t viewOrg, viewAng, forward;
+	qboolean ads;
+	qboolean autoAds;
+	float slowYaw, slowPitch;
+	float pullYaw, pullPitch;
+
+	trap_Cvar_Set( "cod_padAimSlow", "1" );
+	trap_Cvar_Set( "cod_padAimSlowYaw", "1" );
+	trap_Cvar_Set( "cod_padAimSlowPitch", "1" );
+	trap_Cvar_Set( "cod_padAimPullYaw", "0" );
+	trap_Cvar_Set( "cod_padAimPullPitch", "0" );
+
+	if ( !bg_cod.enable || !cg.snap ) {
+		return;
+	}
+
+	trap_Cvar_VariableStringBuffer( "in_lastInput", lastIn, sizeof( lastIn ) );
+	if ( Q_stricmp( lastIn, "pad" ) ) {
+		return;
+	}
+
+	VectorCopy( cg.refdef.vieworg, viewOrg );
+	VectorCopy( cg.refdefViewAngles, viewAng );
+	AngleVectors( viewAng, forward, NULL, NULL );
+
+	ads = ( CG_CodAdsFrac() > 0.2f ) ? qtrue : qfalse;
+	autoAds = ( bg_cod.padAutoAim && ads ) ? qtrue : qfalse;
+	// Wider cone while Auto-Aim + ADS so the closest enemy can be acquired.
+	maxAng = autoAds ? 32.0f : 18.0f;
+
+	best = NULL;
+	bestScore = 9999.0f;
+
+	for ( i = 0; i < MAX_GENTITIES; i++ ) {
+		centity_t *cent = &cg_entities[i];
+		entityState_t *es;
+		vec3_t chest, dir, wantAng, delta;
+		trace_t tr;
+		float dist, yawErr, pitchErr, angErr, score;
+
+		if ( !cent->currentValid ) {
+			continue;
+		}
+		es = &cent->currentState;
+		if ( es->eType != ET_PLAYER ) {
+			continue;
+		}
+		if ( es->eFlags & EF_DEAD ) {
+			continue;
+		}
+		if ( es->number == cg.snap->ps.clientNum ) {
+			continue;
+		}
+		// Skip same-team (friendly AI / teammates). TEAM_FREE = no filter.
+		{
+			clientInfo_t *ci = &cgs.clientinfo[es->clientNum];
+			int myTeam = cgs.clientinfo[cg.snap->ps.clientNum].team;
+			if ( ci->infoValid && myTeam != TEAM_FREE && ci->team == myTeam ) {
+				continue;
+			}
+		}
+
+		VectorCopy( cent->lerpOrigin, chest );
+		chest[2] += 20.0f; // chest-ish above origin
+		VectorSubtract( chest, viewOrg, dir );
+		dist = VectorNormalize( dir );
+		if ( dist < 32.0f || dist > 1500.0f ) {
+			continue;
+		}
+		if ( DotProduct( dir, forward ) < ( autoAds ? 0.10f : 0.35f ) ) {
+			continue;
+		}
+
+		// No assist through walls — world solid must be clear to the chest.
+		CG_Trace( &tr, viewOrg, NULL, NULL, chest, cg.snap->ps.clientNum, MASK_SOLID );
+		if ( tr.fraction < 1.0f ) {
+			continue;
+		}
+
+		vectoangles( dir, wantAng );
+		AnglesSubtract( wantAng, viewAng, delta );
+		yawErr = fabs( AngleNormalize180( delta[YAW] ) );
+		pitchErr = fabs( AngleNormalize180( delta[PITCH] ) );
+		angErr = yawErr + pitchErr;
+		if ( angErr > maxAng ) {
+			continue;
+		}
+
+		// Auto-Aim + ADS: prefer closest visible enemy in the cone.
+		if ( autoAds ) {
+			score = dist + angErr * 2.0f;
+		} else {
+			score = angErr + dist * 0.01f;
+		}
+		if ( score < bestScore ) {
+			bestScore = score;
+			best = cent;
+		}
+	}
+
+	slowYaw = 1.0f;
+	slowPitch = 1.0f;
+	pullYaw = 0.0f;
+	pullPitch = 0.0f;
+
+	if ( best ) {
+		vec3_t chest, dir, wantAng, delta;
+		float dist, yawSigned, pitchSigned, yawErr, pitchErr, angErr, t, friction;
+		float frametime, magRate, magStep;
+
+		VectorCopy( best->lerpOrigin, chest );
+		chest[2] += 20.0f;
+		VectorSubtract( chest, viewOrg, dir );
+		dist = VectorNormalize( dir );
+		vectoangles( dir, wantAng );
+		AnglesSubtract( wantAng, viewAng, delta );
+		yawSigned = AngleNormalize180( delta[YAW] );
+		pitchSigned = AngleNormalize180( delta[PITCH] );
+		yawErr = fabs( yawSigned );
+		pitchErr = fabs( pitchSigned );
+		angErr = yawErr + pitchErr;
+
+		// Strength 0..1 from centered + close.
+		t = 1.0f - ( angErr / maxAng );
+		if ( t < 0.0f ) {
+			t = 0.0f;
+		}
+		if ( dist < 400.0f ) {
+			t += ( 1.0f - dist / 400.0f ) * 0.35f;
+		}
+		if ( t > 1.0f ) {
+			t = 1.0f;
+		}
+
+		// Target friction (always-on, LOS already required). Soft track — not a snap.
+		friction = t * ( ads ? 0.62f : 0.42f );
+		slowYaw = 1.0f - friction * 0.55f;
+		slowPitch = 1.0f - friction * 0.80f;
+		if ( yawErr > pitchErr + 2.0f ) {
+			slowPitch = 1.0f - friction * 0.92f;
+		} else if ( pitchErr > yawErr + 2.0f ) {
+			slowYaw = 1.0f - friction * 0.85f;
+		}
+		if ( slowYaw < 0.28f ) {
+			slowYaw = 0.28f;
+		}
+		if ( slowPitch < 0.22f ) {
+			slowPitch = 0.22f;
+		}
+
+		frametime = cg.frametime * 0.001f;
+		if ( frametime <= 0.0f ) {
+			frametime = 0.016f;
+		}
+
+		if ( autoAds && dist < 1200.0f ) {
+			// Console-style ADS snap onto closest visible enemy.
+			float rate, step;
+
+			rate = 1440.0f;
+			step = rate * frametime;
+			if ( yawErr > 0.02f ) {
+				pullYaw = ( yawErr <= step ) ? yawSigned : ( ( yawSigned > 0.0f ) ? step : -step );
+			}
+			if ( pitchErr > 0.02f ) {
+				pullPitch = ( pitchErr <= step ) ? pitchSigned : ( ( pitchSigned > 0.0f ) ? step : -step );
+			}
+		} else if ( !bg_cod.padAutoAim ) {
+			// Light magnetism only when Auto-Aim is off (never hipfire-lock with Auto-Aim on).
+			magRate = ( ads ? 45.0f : 28.0f ) * t;
+			magStep = magRate * frametime;
+			if ( yawErr > 0.08f ) {
+				pullYaw = ( yawSigned > 0.0f ) ? magStep : -magStep;
+				if ( fabs( pullYaw ) > yawErr ) {
+					pullYaw = yawSigned;
+				}
+			}
+			if ( pitchErr > 0.08f ) {
+				pullPitch = ( pitchSigned > 0.0f ) ? magStep : -magStep;
+				if ( fabs( pullPitch ) > pitchErr ) {
+					pullPitch = pitchSigned;
+				}
+			}
+		}
+	}
+
+	trap_Cvar_Set( "cod_padAimSlow", va( "%g", ( slowYaw < slowPitch ) ? slowYaw : slowPitch ) );
+	trap_Cvar_Set( "cod_padAimSlowYaw", va( "%g", slowYaw ) );
+	trap_Cvar_Set( "cod_padAimSlowPitch", va( "%g", slowPitch ) );
+	trap_Cvar_Set( "cod_padAimPullYaw", va( "%g", pullYaw ) );
+	trap_Cvar_Set( "cod_padAimPullPitch", va( "%g", pullPitch ) );
 }

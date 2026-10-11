@@ -826,6 +826,16 @@ typedef struct {
 	qboolean codQkStayOnKnife;           // codmod: started already on knife — no switchback
 
 	qboolean codCrouchHeld;              // codmod: phase 5d — sticky togglecrouch state
+	qboolean codCrouchProneDown;         // codmod: +crouchprone held (pad Circle/B)
+	int      codCrouchProneStart;        // codmod: cg.time when +crouchprone went down
+	qboolean codCrouchProneWasCrouched;  // codmod: already crouched at press (tap = stand)
+	qboolean codCrouchProneWentProne;    // codmod: this hold already entered prone
+	qboolean codCrouchProneExitProne;    // codmod: this press exited prone
+	int      codPronePulse;              // codmod: 2=+prone, 1=-prone edge pulse
+	qboolean codReloadUseDown;           // codmod: +reloaduse held (pad Square/X)
+	int      codReloadUseStart;          // codmod: cg.time at press
+	qboolean codReloadUseActivated;      // codmod: hold crossed into +activate
+	int      codReloadPulse;             // codmod: 2=+reload, 1=-reload edge pulse
 	qboolean codFlashlightOn;            // codmod: phase 5d — client-local flashlight
 
 	float landChange;                   // for landing hard
@@ -1504,8 +1514,8 @@ typedef struct {
 	qhandle_t sizeCursor;
 
 	// codmod: original copyright-free pad prompt glyphs (ui/glyphs in codmod_pad.pk3)
-	qhandle_t padXboxDpadUp;
-	qhandle_t padPsDpadUp;
+	qhandle_t padXboxX;      // interact (hold)
+	qhandle_t padPsSquare;   // interact (hold)
 
 } cgMedia_t;
 
@@ -2263,9 +2273,15 @@ void CG_CodMenuDump_f( void );
 void CG_CodMenu_OnShutdown( void ); // codmod: restore stolen arrow binds
 void CG_ToggleAds_f( void );           // codmod: phase 3.1 sticky ADS toggle
 void CG_ToggleCrouch_f( void );        // codmod: phase 5d sticky crouch
+void CG_CrouchProneDown_f( void );     // codmod: pad tap crouch / hold prone
+void CG_CrouchProneUp_f( void );
+void CG_ReloadUseDown_f( void );       // codmod: pad tap reload / hold interact
+void CG_ReloadUseUp_f( void );
 void CG_ToggleFlashlight_f( void );    // codmod: phase 5d flashlight
 void CG_CodResetBinds_f( void );       // codmod: phase 5d full bind reset
 void CG_CodUpdateToggleCrouch( void ); // codmod: phase 5d auto-stand on jump
+void CG_CodUpdateCrouchProne( void );  // codmod: hold-crouch → prone
+void CG_CodUpdateReloadUse( void );    // codmod: tap reload / hold use
 void CG_CodAddFlashlight( void );      // codmod: phase 5d view dlight
 void CG_CodDrawFlashlightHudIcon( float weapX, float weapY, float weapW, float weapH ); // codmod: HUD on-indicator
 void CG_QuickKnife_f( void );          // codmod: phase 5.5 CoD-style quick knife
@@ -2289,6 +2305,7 @@ void CG_CodDrawCrosshair( const vec4_t hcolor ); // codmod: CoD 4-post bloom ret
 void CG_CodTriggerHitMarker( qboolean headshot );                  // codmod: E9
 void CG_CodCheckHitMarker( playerState_t *ps, playerState_t *ops ); // codmod: E9
 void CG_CodDrawHitMarker( void );                                  // codmod: E9
+void CG_CodPadAimAssist( void );                                   // codmod: pad aim slowdown + auto-aim
 
 //
 // cg_consolecmds.c
