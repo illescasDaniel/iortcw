@@ -124,6 +124,7 @@ typedef struct {
 	float sprintRechargeDelay; // ms after sprint ends before recharge starts
 	float ammoScale;           // × pickup/start ammo + max carry (player only; 2 = double)
 	int interactHint;          // cgame: "Press <key> to interact" next to cursor hint
+	int padGlyphs;             // cgame: draw pad button glyphs on interact hints
 
 	// codmod: Phase 5c CoD on-screen HUD (docs/phase-5c-hud.md)
 	int hudEnable;             // master: clip/reserve ammo, no bars, low-HP blood/crosshair

@@ -63,6 +63,87 @@ static SDL_Window *SDL_window = NULL;
 
 /*
 ===============
+IN_SetLastInput
+
+codmod: "kb" or "pad" — used by interact-hint glyphs.
+===============
+*/
+static void IN_SetLastInput( const char *which )
+{
+	cvar_t *cv;
+
+	if ( !which || !which[0] ) {
+		return;
+	}
+	cv = Cvar_Get( "in_lastInput", "kb", CVAR_ROM );
+	if ( Q_stricmp( cv->string, which ) != 0 ) {
+		Cvar_Set( "in_lastInput", which );
+	}
+}
+
+/*
+===============
+IN_UpdateGamepadFamily
+
+codmod: ROM cvar in_gamepadFamily = xbox | ps | generic | none
+===============
+*/
+static void IN_UpdateGamepadFamily( void )
+{
+	const char *family = "none";
+	const char *name = NULL;
+
+	Cvar_Get( "in_gamepadFamily", "none", CVAR_ROM );
+
+	if ( !gamepad ) {
+		Cvar_Set( "in_gamepadFamily", "none" );
+		return;
+	}
+
+#if SDL_VERSION_ATLEAST( 2, 0, 12 )
+	{
+		SDL_GameControllerType t = SDL_GameControllerGetType( gamepad );
+		switch ( t ) {
+		case SDL_CONTROLLER_TYPE_XBOX360:
+		case SDL_CONTROLLER_TYPE_XBOXONE:
+			family = "xbox";
+			break;
+		case SDL_CONTROLLER_TYPE_PS3:
+		case SDL_CONTROLLER_TYPE_PS4:
+		case SDL_CONTROLLER_TYPE_PS5:
+			family = "ps";
+			break;
+		default:
+			family = "generic";
+			break;
+		}
+	}
+#else
+	family = "generic";
+#endif
+
+	// Name fallback when SDL reports UNKNOWN/generic (common for some Bluetooth pads).
+	if ( !Q_stricmp( family, "generic" ) ) {
+		name = SDL_GameControllerName( gamepad );
+		if ( name ) {
+			if ( Q_stristr( name, "DualShock" ) || Q_stristr( name, "DualSense" )
+				 || Q_stristr( name, "PlayStation" ) || Q_stristr( name, "PS3" )
+				 || Q_stristr( name, "PS4" ) || Q_stristr( name, "PS5" )
+				 || Q_stristr( name, "Wireless Controller" ) ) {
+				family = "ps";
+			} else if ( Q_stristr( name, "Xbox" ) || Q_stristr( name, "XInput" )
+						|| Q_stristr( name, "XBox" ) ) {
+				family = "xbox";
+			}
+		}
+	}
+
+	Cvar_Set( "in_gamepadFamily", family );
+	Com_DPrintf( "Gamepad family: %s\n", family );
+}
+
+/*
+===============
 IN_PrintKey
 ===============
 */
@@ -466,6 +547,9 @@ static void IN_InitJoystick( void )
 	stick = NULL;
 	gamepad = NULL;
 	memset(&stick_state, '\0', sizeof (stick_state));
+	Cvar_Get( "in_gamepadFamily", "none", CVAR_ROM );
+	Cvar_Set( "in_gamepadFamily", "none" );
+	Cvar_Get( "in_lastInput", "kb", CVAR_ROM );
 
 	// SDL 2.0.4 requires SDL_INIT_JOYSTICK to be initialized separately from
 	// SDL_INIT_GAMECONTROLLER for SDL_JoystickOpen() to work correctly,
@@ -531,6 +615,8 @@ static void IN_InitJoystick( void )
 	if (SDL_IsGameController(in_joystickNo->integer))
 		gamepad = SDL_GameControllerOpen(in_joystickNo->integer);
 
+	IN_UpdateGamepadFamily();
+
 	Com_DPrintf( "Joystick %d opened\n", in_joystickNo->integer );
 	Com_DPrintf( "Name:       %s\n", SDL_JoystickNameForIndex(in_joystickNo->integer) );
 	Com_DPrintf( "Axes:       %d\n", SDL_JoystickNumAxes(stick) );
@@ -562,6 +648,9 @@ static void IN_ShutdownJoystick( void )
 		SDL_GameControllerClose(gamepad);
 		gamepad = NULL;
 	}
+
+	Cvar_Get( "in_gamepadFamily", "none", CVAR_ROM );
+	Cvar_Set( "in_gamepadFamily", "none" );
 
 	if (stick)
 	{
@@ -652,6 +741,7 @@ static void IN_GamepadMove( void )
 	int i;
 	int translatedAxes[MAX_JOYSTICK_AXIS];
 	qboolean translatedAxesSet[MAX_JOYSTICK_AXIS];
+	qboolean padActivity = qfalse;
 
 	SDL_GameControllerUpdate();
 
@@ -670,6 +760,9 @@ static void IN_GamepadMove( void )
 				Com_QueueEvent(in_eventTime, SE_KEY, K_PAD0_A + i, pressed, 0, NULL);
 			}
 			stick_state.buttons[i] = pressed;
+			if ( pressed ) {
+				padActivity = qtrue;
+			}
 		}
 	}
 
@@ -762,6 +855,9 @@ static void IN_GamepadMove( void )
 			if (!negAnalog && negKey && oldAxis >= 0 && axis < 0)
 				Com_QueueEvent(in_eventTime, SE_KEY, negKey, qtrue, 0, NULL);
 
+			if ( axis != 0 ) {
+				padActivity = qtrue;
+			}
 			stick_state.oldaaxes[i] = axis;
 		}
 	}
@@ -774,6 +870,10 @@ static void IN_GamepadMove( void )
 			if (translatedAxesSet[i])
 				Com_QueueEvent(in_eventTime, SE_JOYSTICK_AXIS, i, translatedAxes[i], 0, NULL);
 		}
+	}
+
+	if ( padActivity ) {
+		IN_SetLastInput( "pad" );
 	}
 }
 
@@ -1010,8 +1110,10 @@ static void IN_ProcessEvents( void )
 				if ( e.key.repeat && Key_GetCatcher( ) == 0 )
 					break;
 
-				if( ( key = IN_TranslateSDLToQ3Key( &e.key.keysym, qtrue ) ) )
+				if( ( key = IN_TranslateSDLToQ3Key( &e.key.keysym, qtrue ) ) ) {
 					Com_QueueEvent( in_eventTime, SE_KEY, key, qtrue, 0, NULL );
+					IN_SetLastInput( "kb" );
+				}
 
 				if( key == K_BACKSPACE )
 					Com_QueueEvent( in_eventTime, SE_CHAR, CTRL('h'), 0, 0, NULL );
@@ -1084,6 +1186,7 @@ static void IN_ProcessEvents( void )
 					if( !e.motion.xrel && !e.motion.yrel )
 						break;
 					Com_QueueEvent( in_eventTime, SE_MOUSE, e.motion.xrel, e.motion.yrel, 0, NULL );
+					IN_SetLastInput( "kb" );
 				}
 				break;
 
@@ -1102,6 +1205,9 @@ static void IN_ProcessEvents( void )
 					}
 					Com_QueueEvent( in_eventTime, SE_KEY, b,
 						( e.type == SDL_MOUSEBUTTONDOWN ? qtrue : qfalse ), 0, NULL );
+					if ( e.type == SDL_MOUSEBUTTONDOWN ) {
+						IN_SetLastInput( "kb" );
+					}
 				}
 				break;
 

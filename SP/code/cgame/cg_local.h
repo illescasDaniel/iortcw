@@ -1503,6 +1503,10 @@ typedef struct {
 	qhandle_t selectCursor;
 	qhandle_t sizeCursor;
 
+	// codmod: original copyright-free pad prompt glyphs (ui/glyphs in codmod_pad.pk3)
+	qhandle_t padXboxDpadUp;
+	qhandle_t padPsDpadUp;
+
 } cgMedia_t;
 
 

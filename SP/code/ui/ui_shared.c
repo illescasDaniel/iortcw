@@ -2133,7 +2133,7 @@ qboolean Item_ListBox_HandleKey( itemDef_t *item, int key, qboolean down, qboole
 		max = Item_ListBox_MaxScroll( item );
 		if ( item->window.flags & WINDOW_HORIZONTAL ) {
 			viewmax = ( item->window.rect.w / listPtr->elementWidth );
-			if ( key == K_LEFTARROW || key == K_KP_LEFTARROW ) {
+			if ( key == K_LEFTARROW || key == K_KP_LEFTARROW || key == K_PAD0_DPAD_LEFT ) {
 				if ( !listPtr->notselectable ) {
 					listPtr->cursorPos--;
 					if ( listPtr->cursorPos < 0 ) {
@@ -2155,7 +2155,7 @@ qboolean Item_ListBox_HandleKey( itemDef_t *item, int key, qboolean down, qboole
 				}
 				return qtrue;
 			}
-			if ( key == K_RIGHTARROW || key == K_KP_RIGHTARROW ) {
+			if ( key == K_RIGHTARROW || key == K_KP_RIGHTARROW || key == K_PAD0_DPAD_RIGHT ) {
 				if ( !listPtr->notselectable ) {
 					listPtr->cursorPos++;
 					if ( listPtr->cursorPos < listPtr->startPos ) {
@@ -2179,7 +2179,7 @@ qboolean Item_ListBox_HandleKey( itemDef_t *item, int key, qboolean down, qboole
 			}
 		} else {
 			viewmax = ( item->window.rect.h / listPtr->elementHeight );
-			if ( key == K_UPARROW || key == K_KP_UPARROW ) {
+			if ( key == K_UPARROW || key == K_KP_UPARROW || key == K_PAD0_DPAD_UP ) {
 				if ( !listPtr->notselectable ) {
 					listPtr->cursorPos--;
 					if ( listPtr->cursorPos < 0 ) {
@@ -2201,7 +2201,7 @@ qboolean Item_ListBox_HandleKey( itemDef_t *item, int key, qboolean down, qboole
 				}
 				return qtrue;
 			}
-			if ( key == K_DOWNARROW || key == K_KP_DOWNARROW ) {
+			if ( key == K_DOWNARROW || key == K_KP_DOWNARROW || key == K_PAD0_DPAD_DOWN ) {
 				if ( !listPtr->notselectable ) {
 					listPtr->cursorPos++;
 					if ( listPtr->cursorPos < listPtr->startPos ) {
@@ -3081,11 +3081,16 @@ int UI_SelectForKey(int key)
 		case K_JOY2:
 		case K_JOY3:
 		case K_JOY4:
+		case K_PAD0_A:
+		case K_PAD0_RIGHTSHOULDER:
+		case K_PAD0_DPAD_RIGHT:
 			return 1; // next
 
 		case K_MOUSE2:
 		case K_LEFTARROW:
 		case K_KP_LEFTARROW:
+		case K_PAD0_DPAD_LEFT:
+		case K_PAD0_LEFTSHOULDER:
 			return -1; // previous
 	}
 
@@ -3181,10 +3186,13 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 	case K_UPARROW:
 	case K_LEFTARROW:
 	case K_MWHEELUP:
+	case K_PAD0_DPAD_UP:
 		Menu_SetPrevCursorItem( menu );
 		break;
 
 	case K_ESCAPE:
+	case K_PAD0_B:
+	case K_PAD0_START:
 		if ( !g_waitingForKey && menu->onESC ) {
 			itemDef_t it;
 			it.parent = menu;
@@ -3197,6 +3205,7 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 	case K_DOWNARROW:
 	case K_RIGHTARROW:
 	case K_MWHEELDOWN:
+	case K_PAD0_DPAD_DOWN:
 		Menu_SetNextCursorItem( menu );
 		break;
 
@@ -3225,6 +3234,7 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 	case K_JOY2:
 	case K_JOY3:
 	case K_JOY4:
+	case K_PAD0_A:
 	case K_AUX1:
 	case K_AUX2:
 	case K_AUX3:
@@ -3778,7 +3788,8 @@ static void Controls_GetKeyAssignment( char *command, int *twokeys ) {
 	twokeys[0] = twokeys[1] = -1;
 	count = 0;
 
-	for ( j = 0; j < 256; j++ )
+	// MAX_KEYS (not 256): K_PAD0_* live above 255 and must show in Controls.
+	for ( j = 0; j < MAX_KEYS; j++ )
 	{
 		DC->getBindingBuf( j, b, 256 );
 		if ( *b == 0 ) {
@@ -3990,7 +4001,8 @@ qboolean Item_Bind_HandleKey( itemDef_t *item, int key, qboolean down ) {
 	if (!g_waitingForKey)
  	{
 		if (down && ((key == K_MOUSE1 && Rect_ContainsPoint(&item->window.rect, DC->cursorx, DC->cursory))
-				|| key == K_ENTER || key == K_KP_ENTER || key == K_JOY1 || key == K_JOY2 || key == K_JOY3 || key == K_JOY4)) {
+				|| key == K_ENTER || key == K_KP_ENTER || key == K_JOY1 || key == K_JOY2 || key == K_JOY3 || key == K_JOY4
+				|| key == K_PAD0_A)) {
 			g_waitingForKey = qtrue;
 			g_bindItem = item;
 		}

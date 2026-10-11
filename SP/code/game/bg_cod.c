@@ -157,6 +157,7 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_sprintRechargeDelay","600",  0,            CODOFS( sprintRechargeDelay ), 0 },
 	{ "cod_ammoScale",          "2",    0,            CODOFS( ammoScale ),          0 },
 	{ "cod_interactHint",       "1",    0,            CODOFS( interactHint ),       1 },
+	{ "cod_padGlyphs",          "1",    0,            CODOFS( padGlyphs ),          1 },
 
 	// codmod: Phase 5c CoD HUD (docs/phase-5c-hud.md)
 	{ "cod_hudEnable",          "1",    0,            CODOFS( hudEnable ),          1 },

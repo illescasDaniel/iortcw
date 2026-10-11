@@ -526,12 +526,14 @@ static void CG_DrawCursorhint( rectDef_t *rect ) {
 
 	trap_R_SetColor( NULL );
 
-	// codmod: label above the cursor-hint icon (phase 5b). CoD-style "F" for use prompts
-	// (vanilla also binds ENTER; trap_Key_GetKey returns the first bind — always show F).
+	// codmod: label above the cursor-hint icon (phase 5b). Keyboard shows "Press F…";
+	// pad last-input shows D-pad Up glyph (Xbox-like / PS-like) + "to interact".
 	// Breakable props are look-only (shoot to destroy) — short status, not a use prompt.
 	if ( bg_cod.enable && bg_cod.vitalsEnable && bg_cod.interactHint ) {
 		const char *hintText = NULL;
 		int hint = cg.cursorHintIcon;
+		qboolean usePadGlyph = qfalse;
+		qhandle_t padGlyph = 0;
 
 		// Chair while armed with a two-hander draws NOACTIVATE — no prompt.
 		if ( hint == HINT_CHAIR
@@ -560,18 +562,53 @@ static void CG_DrawCursorhint( rectDef_t *rect ) {
 			break;
 		default:
 			// Doors, buttons, MG42, pickups, ladders, etc.
-			hintText = "Press F to interact";
+			if ( bg_cod.padGlyphs ) {
+				char lastIn[16];
+				char family[16];
+
+				trap_Cvar_VariableStringBuffer( "in_lastInput", lastIn, sizeof( lastIn ) );
+				trap_Cvar_VariableStringBuffer( "in_gamepadFamily", family, sizeof( family ) );
+				if ( !Q_stricmp( lastIn, "pad" ) && Q_stricmp( family, "none" ) ) {
+					usePadGlyph = qtrue;
+					if ( !Q_stricmp( family, "ps" ) && cgs.media.padPsDpadUp ) {
+						padGlyph = cgs.media.padPsDpadUp;
+					} else if ( cgs.media.padXboxDpadUp ) {
+						padGlyph = cgs.media.padXboxDpadUp; // xbox + generic
+					}
+					if ( !padGlyph ) {
+						usePadGlyph = qfalse;
+					}
+				}
+			}
+			if ( usePadGlyph ) {
+				hintText = "to interact";
+			} else {
+				hintText = "Press F to interact";
+			}
 			break;
 		}
 
 		if ( hintText ) {
 			int textW, textX, textY;
 			vec4_t textColor;
+			const int glyphSize = SMALLCHAR_HEIGHT + 4;
 
 			Vector4Copy( color, textColor );
 			textW = CG_DrawStrlen( hintText ) * SMALLCHAR_WIDTH;
-			textX = (int)( rect->x + rect->w * 0.5f ) - textW / 2;
 			textY = (int)( rect->y - halfscale ) - SMALLCHAR_HEIGHT - 2;
+
+			if ( usePadGlyph && padGlyph ) {
+				int totalW = glyphSize + 4 + textW;
+				int startX = (int)( rect->x + rect->w * 0.5f ) - totalW / 2;
+				int glyphY = textY - 2;
+
+				trap_R_SetColor( color );
+				CG_DrawPic( startX, glyphY, glyphSize, glyphSize, padGlyph );
+				trap_R_SetColor( NULL );
+				textX = startX + glyphSize + 4;
+			} else {
+				textX = (int)( rect->x + rect->w * 0.5f ) - textW / 2;
+			}
 			CG_DrawSmallStringColor( textX, textY, hintText, textColor );
 		}
 	}
