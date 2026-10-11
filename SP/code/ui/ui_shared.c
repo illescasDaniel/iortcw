@@ -1321,6 +1321,8 @@ void Menus_CloseByName( const char *p ) {
 	menuDef_t *menu = Menus_FindByName( p );
 	if ( menu != NULL ) {
 		Menu_RunCloseScript( menu );
+		Menu_ClearFocus( menu );
+		menu->cursorItem = -1;
 		menu->window.flags &= ~( WINDOW_VISIBLE | WINDOW_HASFOCUS );
 	}
 }
@@ -1329,6 +1331,8 @@ void Menus_CloseAll( void ) {
 	int i;
 	for ( i = 0; i < menuCount; i++ ) {
 		Menu_RunCloseScript( &Menus[i] );
+		Menu_ClearFocus( &Menus[i] );
+		Menus[i].cursorItem = -1;
 		Menus[i].window.flags &= ~( WINDOW_HASFOCUS | WINDOW_VISIBLE );
 	}
 }
@@ -1577,14 +1581,24 @@ void Script_SetFocus( itemDef_t *item, char **args ) {
 
 	if ( String_Parse( args, &name ) ) {
 		focusItem = Menu_FindItemByName( item->parent, name );
-		if ( focusItem && !( focusItem->window.flags & WINDOW_DECORATION ) && !( focusItem->window.flags & WINDOW_HASFOCUS ) ) {
-			Menu_ClearFocus( item->parent );
+		if ( focusItem && !( focusItem->window.flags & WINDOW_DECORATION ) ) {
+			menuDef_t *parent = (menuDef_t *)item->parent;
+			int i;
+
+			Menu_ClearFocus( parent );
 			focusItem->window.flags |= WINDOW_HASFOCUS;
 			if ( focusItem->onFocus ) {
 				Item_RunScript( focusItem, focusItem->onFocus );
 			}
 			if ( DC->Assets.itemFocusSound ) {
 				DC->startLocalSound( DC->Assets.itemFocusSound, CHAN_LOCAL_SOUND );
+			}
+			// Keep cursorItem in sync so pad/keyboard next/prev match the painted focus.
+			for ( i = 0; i < parent->itemCount; i++ ) {
+				if ( parent->items[i] == focusItem ) {
+					parent->cursorItem = i;
+					break;
+				}
 			}
 		}
 	}
@@ -1779,7 +1793,8 @@ qboolean Item_SetFocus( itemDef_t *item, float x, float y ) {
 
 	oldFocus = Menu_ClearFocus( item->parent );
 
-	if ( item->type == ITEM_TYPE_TEXT ) {
+	if ( item->type == ITEM_TYPE_TEXT && !item->action ) {
+		// Pure text label: only focus when the cursor is on the painted glyphs.
 		rectDef_t r;
 		r = item->textRect;
 		r.y -= r.h;
@@ -1798,6 +1813,7 @@ qboolean Item_SetFocus( itemDef_t *item, float x, float y ) {
 			}
 		}
 	} else {
+		// Buttons, actionable text rows, editfields, etc. — window rect (pad autofocus).
 		item->window.flags |= WINDOW_HASFOCUS;
 		if ( item->onFocus ) {
 			Item_RunScript( item, item->onFocus );
@@ -2548,6 +2564,34 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 				return qtrue;
 			}
 
+			// codmod: pad left/right nudge numeric editfields by 0.05 (settings values).
+			if ( key == K_PAD0_DPAD_LEFT || key == K_PAD0_LEFTSTICK_LEFT
+				 || key == K_PAD0_DPAD_RIGHT || key == K_PAD0_LEFTSTICK_RIGHT ) {
+				float value = (float)atof( buff );
+				float step = 0.05f;
+				int hundredths;
+
+				if ( key == K_PAD0_DPAD_LEFT || key == K_PAD0_LEFTSTICK_LEFT ) {
+					value -= step;
+				} else {
+					value += step;
+				}
+				if ( editPtr->maxVal > editPtr->minVal ) {
+					if ( value < editPtr->minVal ) {
+						value = editPtr->minVal;
+					} else if ( value > editPtr->maxVal ) {
+						value = editPtr->maxVal;
+					}
+				}
+				// Snap to hundredths so 0.05 steps stay clean.
+				hundredths = (int)( value * 100.0f + ( value >= 0.0f ? 0.5f : -0.5f ) );
+				value = (float)hundredths / 100.0f;
+				DC->setCVar( item->cvar, va( "%.2f", value ) );
+				item->cursorPos = 0;
+				editPtr->paintOffset = 0;
+				return qtrue;
+			}
+
 			if ( key == K_RIGHTARROW || key == K_KP_RIGHTARROW ) {
 				if ( editPtr->maxPaintChars && item->cursorPos >= editPtr->maxPaintChars && item->cursorPos < len ) {
 					item->cursorPos++;
@@ -2612,7 +2656,9 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 		}
 		// -NERVE - SMF
 
-		if ( key == K_ENTER || key == K_KP_ENTER || key == K_ESCAPE ) {
+		// A/X confirm, B/Esc cancel — leave edit mode.
+		if ( key == K_ENTER || key == K_KP_ENTER || key == K_ESCAPE
+			 || key == K_PAD0_A || key == K_PAD0_X || key == K_PAD0_B ) {
 			return qfalse;
 		}
 
@@ -2968,6 +3014,175 @@ itemDef_t *Menu_SetNextCursorItem( menuDef_t *menu ) {
 	return NULL;
 }
 
+// codmod: can this item receive pad/keyboard focus?
+static qboolean Menu_ItemCanFocus( itemDef_t *it ) {
+	if ( !it || ( it->window.flags & WINDOW_DECORATION ) ) {
+		return qfalse;
+	}
+	if ( !( it->window.flags & WINDOW_VISIBLE ) ) {
+		return qfalse;
+	}
+	if ( it->type == ITEM_TYPE_OWNERDRAW || it->type == ITEM_TYPE_MODEL
+		 || it->type == ITEM_TYPE_MENUMODEL ) {
+		return qfalse;
+	}
+	// Labels / titles: TEXT or BUTTON with no action must not steal pad focus.
+	if ( ( it->type == ITEM_TYPE_TEXT || it->type == ITEM_TYPE_BUTTON ) && !it->action ) {
+		return qfalse;
+	}
+	if ( it->cvarFlags & ( CVAR_ENABLE | CVAR_DISABLE ) && !Item_EnableShowViaCvar( it, CVAR_ENABLE ) ) {
+		return qfalse;
+	}
+	if ( it->cvarFlags & ( CVAR_SHOW | CVAR_HIDE ) && !Item_EnableShowViaCvar( it, CVAR_SHOW ) ) {
+		return qfalse;
+	}
+	return qtrue;
+}
+
+static qboolean Menu_ItemIsBackButton( itemDef_t *it ) {
+	if ( !it || !it->window.name ) {
+		return qfalse;
+	}
+	return !Q_stricmp( it->window.name, "back" )
+		|| !Q_stricmp( it->window.name, "back_alt" );
+}
+
+// codmod: autofocus top-left focusable item, skipping BACK (usually bottom chrome).
+static itemDef_t *Menu_AutofocusFirstItem( menuDef_t *menu ) {
+	int i;
+	itemDef_t *best = NULL;
+	float bestY = 1e9f, bestX = 1e9f;
+
+	if ( !menu ) {
+		return NULL;
+	}
+
+	Menu_ClearFocus( menu );
+	menu->cursorItem = -1;
+
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		itemDef_t *it = menu->items[i];
+		float x, y;
+
+		if ( !Menu_ItemCanFocus( it ) || Menu_ItemIsBackButton( it ) ) {
+			continue;
+		}
+		x = it->window.rect.x;
+		y = it->window.rect.y;
+		if ( y < bestY - 0.5f || ( fabs( y - bestY ) < 0.5f && x < bestX ) ) {
+			best = it;
+			bestY = y;
+			bestX = x;
+		}
+	}
+
+	// Fall back to BACK if it's the only focusable control.
+	if ( !best ) {
+		for ( i = 0; i < menu->itemCount; i++ ) {
+			if ( Menu_ItemCanFocus( menu->items[i] ) ) {
+				best = menu->items[i];
+				break;
+			}
+		}
+	}
+
+	if ( best && Item_SetFocus( best, best->window.rect.x + 1, best->window.rect.y + 1 ) ) {
+		return best;
+	}
+	return NULL;
+}
+
+// codmod: after show/hide scripts, refocus if the current item can no longer take focus.
+static void Menu_EnsureValidFocus( menuDef_t *menu ) {
+	int i;
+	itemDef_t *cur = NULL;
+
+	if ( !menu ) {
+		return;
+	}
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		if ( menu->items[i]->window.flags & WINDOW_HASFOCUS ) {
+			cur = menu->items[i];
+			break;
+		}
+	}
+	if ( cur && Menu_ItemCanFocus( cur ) ) {
+		return;
+	}
+	Menu_AutofocusFirstItem( menu );
+}
+
+// codmod: spatial focus move (dx,dy in {-1,0,1}) so tabs ↔ detail rows work on pad.
+static itemDef_t *Menu_SetCursorItemDirectional( menuDef_t *menu, int dirX, int dirY ) {
+	int i;
+	itemDef_t *cur = NULL;
+	itemDef_t *best = NULL;
+	float cx, cy;
+	float bestScore = 1e12f;
+
+	if ( !menu ) {
+		return NULL;
+	}
+
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		if ( menu->items[i]->window.flags & WINDOW_HASFOCUS ) {
+			cur = menu->items[i];
+			break;
+		}
+	}
+	if ( !cur ) {
+		return Menu_AutofocusFirstItem( menu );
+	}
+
+	cx = cur->window.rect.x + cur->window.rect.w * 0.5f;
+	cy = cur->window.rect.y + cur->window.rect.h * 0.5f;
+
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		itemDef_t *it = menu->items[i];
+		float ix, iy, dx, dy, primary, secondary, score;
+
+		if ( it == cur || !Menu_ItemCanFocus( it ) ) {
+			continue;
+		}
+		ix = it->window.rect.x + it->window.rect.w * 0.5f;
+		iy = it->window.rect.y + it->window.rect.h * 0.5f;
+		dx = ix - cx;
+		dy = iy - cy;
+
+		if ( dirX < 0 && dx >= -1.0f ) {
+			continue;
+		}
+		if ( dirX > 0 && dx <= 1.0f ) {
+			continue;
+		}
+		if ( dirY < 0 && dy >= -1.0f ) {
+			continue;
+		}
+		if ( dirY > 0 && dy <= 1.0f ) {
+			continue;
+		}
+
+		if ( dirX != 0 ) {
+			primary = fabs( dx );
+			secondary = fabs( dy );
+		} else {
+			primary = fabs( dy );
+			secondary = fabs( dx );
+		}
+		// Prefer candidates aligned on the travel axis.
+		score = primary + secondary * 2.5f;
+		if ( score < bestScore ) {
+			bestScore = score;
+			best = it;
+		}
+	}
+
+	if ( best && Item_SetFocus( best, best->window.rect.x + 1, best->window.rect.y + 1 ) ) {
+		return best;
+	}
+	return NULL;
+}
+
 
 static void Window_CloseCinematic( windowDef_t *window ) {
 	if ( window->style == WINDOW_STYLE_CINEMATIC && window->cinematic >= 0 ) {
@@ -2997,47 +3212,29 @@ static void Display_CloseCinematics( void ) {
 }
 
 void  Menus_Activate( menuDef_t *menu ) {
+	int i;
+	qboolean focused = qfalse;
+
 	menu->window.flags |= ( WINDOW_HASFOCUS | WINDOW_VISIBLE );
+
+	// codmod: drop stale item focus/cursor so reopen + setfocus stay in sync.
+	Menu_ClearFocus( menu );
+	menu->cursorItem = -1;
+
 	if ( menu->onOpen ) {
 		itemDef_t item;
 		item.parent = menu;
 		Item_RunScript( &item, menu->onOpen );
 	}
 
-	// codmod: auto-select the first focusable item so pad/keyboard nav has a start point.
-	{
-		int i;
-		qboolean focused = qfalse;
-
-		for ( i = 0; i < menu->itemCount; i++ ) {
-			if ( menu->items[i]->window.flags & WINDOW_HASFOCUS ) {
-				focused = qtrue;
-				break;
-			}
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		if ( menu->items[i]->window.flags & WINDOW_HASFOCUS ) {
+			focused = qtrue;
+			break;
 		}
-		if ( !focused ) {
-			menu->cursorItem = -1;
-			for ( i = 0; i < menu->itemCount; i++ ) {
-				itemDef_t *it = menu->items[i];
-				if ( !it || ( it->window.flags & WINDOW_DECORATION ) ) {
-					continue;
-				}
-				if ( !( it->window.flags & WINDOW_VISIBLE ) ) {
-					continue;
-				}
-				if ( it->type == ITEM_TYPE_OWNERDRAW || it->type == ITEM_TYPE_MODEL
-					 || it->type == ITEM_TYPE_MENUMODEL ) {
-					continue;
-				}
-				// Skip pure labels (TEXT with no action).
-				if ( it->type == ITEM_TYPE_TEXT && !it->action ) {
-					continue;
-				}
-				if ( Item_SetFocus( it, it->window.rect.x + 1, it->window.rect.y + 1 ) ) {
-					break;
-				}
-			}
-		}
+	}
+	if ( !focused ) {
+		Menu_AutofocusFirstItem( menu );
 	}
 
 	if ( menu->soundName && *menu->soundName ) {
@@ -3104,6 +3301,7 @@ static rectDef_t *Item_CorrectedTextRect( itemDef_t *item ) {
 }
 
 // menu item key horizontal action: -1 = previous value, 1 = next value, 0 = no change
+// codmod: pad D-pad/stick directions navigate items (not values); A/X cycle values.
 int UI_SelectForKey(int key)
 {
 	switch (key) {
@@ -3119,13 +3317,12 @@ int UI_SelectForKey(int key)
 		case K_JOY4:
 		case K_PAD0_A:
 		case K_PAD0_RIGHTSHOULDER:
-		case K_PAD0_DPAD_RIGHT:
 			return 1; // next
 
 		case K_MOUSE2:
 		case K_LEFTARROW:
 		case K_KP_LEFTARROW:
-		case K_PAD0_DPAD_LEFT:
+		case K_PAD0_X:
 		case K_PAD0_LEFTSHOULDER:
 			return -1; // previous
 	}
@@ -3187,6 +3384,7 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 	if ( item != NULL ) {
 		if ( Item_HandleKey( item, key, down ) ) {
 			Item_Action( item );
+			Menu_EnsureValidFocus( menu );
 			return;
 		}
 	}
@@ -3220,10 +3418,17 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 		break;
 	case K_KP_UPARROW:
 	case K_UPARROW:
-	case K_LEFTARROW:
 	case K_MWHEELUP:
 	case K_PAD0_DPAD_UP:
-		Menu_SetPrevCursorItem( menu );
+	case K_PAD0_LEFTSTICK_UP:
+		Menu_SetCursorItemDirectional( menu, 0, -1 );
+		break;
+
+	case K_LEFTARROW:
+	case K_KP_LEFTARROW:
+	case K_PAD0_DPAD_LEFT:
+	case K_PAD0_LEFTSTICK_LEFT:
+		Menu_SetCursorItemDirectional( menu, -1, 0 );
 		break;
 
 	case K_ESCAPE:
@@ -3239,10 +3444,17 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 	case K_TAB:
 	case K_KP_DOWNARROW:
 	case K_DOWNARROW:
-	case K_RIGHTARROW:
 	case K_MWHEELDOWN:
 	case K_PAD0_DPAD_DOWN:
-		Menu_SetNextCursorItem( menu );
+	case K_PAD0_LEFTSTICK_DOWN:
+		Menu_SetCursorItemDirectional( menu, 0, 1 );
+		break;
+
+	case K_RIGHTARROW:
+	case K_KP_RIGHTARROW:
+	case K_PAD0_DPAD_RIGHT:
+	case K_PAD0_LEFTSTICK_RIGHT:
+		Menu_SetCursorItemDirectional( menu, 1, 0 );
 		break;
 
 	case K_MOUSE1:
@@ -3271,6 +3483,7 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 	case K_JOY3:
 	case K_JOY4:
 	case K_PAD0_A:
+	case K_PAD0_X:
 	case K_AUX1:
 	case K_AUX2:
 	case K_AUX3:
@@ -3292,11 +3505,13 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 	case K_MOUSE3:
 		if ( item ) {
 			if ( item->type == ITEM_TYPE_EDITFIELD || item->type == ITEM_TYPE_NUMERICFIELD || item->type == ITEM_TYPE_VALIDFILEFIELD ) {
+				// A/X enter edit mode; then pad left/right nudge by 0.05.
 				item->cursorPos = 0;
 				g_editingField = qtrue;
 				g_editItem = item;
 			} else {
 				Item_Action( item );
+				Menu_EnsureValidFocus( menu );
 			}
 		}
 		break;
@@ -6691,10 +6906,10 @@ qboolean Display_MouseMove( void *p, int x, int y ) {
 	if ( menu == NULL ) {
 		menu = Menu_GetFocused();
 		if ( menu ) {
-			if ( menu->window.flags & WINDOW_POPUP ) {
-				Menu_HandleMouseMove( menu, x, y );
-				return qtrue;
-			}
+			// codmod: only the focused menu gets hover — stops overlays
+			// (e.g. Exit) from highlighting pause items underneath.
+			Menu_HandleMouseMove( menu, x, y );
+			return qtrue;
 		}
 		for ( i = 0; i < menuCount; i++ ) {
 			Menu_HandleMouseMove( &Menus[i], x, y );
@@ -6724,7 +6939,13 @@ int Display_CursorType( int x, int y ) {
 
 
 void Display_HandleKey( int key, qboolean down, int x, int y ) {
-	menuDef_t *menu = Display_CaptureItem( x, y );
+	menuDef_t *menu = NULL;
+
+	// Mouse clicks may hit a window under the cursor; pad/keyboard always
+	// go to the focused menu so overlays (Exit) keep receiving input.
+	if ( key == K_MOUSE1 || key == K_MOUSE2 || key == K_MOUSE3 ) {
+		menu = Display_CaptureItem( x, y );
+	}
 	if ( menu == NULL ) {
 		menu = Menu_GetFocused();
 	}
