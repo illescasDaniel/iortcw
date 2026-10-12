@@ -1460,6 +1460,10 @@ void AIChar_spawn( gentity_t *ent ) {
 	cs->castScriptStatus.castScriptEventIndex = -1;
 	cs->castScriptStatus.scriptAttackEnt = -1;
 	//
+	// codmod: cod_aiSpeedMode -- apply at spawn time too, so AI never run a frame of their
+	// un-matched starting speeds before AICast_Think's first update (phase 2.4)
+	AICast_CodApplySpeedMode( cs, ent->aiCharacter );
+	//
 	// set crouch move speed
 	ent->client->ps.crouchSpeedScale = cs->attributes[CROUCHING_SPEED] / cs->attributes[RUNNING_SPEED];
 	//

@@ -17,7 +17,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with RTCW SP Source Code.  If not, please request a copy in writing from id Software at the address below.
+along with RTCW SP Source Code.  If not, see <http://www.gnu.org/licenses/>.
+
+In addition, the RTCW SP Source Code is also subject to certain additional terms. You should have received a copy of these additional terms immediately following the terms and conditions of the GNU General Public License which accompanied the RTCW SP Source Code.  If not, please request a copy in writing from id Software at the address below.
 
 If you have questions concerning this license or the applicable additional terms, you may contact in writing id Software LLC, c/o ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 
@@ -59,9 +61,6 @@ typedef struct {
 
 	// Ridah, ladders
 	qboolean ladder;
-
-	// codmod: phase 6 — PMF_DUCKED before PM_CheckDuck this command (slide start edge)
-	qboolean codWasDucked;
 } pml_t;
 
 extern pmove_t     *pm;

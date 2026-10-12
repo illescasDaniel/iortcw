@@ -35,6 +35,7 @@ If you have questions concerning this license or the applicable additional terms
 
 
 #include "g_local.h"
+#include "bg_cod.h"     // codmod: phase 3.4 ADS spread scale
 
 static float s_quadFactor;
 static vec3_t forward, right, up;
@@ -1723,6 +1724,22 @@ void FireWeapon( gentity_t *ent ) {
 		aimSpreadScale = 1.0;
 	}
 
+	// codmod: CoD hipfire cone + ADS tighten (player only). Hip floors aimSpreadScale so
+	// standing still is still inaccurate; ADS lerps toward adsSpreadScale. Single place
+	// that feeds every Bullet_Fire()/weapon_venom_fire()/Weapon_RocketLauncher_Fire()
+	// below. AI (adsFrac 0, skipped) keep vanilla aimSpreadScale.
+	if ( !ent->aiCharacter && bg_cod.enable && bg_cod.adsEnable ) {
+		float adsFrac = ent->client->ps.stats[STAT_COD_ADS] / 1000.0f;
+		aimSpreadScale = BG_CodFireSpreadScale( aimSpreadScale, ent->s.weapon, adsFrac );
+	}
+
+	// codmod: tighter spread while still and prone (phase 6b); stacks with ADS
+	if ( !ent->aiCharacter && bg_cod.enable && bg_cod.proneEnable
+		 && ( ent->client->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE )
+		 && !( ent->client->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE_MOVING ) ) {
+		aimSpreadScale *= bg_cod.proneSpreadScale;
+	}
+
 	// fire the specific weapon
 	switch ( ent->s.weapon ) {
 	case WP_KNIFE:
@@ -1805,6 +1822,11 @@ void FireWeapon( gentity_t *ent ) {
 		Bullet_Fire( ent, THOMPSON_SPREAD * aimSpreadScale, THOMPSON_DAMAGE );
 		break;
 	case WP_PANZERFAUST:
+		// codmod: block panzer while prone unless cod_pronePanzer (phase 6b)
+		if ( !ent->aiCharacter && bg_cod.enable && bg_cod.proneEnable && !bg_cod.pronePanzer
+			 && ( ent->client->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+			break;
+		}
 		ent->client->ps.classWeaponTime = level.time; // JPW NERVE
 		Weapon_RocketLauncher_Fire( ent, aimSpreadScale );
 		break;

@@ -3,7 +3,6 @@ attribute vec4 attr_TexCoord0;
 attribute vec3 attr_Normal;
 
 uniform vec4   u_DlightInfo;
-uniform vec4   u_LightSpot; // codmod: xyz dir (local), w = cos(outer); w < -1.5 = point
 
 #if defined(USE_DEFORM_VERTEXES)
 uniform int    u_DeformGen;
@@ -88,23 +87,6 @@ void main()
 	var_Tex1 = dist.xy * u_DlightInfo.a + vec2(0.5);
 	float dlightmod = step(0.0, dot(dist, normal));
 	dlightmod *= clamp(2.0 * (1.0 - abs(dist.z) * u_DlightInfo.a), 0.0, 1.0);
-
-	// codmod: clip classic projective dlights to the spotlight cone
-	if (u_LightSpot.w > -1.5)
-	{
-		vec3 lightToFrag = -dist;
-		float len2 = dot(lightToFrag, lightToFrag);
-		if (len2 > 0.0001)
-		{
-			float cd = dot(normalize(u_LightSpot.xyz), lightToFrag * inversesqrt(len2));
-			float inner = mix(u_LightSpot.w, 1.0, 0.35);
-			dlightmod *= smoothstep(u_LightSpot.w, inner, cd);
-		}
-		else
-		{
-			dlightmod = 0.0;
-		}
-	}
 	
 	var_Color = u_Color * dlightmod;
 }

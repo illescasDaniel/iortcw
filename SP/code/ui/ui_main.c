@@ -4677,6 +4677,16 @@ static void UI_RunMenuScript( char **args ) {
 			trap_Cmd_ExecuteText( EXEC_NOW, "exec language.cfg\n" );       // NERVE - SMF
 			trap_Cmd_ExecuteText( EXEC_NOW, "setRecommended\n" );     // NERVE - SMF
 			Controls_SetDefaults();
+			// codmod: re-apply full codmod bind reset (ADS, quickknife, toggle crouch,
+			// flashlight, unbind CTRL) so menu Defaults is not vanilla-only (phase 5d).
+			{
+				char fsGame[MAX_QPATH];
+
+				trap_Cvar_VariableStringBuffer( "fs_game", fsGame, sizeof( fsGame ) );
+				if ( !Q_stricmp( fsGame, "codmod" ) ) {
+					trap_Cmd_ExecuteText( EXEC_NOW, "exec codmod_binds.cfg\n" );
+				}
+			}
 #ifdef CINEMATICS_INTRO
 			trap_Cvar_Set( "com_introPlayed", "1" );
 #endif
@@ -6940,8 +6950,13 @@ void _UI_KeyEvent( int key, qboolean down ) {
 	if ( Menu_Count() > 0 ) {
 		menuDef_t *menu = Menu_GetFocused();
 		if ( menu ) {
-			if ( key == K_ESCAPE && down && !Menus_AnyFullScreenVisible() ) {
+			// ESC or pad B/Circle: close non-fullscreen menus (pause) and unpause.
+			// Fullscreen pages (settings, controls, …) use their onEsc scripts instead.
+			if ( ( key == K_ESCAPE || key == K_PAD0_B ) && down && !Menus_AnyFullScreenVisible() ) {
 				Menus_CloseAll();
+				trap_Key_SetCatcher( trap_Key_GetCatcher() & ~KEYCATCH_UI );
+				trap_Key_ClearStates();
+				trap_Cvar_Set( "cl_paused", "0" );
 			} else {
 				Menu_HandleKey( menu, key, down );
 			}

@@ -184,6 +184,8 @@ demo through a file.
 */
 
 #define MAX_TIMEDEMO_DURATIONS	4096
+#define BENCH_WARMUP_US		2000000LL	// skip asset/shader load hitches
+#define MAX_BENCH_FRAMES		65536	// cl_benchDemo frame-time samples (microseconds)
 
 typedef struct {
 
@@ -256,6 +258,13 @@ typedef struct {
 	int			timeDemoMinDuration;	// minimum frame duration
 	int			timeDemoMaxDuration;	// maximum frame duration
 	unsigned char	timeDemoDurations[ MAX_TIMEDEMO_DURATIONS ];	// log of frame durations
+
+	// cl_benchDemo: real-time demo playback frame times (does not touch cl.serverTime)
+	long long	benchStartUs;			// first frame seen (warm-up starts)
+	long long	benchLastUs;			// previous frame
+	long long	benchMeasureUs;			// first measured frame (after warm-up)
+	int			benchFrames;			// measured frames
+	int			benchDurations[ MAX_BENCH_FRAMES ];	// frame durations in microseconds
 
 	float	aviVideoFrameRemainder;
 	float	aviSoundFrameRemainder;
@@ -440,6 +449,7 @@ extern	cvar_t	*j_side_axis;
 extern	cvar_t	*j_up_axis;
 
 extern cvar_t  *cl_timedemo;
+extern cvar_t  *cl_benchDemo;
 extern	cvar_t	*cl_aviFrameRate;
 extern	cvar_t	*cl_aviMotionJpeg;
 

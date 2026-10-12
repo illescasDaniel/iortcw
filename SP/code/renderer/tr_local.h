@@ -1660,6 +1660,8 @@ void RE_AddPolysToScene( qhandle_t hShader, int numVerts, const polyVert_t *vert
 // Ridah
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b, int overdraw );
 // done.
+void RE_AddSpotLightToScene( const vec3_t org, float intensity, float r, float g, float b,
+							 const vec3_t dir, float coneAngleDeg, int overdraw ); // codmod
 //----(SA)
 void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b, float scale, int id, int flags );
 //----(SA)

@@ -142,6 +142,46 @@ int Cvar_VariableIntegerValue( const char *var_name ) {
 
 /*
 ============
+Cvar_LatchedPending
+
+True if a latched value differs from the live string. Does not apply the latch
+(unlike Cvar_Get, which would take the latched value immediately).
+============
+*/
+qboolean Cvar_LatchedPending( const char *var_name ) {
+	cvar_t  *var;
+
+	var = Cvar_FindVar( var_name );
+	if ( !var || !var->latchedString ) {
+		return qfalse;
+	}
+	return strcmp( var->latchedString, var->string ) != 0;
+}
+
+
+/*
+============
+Cvar_VariableLatchedInteger
+
+Pending latched integer if any, otherwise the live integer. Does not apply.
+============
+*/
+int Cvar_VariableLatchedInteger( const char *var_name ) {
+	cvar_t  *var;
+
+	var = Cvar_FindVar( var_name );
+	if ( !var ) {
+		return 0;
+	}
+	if ( var->latchedString ) {
+		return atoi( var->latchedString );
+	}
+	return var->integer;
+}
+
+
+/*
+============
 Cvar_VariableString
 ============
 */

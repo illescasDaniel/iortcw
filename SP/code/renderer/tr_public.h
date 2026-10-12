@@ -31,7 +31,7 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "tr_types.h"
 
-#define REF_API_VERSION     9
+#define REF_API_VERSION     8
 
 //
 // these are the functions exported by the refresh module
@@ -78,9 +78,6 @@ typedef struct {
 	void ( *AddPolysToScene )( qhandle_t hShader, int numVerts, const polyVert_t *verts, int numPolys );
 	// done.
 	void ( *AddLightToScene )( const vec3_t org, float intensity, float r, float g, float b, int overdraw );
-	// codmod: directional spotlight (coneAngleDeg = half-angle). Point lights use AddLightToScene.
-	void ( *AddSpotLightToScene )( const vec3_t org, float intensity, float r, float g, float b,
-								   const vec3_t dir, float coneAngleDeg, int overdraw );
 //----(SA)
 	void ( *AddCoronaToScene )( const vec3_t org, float r, float g, float b, float scale, int id, int flags );
 	void ( *SetFog )( int fogvar, int var1, int var2, float r, float g, float b, float density );
@@ -198,10 +195,6 @@ typedef struct {
 	void	(*Sys_GLimpSafeInit)( void );
 	void	(*Sys_GLimpInit)( void );
 	qboolean (*Sys_LowPhysicalMemory)( void );
-
-	// frame pacing around the buffer swap (finish = glFinish); may be NULL
-	void	(*PresentWait)( void ( *finish )( void ) );
-	void	(*PresentDone)( void ( *finish )( void ) );
 } refimport_t;
 
 

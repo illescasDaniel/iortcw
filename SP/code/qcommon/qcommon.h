@@ -569,6 +569,10 @@ float   Cvar_VariableValue( const char *var_name );
 int     Cvar_VariableIntegerValue( const char *var_name );
 // returns 0 if not defined or non numeric
 
+qboolean Cvar_LatchedPending( const char *var_name );
+int     Cvar_VariableLatchedInteger( const char *var_name );
+// peek latched value without applying it (Cvar_Get would apply)
+
 char    *Cvar_VariableString( const char *var_name );
 void    Cvar_VariableStringBuffer( const char *var_name, char *buffer, int bufsize );
 // returns an empty string if not defined
@@ -1104,6 +1108,7 @@ void IN_Init( void *windowData );
 void IN_Frame( void );
 void IN_Shutdown( void );
 void IN_Restart( void );
+qboolean IN_ToggleFullscreenInPlace( void );
 
 /*
 ==============================================================
@@ -1140,6 +1145,21 @@ void    Sys_Print( const char *msg );
 // Sys_Milliseconds should only be used for profiling purposes,
 // any game related timing information should come from event timestamps
 int     Sys_Milliseconds( void );
+
+// Monotonic microsecond clock for frame-time benchmarking (cl_benchDemo)
+long long Sys_Microseconds( void );
+
+// Hybrid sleep+spin to an absolute Sys_Microseconds deadline. spinUs: <0 auto, 0 sleep only.
+// Returns microseconds woken past the deadline.
+long long Sys_WaitUntil( long long deadlineUs, int spinUs );
+
+// Frame pacer hooks called by the renderer around the buffer swap (finish = glFinish)
+void Com_PresentWait( void ( *finish )( void ) );
+void Com_PresentDone( void ( *finish )( void ) );
+// Sub-millisecond remainder (0..999 us) of the paced game clock, for cgame interpolation
+extern int com_frameFracUs;
+// Sys_Microseconds time right after the last buffer swap (bench: present cadence)
+extern long long com_lastPresentUs;
 
 qboolean Sys_RandomBytes( byte *string, int len );
 

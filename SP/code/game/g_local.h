@@ -567,6 +567,10 @@ struct gclient_s {
 	// like health / armor countdowns and regeneration
 	int timeResidual;
 
+	// codmod: Phase 5b CoD health regen (player only)
+	int codLastDamageTime;       // level.time of last HP loss that paused regen
+	float codHealthRegenFrac;    // fractional HP accumulator between whole points
+
 	float currentAimSpreadScale;
 
 	int medicHealAmt;

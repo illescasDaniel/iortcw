@@ -38,15 +38,8 @@ int main(int argc, char **argv)
 
         end[1] = '\0';
 
-        // Write line enquoted (escaping quotes and backslashes), with a newline
-        fputc('"', ofp);
-        for(char *c = buffer; *c; c++)
-        {
-            if(*c == '"' || *c == '\\')
-                fputc('\\', ofp);
-            fputc(*c, ofp);
-        }
-        fprintf(ofp, "\\n\"\n");
+        // Write line enquoted, with a newline
+        fprintf(ofp, "\"%s\\n\"\n", buffer);
     }
 
     fprintf(ofp, ";\n");

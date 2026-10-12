@@ -727,6 +727,7 @@ qboolean AICast_GetAvoid( cast_state_t *cs, bot_goal_t *goal, vec3_t outpos, qbo
 void AICast_QueryThink( cast_state_t *cs );
 void AICast_DeadClipWalls( cast_state_t *cs );
 void AICast_IdleReload( cast_state_t *cs );
+void AICast_CodApplySpeedMode( cast_state_t *cs, int aiCharacter );   // codmod: phase 2.4
 //
 // ai_cast_script.c
 qboolean AICast_ScriptRun( cast_state_t *cs, qboolean force );

@@ -318,6 +318,20 @@ void FBO_Init(void)
 		R_CheckFBO(tr.screenScratchFbo);
 	}
 
+	if (tr.smaaEdgesImage)
+	{
+		tr.smaaEdgesFbo = FBO_Create("smaaEdges", tr.smaaEdgesImage->width, tr.smaaEdgesImage->height);
+		FBO_AttachImage(tr.smaaEdgesFbo, tr.smaaEdgesImage, GL_COLOR_ATTACHMENT0, 0);
+		R_CheckFBO(tr.smaaEdgesFbo);
+	}
+
+	if (tr.smaaBlendImage)
+	{
+		tr.smaaBlendFbo = FBO_Create("smaaBlend", tr.smaaBlendImage->width, tr.smaaBlendImage->height);
+		FBO_AttachImage(tr.smaaBlendFbo, tr.smaaBlendImage, GL_COLOR_ATTACHMENT0, 0);
+		R_CheckFBO(tr.smaaBlendFbo);
+	}
+
 	if (tr.sunRaysImage)
 	{
 		tr.sunRaysFbo = FBO_Create("_sunRays", tr.renderDepthImage->width, tr.renderDepthImage->height);

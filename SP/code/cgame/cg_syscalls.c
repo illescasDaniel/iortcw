@@ -320,6 +320,12 @@ void    trap_R_AddLightToScene( const vec3_t org, float intensity, float r, floa
 	syscall( CG_R_ADDLIGHTTOSCENE, org, PASSFLOAT( intensity ), PASSFLOAT( r ), PASSFLOAT( g ), PASSFLOAT( b ), overdraw );
 }
 
+void    trap_R_AddSpotLightToScene( const vec3_t org, float intensity, float r, float g, float b,
+									const vec3_t dir, float coneAngleDeg, int overdraw ) {
+	syscall( CG_R_ADDSPOTLIGHTTOSCENE, org, PASSFLOAT( intensity ), PASSFLOAT( r ), PASSFLOAT( g ), PASSFLOAT( b ),
+			 dir, PASSFLOAT( coneAngleDeg ), overdraw );
+}
+
 //----(SA)
 void    trap_R_AddCoronaToScene( const vec3_t org, float r, float g, float b, float scale, int id, int flags ) {
 	syscall( CG_R_ADDCORONATOSCENE, org, PASSFLOAT( r ), PASSFLOAT( g ), PASSFLOAT( b ), PASSFLOAT( scale ), id, flags );
@@ -439,6 +445,15 @@ void trap_Key_SetCatcher( int catcher ) {
 
 int trap_Key_GetKey( const char *binding ) {
 	return syscall( CG_KEY_GETKEY, binding );
+}
+
+// codmod: used by /cod_menu to steal arrow keys from movement binds
+void trap_Key_GetBindingBuf( int keynum, char *buf, int buflen ) {
+	syscall( CG_KEY_GETBINDINGBUF, keynum, buf, buflen );
+}
+
+void trap_Key_SetBinding( int keynum, const char *binding ) {
+	syscall( CG_KEY_SETBINDING, keynum, binding );
 }
 
 

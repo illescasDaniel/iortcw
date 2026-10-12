@@ -1822,6 +1822,11 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME( "EV_JUMP" );
 		trap_S_StartSound( NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*jump1.wav" ) );
 		break;
+	case EV_COD_SLIDE:
+		DEBUGNAME( "EV_COD_SLIDE" );
+		// codmod: phase 6 — reuse gravel scrape; no new assets
+		trap_S_StartSound( NULL, es->number, CHAN_BODY, cgs.media.footsteps[FOOTSTEP_GRAVEL][0] );
+		break;
 	case EV_TAUNT:
 		DEBUGNAME( "EV_TAUNT" );
 		trap_S_StartSound( NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*taunt.wav" ) );

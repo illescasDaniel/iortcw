@@ -206,7 +206,9 @@ typedef struct editFieldDef_s {
 	int paintOffset;                //
 } editFieldDef_t;
 
-#define MAX_MULTI_CVARS 32
+// Was 32 — r_mode list (30 modes + Automatic + Custom) filled it exactly and
+// clipped anything we add (e.g. more high-DPI modes). Headroom for E14.
+#define MAX_MULTI_CVARS 48
 
 typedef struct multiDef_s {
 	const char *cvarList[MAX_MULTI_CVARS];
