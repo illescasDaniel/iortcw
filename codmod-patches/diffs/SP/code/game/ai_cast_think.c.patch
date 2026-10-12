@@ -1,0 +1,89 @@
+diff --git a/SP/code/game/ai_cast_think.c b/SP/code/game/ai_cast_think.c
+index 24376c15..f4979589 100644
+--- a/SP/code/game/ai_cast_think.c
++++ b/SP/code/game/ai_cast_think.c
+@@ -45,6 +45,7 @@ If you have questions concerning this license or the applicable additional terms
+ #include "../botlib/botai.h"          //bot ai interface
+ 
+ #include "ai_cast.h"
++#include "bg_cod.h"     // codmod: phase 2.4, cod_aiSpeedMode
+ 
+ /*
+ The lowest level of Cast AI thinking.
+@@ -422,6 +423,65 @@ void AICast_UpdateInput( cast_state_t *cs, int time ) {
+ 	g_entities[cs->bs->entitynum].client->ps.aiState = cs->aiState;
+ }
+ 
++/*
++============
++AICast_CodIsHumanType
++
++codmod: phase 2.4 -- human characters only. Never zombies, lopers, super/proto soldiers,
++or Helga/Heinrich, whose speeds are part of their boss/monster design (phase doc 2.4).
++============
++*/
++static qboolean AICast_CodIsHumanType( int aiCharacter ) {
++	switch ( aiCharacter ) {
++	case AICHAR_SOLDIER:
++	case AICHAR_AMERICAN:
++	case AICHAR_ELITEGUARD:
++	case AICHAR_BLACKGUARD:
++	case AICHAR_VENOM:
++	case AICHAR_PARTISAN:
++	case AICHAR_CIVILIAN:
++	case AICHAR_FROGMAN:
++	case AICHAR_STIMSOLDIER1:
++	case AICHAR_STIMSOLDIER2:
++	case AICHAR_STIMSOLDIER3:
++		return qtrue;
++	default:
++		return qfalse;
++	}
++}
++
++/*
++============
++AICast_CodApplySpeedMode
++
++codmod: phase 2.4, "soldiers move like the player" (user request). Called right after
++cs->attributes[WALKING_SPEED/RUNNING_SPEED/CROUCHING_SPEED] are set from the current anim
++(ai_cast_think.c) or from the character's starting attributes (ai_cast_characters.c).
++Server-only; never touches bg_pmove.c, so prediction and AI navigation are untouched.
++cod_aiSpeedMode 0 is a true vanilla A/B.
++============
++*/
++void AICast_CodApplySpeedMode( cast_state_t *cs, int aiCharacter ) {
++	if ( !bg_cod.enable || bg_cod.aiSpeedMode == 0 ) {
++		return;     // vanilla
++	}
++	if ( !AICast_CodIsHumanType( aiCharacter ) ) {
++		return;     // never touch zombies, lopers, bosses, etc.
++	}
++
++	if ( bg_cod.aiSpeedMode == 1 ) {
++		// match the player's CoD4 speeds
++		cs->attributes[RUNNING_SPEED]   = bg_cod.runSpeed;
++		cs->attributes[WALKING_SPEED]   = bg_cod.runSpeed * bg_cod.walkScale;
++		cs->attributes[CROUCHING_SPEED] = bg_cod.runSpeed * bg_cod.crouchScale;
++	} else if ( bg_cod.aiSpeedMode == 2 ) {
++		// scale whatever the anims (or starting attributes) gave us
++		cs->attributes[WALKING_SPEED]   *= bg_cod.aiSpeedScale;
++		cs->attributes[RUNNING_SPEED]   *= bg_cod.aiSpeedScale;
++		cs->attributes[CROUCHING_SPEED] *= bg_cod.aiSpeedScale;
++	}
++}
++
+ /*
+ ============
+ AICast_Think
+@@ -648,6 +708,10 @@ void AICast_Think( int client, float thinktime ) {
+ 		anim = BG_GetAnimationForIndex( cs->entityNum, animIndex );
+ 		cs->attributes[RUNNING_SPEED] = anim->moveSpeed;
+ 	}
++	// codmod: cod_aiSpeedMode -- "soldiers move like the player" (phase 2.4). Server-only,
++	// human AI types only, never touches bg_pmove.c or AI behaviour. See
++	// docs/architecture.md section 3 for why this is the one deliberate AI exception.
++	AICast_CodApplySpeedMode( cs, ent->aiCharacter );
+ 	// update crouch speed scale
+ 	ent->client->ps.crouchSpeedScale = cs->attributes[CROUCHING_SPEED] / cs->attributes[RUNNING_SPEED];
+ 	//
