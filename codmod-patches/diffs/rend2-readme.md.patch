@@ -1,0 +1,14 @@
+diff --git a/rend2-readme.md b/rend2-readme.md
+index 1d76408e..557f84ac 100644
+--- a/rend2-readme.md
++++ b/rend2-readme.md
+@@ -616,3 +616,9 @@ My name is James Canete, and I wrote most of this readme.  Also, a renderer.
+ 
+ If you wish to get in touch with me, try my GMail at use.less01 (you should be
+ able to solve this), or look for SmileTheory in #ioquake3 on irc.freenode.net.
++
++## SMAA
++
++`r_smaa` (0 off, 1 low, 2 medium, 3 high, 4 ultra) runs SMAA 1x after tonemapping. Based on the SMAA reference
++implementation by Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and Diego Gutierrez (MIT,
++https://github.com/iryoku/smaa). Needs the framebuffer path (`r_hdr 1` or MSAA) and GLSL 1.30+.
