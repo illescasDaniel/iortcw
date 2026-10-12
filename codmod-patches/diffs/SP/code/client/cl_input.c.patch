@@ -1,0 +1,100 @@
+diff --git a/SP/code/client/cl_input.c b/SP/code/client/cl_input.c
+index 116e0deb..47909283 100644
+--- a/SP/code/client/cl_input.c
++++ b/SP/code/client/cl_input.c
+@@ -438,6 +438,8 @@ CL_JoystickMove
+ */
+ void CL_JoystickMove( usercmd_t *cmd ) {
+ 	float anglespeed;
++	float padSensX, padSensY, aimSlowYaw, aimSlowPitch, pullYaw, pullPitch;
++	qboolean looking;
+ 
+ 	float yaw     = j_yaw->value     * cl.joystickAxis[j_yaw_axis->integer];
+ 	float right   = j_side->value    * cl.joystickAxis[j_side_axis->integer];
+@@ -445,6 +447,33 @@ void CL_JoystickMove( usercmd_t *cmd ) {
+ 	float pitch   = j_pitch->value   * cl.joystickAxis[j_pitch_axis->integer];
+ 	float up      = j_up->value      * cl.joystickAxis[j_up_axis->integer];
+ 
++	// codmod: pad look scales (defaults: X half of engine, Y lower than X).
++	padSensX = Cvar_VariableValue( "cod_padSensX" );
++	padSensY = Cvar_VariableValue( "cod_padSensY" );
++	if ( padSensX <= 0.0f ) {
++		padSensX = 0.5f;
++	}
++	if ( padSensY <= 0.0f ) {
++		padSensY = 0.35f;
++	}
++	yaw *= padSensX;
++	pitch *= padSensY;
++
++	// Target friction (per-axis) + auto-aim pull from cgame (pad only).
++	aimSlowYaw = Cvar_VariableValue( "cod_padAimSlowYaw" );
++	aimSlowPitch = Cvar_VariableValue( "cod_padAimSlowPitch" );
++	if ( aimSlowYaw <= 0.0f || aimSlowYaw > 1.0f ) {
++		aimSlowYaw = Cvar_VariableValue( "cod_padAimSlow" );
++		if ( aimSlowYaw <= 0.0f || aimSlowYaw > 1.0f ) {
++			aimSlowYaw = 1.0f;
++		}
++	}
++	if ( aimSlowPitch <= 0.0f || aimSlowPitch > 1.0f ) {
++		aimSlowPitch = aimSlowYaw;
++	}
++	yaw *= aimSlowYaw;
++	pitch *= aimSlowPitch;
++
+ 	if ( !( kb[KB_SPEED].active ^ cl_run->integer ) ) {
+ 		cmd->buttons |= BUTTON_WALKING;
+ 	}
+@@ -471,6 +500,18 @@ void CL_JoystickMove( usercmd_t *cmd ) {
+ 	}
+ 
+ 	cmd->upmove = ClampChar( cmd->upmove + (int)up );
++
++	// Auto-aim angle pull (degrees this frame). Applied even if stick is centered
++	// so ADS near an enemy still tracks the chest.
++	pullYaw = Cvar_VariableValue( "cod_padAimPullYaw" );
++	pullPitch = Cvar_VariableValue( "cod_padAimPullPitch" );
++	looking = ( cl.joystickAxis[j_yaw_axis->integer] != 0
++				|| cl.joystickAxis[j_pitch_axis->integer] != 0
++				|| pullYaw != 0.0f || pullPitch != 0.0f );
++	if ( looking ) {
++		cl.viewangles[YAW] += pullYaw;
++		cl.viewangles[PITCH] += pullPitch;
++	}
+ }
+ 
+ /*
+@@ -586,7 +627,9 @@ void CL_CmdButtons( usercmd_t *cmd ) {
+ 		kb[KB_BUTTONS0 + i].wasPressed = qfalse;
+ 	}
+ 
+-	for ( i = 0 ; i < 7 ; i++ ) {
++	// codmod: was i < 7, which never packed KB_WBUTTONS7 → WBUTTON_EXTRA7 (bit 128).
++	// ADS uses wbutton6 (bit 64); prone uses wbutton7 — both need the full 0..7 range.
++	for ( i = 0 ; i < 8 ; i++ ) {
+ 		if ( kb[KB_WBUTTONS0 + i].active || kb[KB_WBUTTONS0 + i].wasPressed ) {
+ 			cmd->wbuttons |= 1 << i;
+ 		}
+@@ -1074,6 +1117,13 @@ void CL_InitInput( void ) {
+ 	Cmd_AddCommand( "-wbutton6", IN_Wbutton6Up );
+ 	Cmd_AddCommand( "+wbutton7", IN_Wbutton7Down );   //
+ 	Cmd_AddCommand( "-wbutton7", IN_Wbutton7Up );
++	// codmod: +ads is a named alias for +wbutton6 (WBUTTON_COD_ADS). ioRTCW SP has no
++	// console `alias` command, so we register these here instead of using cfg aliases.
++	Cmd_AddCommand( "+ads", IN_Wbutton6Down );
++	Cmd_AddCommand( "-ads", IN_Wbutton6Up );
++	// codmod: +prone → +wbutton7 (WBUTTON_COD_PRONE, phase 6b)
++	Cmd_AddCommand( "+prone", IN_Wbutton7Down );
++	Cmd_AddCommand( "-prone", IN_Wbutton7Up );
+ //----(SA) end
+ 
+ 	Cmd_AddCommand( "+mlook", IN_MLookDown );
+@@ -1164,6 +1214,8 @@ void CL_ShutdownInput(void)
+ 	Cmd_RemoveCommand("-wbutton6");
+ 	Cmd_RemoveCommand("+wbutton7");
+ 	Cmd_RemoveCommand("-wbutton7");
++	Cmd_RemoveCommand("+ads");   // codmod
++	Cmd_RemoveCommand("-ads");   // codmod
+ 
+ 	Cmd_RemoveCommand("+mlook");
+ 	Cmd_RemoveCommand("-mlook");
