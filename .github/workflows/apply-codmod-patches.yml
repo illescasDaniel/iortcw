@@ -24,16 +24,14 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin master
-          # Restore every tracked path from master except staging/workflow/marker
           git checkout origin/master -- .
           git checkout HEAD -- codmod-patches .github/workflows/apply-codmod-patches.yml CODMOD.md 2>/dev/null || true
-          # Drop any leftover untracked junk from the master checkout swap
           git status --short | head -50
       - name: Fetch remaining staged patches tarball
         run: |
           set -euo pipefail
-          URL="https://litter.catbox.moe/xg95si.gz"
-          EXPECT_SHA="934fe4d82a720bc7b6e69ee038ef96f8903230bd12287d58e5a92935ba5d8466"
+          URL="https://litter.catbox.moe/n2row3.gz"
+          EXPECT_SHA="8a1e14d40a191269b66b5a0ae79485976dc28e953e5aab7486a90b8ca6cb353c"
           curl -fsSL -o /tmp/remaining_codmod_patches.tar.gz "$URL"
           echo "$EXPECT_SHA  /tmp/remaining_codmod_patches.tar.gz" | sha256sum -c -
           tar -xzf /tmp/remaining_codmod_patches.tar.gz
@@ -43,33 +41,33 @@ jobs:
         run: |
           set -euo pipefail
           if [ -d codmod-patches/diffs ]; then
-            find codmod-patches/diffs -type f -name '*.patch' | sort | while read -r p; do
+            while IFS= read -r p; do
               echo "APPLY $p"
               git apply --whitespace=nowarn "$p"
-            done
+            done < <(find codmod-patches/diffs -type f -name '*.patch' | sort)
           fi
       - name: Assemble chunked files
         run: |
           set -euo pipefail
           if [ -d codmod-patches/chunks ]; then
-            find codmod-patches/chunks -mindepth 1 -maxdepth 1 -type d | sort | while read -r d; do
+            while IFS= read -r d; do
               key="$(basename "$d")"
               outpath="$(echo "$key" | sed 's#__#/#g')"
               echo "ASSEMBLE $outpath from $d"
               mkdir -p "$(dirname "$outpath")"
               cat "$d"/part_* | base64 -d > "$outpath"
-            done
+            done < <(find codmod-patches/chunks -mindepth 1 -maxdepth 1 -type d | sort)
           fi
       - name: Copy full new files
         run: |
           set -euo pipefail
           if [ -d codmod-patches/files ]; then
-            find codmod-patches/files -type f | sort | while read -r f; do
+            while IFS= read -r f; do
               outpath="${f#codmod-patches/files/}"
               echo "COPY $outpath"
               mkdir -p "$(dirname "$outpath")"
               cp "$f" "$outpath"
-            done
+            done < <(find codmod-patches/files -type f | sort)
           fi
       - name: Remove staging and commit
         run: |
