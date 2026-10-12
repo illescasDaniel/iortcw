@@ -20,6 +20,15 @@ jobs:
         with:
           ref: cursor/codmod-patches-0f47
           fetch-depth: 0
+      - name: Reset sources to master (undo partial applies)
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          # Restore every tracked path from master except staging/workflow/marker
+          git checkout origin/master -- .
+          git checkout HEAD -- codmod-patches .github/workflows/apply-codmod-patches.yml CODMOD.md 2>/dev/null || true
+          # Drop any leftover untracked junk from the master checkout swap
+          git status --short | head -50
       - name: Fetch remaining staged patches tarball
         run: |
           set -euo pipefail
@@ -27,7 +36,6 @@ jobs:
           EXPECT_SHA="934fe4d82a720bc7b6e69ee038ef96f8903230bd12287d58e5a92935ba5d8466"
           curl -fsSL -o /tmp/remaining_codmod_patches.tar.gz "$URL"
           echo "$EXPECT_SHA  /tmp/remaining_codmod_patches.tar.gz" | sha256sum -c -
-          # Extract into repo root; tarball root is codmod-patches/
           tar -xzf /tmp/remaining_codmod_patches.tar.gz
           echo "Merged remaining staging tree:"
           find codmod-patches -type f | wc -l
