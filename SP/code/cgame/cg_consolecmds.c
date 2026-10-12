@@ -4,7 +4,7 @@
 Return to Castle Wolfenstein single player GPL Source Code
 Copyright (C) 1999-2010 id Software LLC, a ZeniMax Media company. 
 
-This file is part of the Return to Castle Wolfenstein single player GPL Source Code (RTCW SP Source Code).  
+This file is part of the Return to Castle Wolfenstein single player GPL Source Code (“RTCW SP Source Code”).  
 
 RTCW SP Source Code is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -95,7 +95,7 @@ static void CG_Viewpos_f( void ) {
 static void CG_ScoresDown_f( void ) {
 	if ( cg.scoresRequestTime + 2000 < cg.time ) {
 		// the scores are more than two seconds out of data,
-		// so request new ones
+		so request new ones
 		cg.scoresRequestTime = cg.time;
 		trap_SendClientCommand( "score" );
 
@@ -420,8 +420,28 @@ static consoleCommand_t commands[] = {
 	{ "mp_QuickMessage", CG_QuickMessage_f },
 	{ "OpenLimboMenu", CG_OpenLimbo_f },
 	{ "CloseLimboMenu", CG_CloseLimbo_f },
-	{ "LimboMessage", CG_LimboMessage_f }
+	{ "LimboMessage", CG_LimboMessage_f },
 	// -NERVE - SMF
+
+	{ "cod_dump", CG_CodDump_f },   // codmod: phase 2.0, see cg_cod.c
+	{ "toggleads", CG_ToggleAds_f }, // codmod: phase 3.1 sticky ADS toggle
+	{ "togglecrouch", CG_ToggleCrouch_f }, // codmod: phase 5d sticky crouch (bind c)
+	{ "+crouchprone", CG_CrouchProneDown_f }, // codmod: pad Circle/B tap crouch / hold prone
+	{ "-crouchprone", CG_CrouchProneUp_f },
+	{ "+reloaduse", CG_ReloadUseDown_f },     // codmod: pad Square/X tap reload / hold interact
+	{ "-reloaduse", CG_ReloadUseUp_f },
+	{ "toggleflashlight", CG_ToggleFlashlight_f }, // codmod: phase 5d flashlight (bind l)
+	{ "cod_resetbinds", CG_CodResetBinds_f }, // codmod: phase 5d full bind reset
+	{ "+quickkick", CG_QuickKickDown_f }, // codmod: pad R3 tap quickknife / hold kick
+	{ "-quickkick", CG_QuickKickUp_f },
+	{ "quickknife", CG_QuickKnife_f }, // codmod: phase 5.5 CoD-style quick knife (bind v)
+	{ "cod_adsTuneLoad", CG_CodAdsTuneLoad_f },   // codmod: phase 3.5 alignment tooling
+	{ "cod_adsTuneDump", CG_CodAdsTuneDump_f },   // codmod: phase 3.5 alignment tooling
+	{ "cod_adsTuneSave", CG_CodAdsTuneSave_f },   // codmod: SAVE current weapon to ads tune log
+	{ "cod_adsTuneStart", CG_CodAdsTuneStart_f }, // codmod: begin per-weapon ADS tune session
+	{ "cod_adsTuneNext", CG_CodAdsTuneNext_f },   // codmod: next iron-sight weapon + load
+	{ "cod_menu", CG_CodMenu_f },           // codmod: sectioned tune menu
+	{ "cod_menu_dump", CG_CodMenuDump_f },  // codmod: dump all tunables + runtime to log
 };
 
 
