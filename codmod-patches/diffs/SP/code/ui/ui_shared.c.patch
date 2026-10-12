@@ -1,1 +1,13 @@
-PLACEHOLDER
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 7485f0f0..9a0d7c9b 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -49,6 +49,8 @@ typedef struct scrollInfo_s {
+ 
+ static scrollInfo_t scrollInfo;
+ 
++static void UI_RebuildVidModeMulti( itemDef_t *item );
++
+ static void ( *captureFunc )( void *p ) = 0;
+ static void *captureData = NULL;
+ static itemDef_t *itemCapture = NULL;   // item that has the mouse captured ( if any )
