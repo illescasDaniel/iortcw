@@ -1,0 +1,35 @@
+diff --git a/SP/code/game/g_cmds.c b/SP/code/game/g_cmds.c
+index 5048abca..59355e3b 100644
+--- a/SP/code/game/g_cmds.c
++++ b/SP/code/game/g_cmds.c
+@@ -27,6 +27,7 @@ If you have questions concerning this license or the applicable additional terms
+ */
+ 
+ #include "g_local.h"
++#include "bg_cod.h"     // codmod: kick damage
+ 
+ /*
+ ==================
+@@ -1575,7 +1576,10 @@ void Cmd_Activate_f( gentity_t *ent ) {
+ 		} else if ( ( Q_stricmp( traceEnt->classname, "misc_mg42" ) == 0 ) /*&& activatetime > oldactivatetime + 1000*/ && traceEnt->active == qfalse )         {
+ 			if ( !ent->active && traceEnt->takedamage ) {  // not a dead gun
+ 				// RF, dont allow activating MG42 if crouching
+-				if ( !( ent->client->ps.pm_flags & PMF_DUCKED ) && !infront( traceEnt, ent ) ) {
++				// codmod: also block while prone (PMF_DUCKED is set, but keep explicit) (phase 6b)
++				if ( !( ent->client->ps.pm_flags & PMF_DUCKED )
++					 && !( ent->client->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE )
++					 && !infront( traceEnt, ent ) ) {
+ 					gclient_t   *cl;
+ 					cl = &level.clients[ ent->s.clientNum ];
+ 
+@@ -1690,6 +1694,10 @@ int Cmd_WolfKick_f( gentity_t *ent ) {
+ 
+ 	int damage = 15;
+ 
++	if ( !ent->aiCharacter && bg_cod.enable && bg_cod.kickDamage > 0 ) {
++		damage = (int)bg_cod.kickDamage;
++	}
++
+ 	if ( ent->client->ps.leanf ) {
+ 		return 0;   // no kick when leaning
+ 

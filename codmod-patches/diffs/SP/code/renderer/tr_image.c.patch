@@ -1,0 +1,29 @@
+diff --git a/SP/code/renderer/tr_image.c b/SP/code/renderer/tr_image.c
+index a651a5d4..c689b8f9 100644
+--- a/SP/code/renderer/tr_image.c
++++ b/SP/code/renderer/tr_image.c
+@@ -332,9 +332,13 @@ static void ResampleTexture( unsigned *in, int inwidth, int inheight, unsigned *
+ 	int i, j;
+ 	unsigned    *inrow, *inrow2;
+ 	unsigned frac, fracstep;
+-	unsigned p1[1024], p2[1024];
++	unsigned    *p1, *p2;
+ 	byte        *pix1, *pix2, *pix3, *pix4;
+ 
++	// codmod: was p1[1024]/p2[1024] — HD textures (2048+) overflowed and SIGSEGV'd in ResampleTexture.
++	p1 = ri.Hunk_AllocateTempMemory( outwidth * sizeof( unsigned ) );
++	p2 = ri.Hunk_AllocateTempMemory( outwidth * sizeof( unsigned ) );
++
+ 	fracstep = inwidth * 0x10000 / outwidth;
+ 
+ 	frac = fracstep >> 2;
+@@ -362,6 +366,9 @@ static void ResampleTexture( unsigned *in, int inwidth, int inheight, unsigned *
+ 			( ( byte * )( out + j ) )[3] = ( pix1[3] + pix2[3] + pix3[3] + pix4[3] ) >> 2;
+ 		}
+ 	}
++
++	ri.Hunk_FreeTempMemory( p2 );
++	ri.Hunk_FreeTempMemory( p1 );
+ }
+ 
+ /*
