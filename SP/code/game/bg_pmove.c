@@ -3900,6 +3900,13 @@ PM_CodCheckProne
 codmod: CoD4/ET-style prone stance (phase 6b, docs/phase-6b-prone.md). Port of ET
 PM_CheckProne ideas onto networked STAT_COD_* (no eFlags / pmoveExt). Player only.
 Call before PM_CheckDuck so the prone bbox wins.
+
+Attribution: the prone design (enter/exit rules, bounding-box fit tests, forced exit
+in air/water/ladder) is adapted from Wolfenstein: Enemy Territory's PM_CheckProne as
+maintained in ET: Legacy (https://github.com/etlegacy/etlegacy, src/game/bg_pmove.c,
+v2.86.1). Original code Copyright (C) 1999-2010 id Software LLC, a ZeniMax Media
+company, and the ET: Legacy team; licensed under the GNU GPL v3 (see LICENSE and
+docs/credits.md). The state machine here is rewritten for RTCW's networked stats.
 ================
 */
 static void PM_CodCheckProne( void ) {
