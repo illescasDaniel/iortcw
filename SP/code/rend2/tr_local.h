@@ -807,6 +807,8 @@ typedef enum
 	UNIFORM_ZFADELOWEST,
 	UNIFORM_ZFADEHIGHEST,
 
+	UNIFORM_SMAAMETRICS, // 1/w, 1/h, w, h of the SMAA render target
+
 	UNIFORM_LIGHTSPOT, // xyz = world/local spot dir, w = cos(outer half-angle); w < -1.5 = point
 
 	UNIFORM_COUNT
@@ -1676,6 +1678,10 @@ typedef struct {
 	image_t					*renderDepthImage;
 	image_t					*pshadowMaps[MAX_DRAWN_PSHADOWS];
 	image_t					*screenScratchImage;
+	image_t					*smaaEdgesImage;
+	image_t					*smaaBlendImage;
+	image_t					*smaaAreaImage;
+	image_t					*smaaSearchImage;
 	image_t					*textureScratchImage[2];
 	image_t                 *quarterImage[2];
 	image_t					*calcLevelsImage;
@@ -1695,6 +1701,8 @@ typedef struct {
 	FBO_t					*depthFbo;
 	FBO_t					*pshadowFbos[MAX_DRAWN_PSHADOWS];
 	FBO_t					*screenScratchFbo;
+	FBO_t					*smaaEdgesFbo;
+	FBO_t					*smaaBlendFbo;
 	FBO_t					*textureScratchFbo[2];
 	FBO_t                   *quarterFbo[2];
 	FBO_t					*calcLevelsFbo;
@@ -1747,6 +1755,10 @@ typedef struct {
 	shaderProgram_t down4xShader;
 	shaderProgram_t bokehShader;
 	shaderProgram_t tonemapShader;
+	shaderProgram_t smaaEdgeShader[4];    // per preset: low, medium, high, ultra
+	shaderProgram_t smaaWeightsShader[4];
+	shaderProgram_t smaaBlendShader;
+	qboolean        smaaAvailable;       // shaders compiled and images/FBOs exist
 	shaderProgram_t calclevels4xShader[2];
 	shaderProgram_t shadowmaskShader;
 	shaderProgram_t ssaoShader;
@@ -1993,6 +2005,10 @@ extern  cvar_t  *r_floatLightmap;
 extern  cvar_t  *r_postProcess;
 
 extern  cvar_t  *r_toneMap;
+extern  cvar_t  *r_smaa;
+extern  cvar_t  *r_smaaDebug;
+extern  cvar_t  *r_aa;
+void R_ApplyAA( void );
 extern  cvar_t  *r_forceToneMap;
 extern  cvar_t  *r_forceToneMapMin;
 extern  cvar_t  *r_forceToneMapAvg;

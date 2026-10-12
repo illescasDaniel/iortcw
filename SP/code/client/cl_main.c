@@ -939,9 +939,10 @@ static void CL_ReportBenchDemo( void ) {
 				 n, seconds, avgFps, low1Fps, median, p95, p99, maxMs, hitches );
 	Com_Printf( "codmod bench: %s\n", line );
 
-	Com_sprintf( head, sizeof( head ), "res=%dx%d msaa=%s swap=%s maxfps=%s renderer=%s",
+	Com_sprintf( head, sizeof( head ), "res=%dx%d msaa=%s smaa=%s swap=%s maxfps=%s renderer=%s",
 				 cls.glconfig.vidWidth, cls.glconfig.vidHeight,
 				 Cvar_VariableString( "r_ext_framebuffer_multisample" ),
+				 Cvar_VariableString( "r_smaa" ),
 				 Cvar_VariableString( "r_vsync" ),
 				 Cvar_VariableString( "com_maxfps" ),
 				 Cvar_VariableString( "cl_renderer" ) );

@@ -50,6 +50,13 @@ extern const char *fallbackShader_ssao_vp;
 extern const char *fallbackShader_ssao_fp;
 extern const char *fallbackShader_texturecolor_vp;
 extern const char *fallbackShader_texturecolor_fp;
+extern const char *fallbackShader_smaa_lib;
+extern const char *fallbackShader_smaa_edge_vp;
+extern const char *fallbackShader_smaa_edge_fp;
+extern const char *fallbackShader_smaa_weights_vp;
+extern const char *fallbackShader_smaa_weights_fp;
+extern const char *fallbackShader_smaa_blend_vp;
+extern const char *fallbackShader_smaa_blend_fp;
 extern const char *fallbackShader_tonemap_vp;
 extern const char *fallbackShader_tonemap_fp;
 
@@ -160,6 +167,8 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_FireRiseDir", GLSL_VEC3 },
 	{ "u_ZFadeLowest", GLSL_FLOAT },
 	{ "u_ZFadeHighest", GLSL_FLOAT },
+
+	{ "u_SmaaMetrics", GLSL_VEC4 },
 
 	{ "u_LightSpot", GLSL_VEC4 },
 };
@@ -281,6 +290,9 @@ static void GLSL_GetShaderHeader( GLenum shaderType, const GLchar *extra, char *
 		Q_strcat(dest, size, "#version 120\n");
 		Q_strcat(dest, size, "#define shadow2D(a,b) shadow2D(a,b).r \n");
 	}
+
+	// let shared code (e.g. the SMAA library) emit only the stage being compiled
+	Q_strcat(dest, size, shaderType == GL_VERTEX_SHADER ? "#define GLSL_STAGE_VERTEX 1\n" : "#define GLSL_STAGE_FRAGMENT 1\n");
 
 	// HACK: add some macros to avoid extra uniforms and save speed and code maintenance
 	//Q_strcat(dest, size,
@@ -595,8 +607,8 @@ static int GLSL_InitGPUShader(shaderProgram_t * program, const char *name,
 	int attribs, qboolean fragmentShader, const GLchar *extra, qboolean addHeader,
 	const char *fallback_vp, const char *fallback_fp)
 {
-	char vpCode[32000];
-	char fpCode[32000];
+	char vpCode[96000]; // SMAA prepends its ~55 KB library
+	char fpCode[96000];
 	char *postHeader;
 	int size;
 	int result;
@@ -1347,6 +1359,91 @@ void GLSL_InitGPUShaders(void)
 	numEtcShaders++;
 
 
+	// SMAA 1x: edge detection, blend weights and neighborhood blending, all built from the vendored
+	// library in smaa_lib.glsl (the library is prepended through the "extra" header text).
+	// Soft-fails: a missing GLSL 1.30 or a compile error leaves tr.smaaAvailable false and the pass off.
+	tr.smaaAvailable = qfalse;
+	if (glRefConfig.framebufferObject &&
+		(glRefConfig.glslMajorVersion > 1 || (glRefConfig.glslMajorVersion == 1 && glRefConfig.glslMinorVersion >= 30)))
+	{
+		static const char *smaaPresets[4] = { "LOW", "MEDIUM", "HIGH", "ULTRA" };
+		int smaaExtraSize = strlen(fallbackShader_smaa_lib) + 1024;
+		char *smaaExtra = ri.Z_Malloc(smaaExtraSize);
+		qboolean smaaOk = qtrue;
+
+		attribs = ATTR_POSITION | ATTR_TEXCOORD;
+
+		for (i = 0; i < 5 && smaaOk; i++)
+		{
+			shaderProgram_t *prog = (i < 4) ? &tr.smaaEdgeShader[i] : &tr.smaaBlendShader;
+
+			Com_sprintf(smaaExtra, smaaExtraSize,
+				"#define SMAA_GLSL_3\n"
+				"#ifdef GLSL_STAGE_VERTEX\n#define SMAA_INCLUDE_VS 1\n#define SMAA_INCLUDE_PS 0\n#else\n#define SMAA_INCLUDE_VS 0\n#define SMAA_INCLUDE_PS 1\n#endif\n"
+				"#define SMAA_PRESET_%s\n"
+				"uniform vec4 u_SmaaMetrics;\n"
+				"#define SMAA_RT_METRICS u_SmaaMetrics\n"
+				"%s",
+				smaaPresets[i < 4 ? i : 0], fallbackShader_smaa_lib);
+
+			if (!GLSL_InitGPUShader(prog, i < 4 ? "smaa_edge" : "smaa_blend", attribs, qtrue, smaaExtra, qtrue,
+					i < 4 ? fallbackShader_smaa_edge_vp : fallbackShader_smaa_blend_vp,
+					i < 4 ? fallbackShader_smaa_edge_fp : fallbackShader_smaa_blend_fp))
+			{
+				Com_Memset(prog, 0, sizeof(*prog));
+				smaaOk = qfalse;
+				break;
+			}
+
+			GLSL_InitUniforms(prog);
+			GLSL_SetUniformInt(prog, UNIFORM_TEXTUREMAP, TB_COLORMAP);
+			if (i == 4)
+				GLSL_SetUniformInt(prog, UNIFORM_LEVELSMAP, TB_LEVELSMAP);
+			GLSL_FinishGPUShader(prog);
+			numEtcShaders++;
+
+			if (i < 4)
+			{
+				// weights shader for the same preset
+				shaderProgram_t *wprog = &tr.smaaWeightsShader[i];
+
+				if (!GLSL_InitGPUShader(wprog, "smaa_weights", attribs, qtrue, smaaExtra, qtrue,
+						fallbackShader_smaa_weights_vp, fallbackShader_smaa_weights_fp))
+				{
+					Com_Memset(wprog, 0, sizeof(*wprog));
+					smaaOk = qfalse;
+					break;
+				}
+
+				GLSL_InitUniforms(wprog);
+				GLSL_SetUniformInt(wprog, UNIFORM_TEXTUREMAP, TB_COLORMAP);
+				GLSL_SetUniformInt(wprog, UNIFORM_LEVELSMAP, TB_LEVELSMAP);
+				GLSL_SetUniformInt(wprog, UNIFORM_SCREENIMAGEMAP, TB_NORMALMAP);
+				GLSL_FinishGPUShader(wprog);
+				numEtcShaders++;
+			}
+		}
+
+		ri.Free(smaaExtra);
+
+		if (smaaOk)
+		{
+			tr.smaaAvailable = qtrue;
+		}
+		else
+		{
+			ri.Printf(PRINT_WARNING, "SMAA shaders failed to compile, r_smaa disabled.\n");
+			// drop whatever did compile so shutdown does not touch half-built programs
+			for (i = 0; i < 4; i++)
+			{
+				GLSL_DeleteGPUShader(&tr.smaaEdgeShader[i]);
+				GLSL_DeleteGPUShader(&tr.smaaWeightsShader[i]);
+			}
+			GLSL_DeleteGPUShader(&tr.smaaBlendShader);
+		}
+	}
+
+
 	for (i = 0; i < 2; i++)
 	{
 		attribs = ATTR_POSITION | ATTR_TEXCOORD;
@@ -1508,6 +1605,13 @@ void GLSL_ShutdownGPUShaders(void)
 	GLSL_DeleteGPUShader(&tr.down4xShader);
 	GLSL_DeleteGPUShader(&tr.bokehShader);
 	GLSL_DeleteGPUShader(&tr.tonemapShader);
+
+	for ( i = 0; i < 4; i++)
+	{
+		GLSL_DeleteGPUShader(&tr.smaaEdgeShader[i]);
+		GLSL_DeleteGPUShader(&tr.smaaWeightsShader[i]);
+	}
+	GLSL_DeleteGPUShader(&tr.smaaBlendShader);
 
 	for ( i = 0; i < 2; i++)
 		GLSL_DeleteGPUShader(&tr.calclevels4xShader[i]);

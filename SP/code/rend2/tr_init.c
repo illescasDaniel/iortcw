@@ -139,6 +139,9 @@ cvar_t  *r_floatLightmap;
 cvar_t  *r_postProcess;
 
 cvar_t  *r_toneMap;
+cvar_t  *r_smaa;
+cvar_t  *r_smaaDebug;
+cvar_t  *r_aa;
 cvar_t  *r_forceToneMap;
 cvar_t  *r_forceToneMapMin;
 cvar_t  *r_forceToneMapAvg;
@@ -1312,6 +1315,33 @@ extern void R_CropImages_f( void );
 R_Register
 ===============
 */
+/*
+==================
+R_ApplyAA
+
+r_aa is the single user-facing anti-aliasing setting:
+0 off, 1-4 SMAA low/medium/high/ultra, 5-7 MSAA 2x/4x/8x.
+It drives r_smaa (live) and r_ext_framebuffer_multisample (latched, needs
+vid_restart). Default 3 (SMAA High). -1 leaves both cvars alone.
+==================
+*/
+void R_ApplyAA( void ) {
+	int aa = r_aa->integer;
+	int smaa, msaa;
+
+	r_aa->modified = qfalse;
+	if ( aa < 0 ) {
+		return;
+	}
+	smaa = ( aa >= 1 && aa <= 4 ) ? aa : 0;
+	msaa = ( aa >= 5 ) ? ( 2 << ( aa - 5 ) ) : 0;
+
+	ri.Cvar_Set( "r_smaa", va( "%d", smaa ) );
+	ri.Cvar_Set( "r_ext_framebuffer_multisample", va( "%d", msaa ) );
+	// at startup the latched MSAA value has to be picked up right away
+	r_ext_framebuffer_multisample = ri.Cvar_Get( "r_ext_framebuffer_multisample", "0", CVAR_ARCHIVE | CVAR_LATCH );
+}
+
 void R_Register( void ) {
 	#ifdef USE_RENDERER_DLOPEN
 	com_altivec = ri.Cvar_Get("com_altivec", "1", CVAR_ARCHIVE);
@@ -1393,6 +1423,13 @@ void R_Register( void ) {
 	r_postProcess = ri.Cvar_Get( "r_postProcess", "1", CVAR_ARCHIVE );
 
 	r_toneMap = ri.Cvar_Get( "r_toneMap", "1", CVAR_ARCHIVE );
+	r_smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE );
+	ri.Cvar_CheckRange( r_smaa, 0, 4, qtrue );
+	r_smaaDebug = ri.Cvar_Get( "r_smaaDebug", "0", 0 );
+	ri.Cvar_CheckRange( r_smaaDebug, 0, 2, qtrue );
+	r_aa = ri.Cvar_Get( "r_aa", "3", CVAR_ARCHIVE );
+	ri.Cvar_CheckRange( r_aa, -1, 7, qtrue );
+	R_ApplyAA();
 	r_forceToneMap = ri.Cvar_Get( "r_forceToneMap", "0", CVAR_CHEAT );
 	r_forceToneMapMin = ri.Cvar_Get( "r_forceToneMapMin", "-8.0", CVAR_CHEAT );
 	r_forceToneMapAvg = ri.Cvar_Get( "r_forceToneMapAvg", "-2.0", CVAR_CHEAT );

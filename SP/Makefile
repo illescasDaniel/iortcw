@@ -1913,6 +1913,13 @@ Q3R2STRINGOBJ = \
   $(B)/rend2/glsl/pshadow_vp.o \
   $(B)/rend2/glsl/shadowfill_fp.o \
   $(B)/rend2/glsl/shadowfill_vp.o \
+  $(B)/rend2/glsl/smaa_blend_fp.o \
+  $(B)/rend2/glsl/smaa_blend_vp.o \
+  $(B)/rend2/glsl/smaa_edge_fp.o \
+  $(B)/rend2/glsl/smaa_edge_vp.o \
+  $(B)/rend2/glsl/smaa_lib.o \
+  $(B)/rend2/glsl/smaa_weights_fp.o \
+  $(B)/rend2/glsl/smaa_weights_vp.o \
   $(B)/rend2/glsl/shadowmask_fp.o \
   $(B)/rend2/glsl/shadowmask_vp.o \
   $(B)/rend2/glsl/ssao_fp.o \
