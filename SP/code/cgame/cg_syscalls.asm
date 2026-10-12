@@ -129,4 +129,6 @@ equ trap_GetModelInfo			-126
 
 ; New in iortcw
 equ trap_Alloc					-901
+; codmod
+equ trap_R_AddSpotLightToScene			-902
 

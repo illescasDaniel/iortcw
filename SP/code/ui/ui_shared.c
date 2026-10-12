@@ -27,14 +27,14 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 //
-// string allocation/management
+// string allocation/managment
 
 #include "ui_shared.h"
 
 #define SCROLL_TIME_START                   500
-#define SCROLL_TIME_ADJUST               150
+#define SCROLL_TIME_ADJUST              150
 #define SCROLL_TIME_ADJUSTOFFSET    40
-#define SCROLL_TIME_FLOOR                    20
+#define SCROLL_TIME_FLOOR                   20
 
 typedef struct scrollInfo_s {
 	int nextScrollTime;
@@ -133,8 +133,8 @@ translateString_t translateStrings[] = {
 	{"keychange"},               //	"Press ENTER or CLICK to change, Press BACKSPACE to clear"
 	{"pleasewait"},              //	"Please Wait..."
 	{"dynamitetimer"},           //	"Dynamite timer set at"
-	{"necond"},                  //
-	{"neconds"},             //
+	{"second"},                  //
+	{"seconds"},             //
 	{"minute"},                  //
 	{"minutes"},             //
 	{"hour"},                    //
@@ -387,7 +387,7 @@ void String_Report( void ) {
 
 
 /*
-================
+=================
 String_Init
 =================
 */
@@ -414,7 +414,7 @@ void String_Init( void ) {
 PC_SourceWarning
 =================
 */
-static __attribute__ ((format (printf, 2, 3))) void PC_SourceWarnin‡(int handle, char *format, ...) {
+static __attribute__ ((format (printf, 2, 3))) void PC_SourceWarning(int handle, char *format, ...) {
 	int line;
 	char filename[128];
 	va_list argptr;
@@ -750,7 +750,7 @@ void Init_Display( displayContextDef_t *dc ) {
 void GradientBar_Paint( rectDef_t *rect, vec4_t color ) {
 	// gradient bar takes two paints
 	DC->setColor( color );
-	DC->drawHandlePic( rect->x, rect->y, rect->w , rect->h, DC->Assets.gradientBar );
+	DC->drawHandlePic( rect->x, rect->y, rect->w, rect->h, DC->Assets.gradientBar );
 	DC->setColor( NULL );
 }
 
