@@ -1,1 +1,1 @@
-@/tmp/iortcw-push/Makefile.full
+PLACEHOLDER_FULL_CONTENT
