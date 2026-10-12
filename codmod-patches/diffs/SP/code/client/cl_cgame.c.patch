@@ -1,0 +1,64 @@
+diff --git a/SP/code/client/cl_cgame.c b/SP/code/client/cl_cgame.c
+index 36dcfa58..3f149a37 100644
+--- a/SP/code/client/cl_cgame.c
++++ b/SP/code/client/cl_cgame.c
+@@ -846,6 +846,25 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
+ 	case CG_ALLOC:
+ 		return VM_Alloc( args[1] );
+ 
++	// codmod: directional spotlight
++	case CG_R_ADDSPOTLIGHTTOSCENE:
++		re.AddSpotLightToScene( VMA( 1 ), VMF( 2 ), VMF( 3 ), VMF( 4 ), VMF( 5 ), VMA( 6 ), VMF( 7 ), args[8] );
++		return 0;
++
++	// codmod: key bind get/set for /cod_menu arrow steal
++	case CG_KEY_GETBINDINGBUF: {
++		char *value = Key_GetBinding( args[1] );
++		if ( value ) {
++			Q_strncpyz( VMA( 2 ), value, args[3] );
++		} else {
++			*( (char *)VMA( 2 ) ) = 0;
++		}
++		return 0;
++	}
++	case CG_KEY_SETBINDING:
++		Key_SetBinding( args[1], VMA( 2 ) );
++		return 0;
++
+ 	default:
+ 		Com_Error( ERR_DROP, "Bad cgame system trap: %ld", (long int) args[0] );
+ 	}
+@@ -1040,7 +1059,7 @@ CL_CGameRendering
+ =====================
+ */
+ void CL_CGameRendering( stereoFrame_t stereo ) {
+-	VM_Call( cgvm, CG_DRAW_ACTIVE_FRAME, cl.serverTime, stereo, clc.demoplaying );
++	VM_Call( cgvm, CG_DRAW_ACTIVE_FRAME, cl.serverTime, stereo, clc.demoplaying, com_frameFracUs );
+ 	VM_Debug( 0 );
+ }
+ 
+@@ -1282,6 +1301,24 @@ void CL_SetCGameTime( void ) {
+ 	// messages from the demo file until the cgame definately
+ 	// has valid snapshots to interpolate between
+ 
++	// cl_benchDemo: measure real-time frame durations; serverTime is left alone
++	// so playback runs at normal speed (unlike timedemo's fixed 50 ms steps).
++	if ( cl_benchDemo->integer && !cl_timedemo->integer ) {
++		// present cadence (previous swap) when the renderer reports it, else frame start
++		long long now = com_lastPresentUs ? com_lastPresentUs : Sys_Microseconds();
++
++		if ( !clc.benchStartUs ) {
++			clc.benchStartUs = now;
++		} else if ( now - clc.benchStartUs >= BENCH_WARMUP_US ) {
++			if ( !clc.benchMeasureUs ) {
++				clc.benchMeasureUs = now;
++			} else if ( clc.benchFrames < MAX_BENCH_FRAMES ) {
++				clc.benchDurations[ clc.benchFrames++ ] = (int)( now - clc.benchLastUs );
++			}
++		}
++		clc.benchLastUs = now;
++	}
++
+ 	// a timedemo will always use a deterministic set of time samples
+ 	// no matter what speed machine it is run on,
+ 	// while a normal demo may have different time samples

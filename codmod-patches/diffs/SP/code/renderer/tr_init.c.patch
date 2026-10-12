@@ -1,0 +1,33 @@
+diff --git a/SP/code/renderer/tr_init.c b/SP/code/renderer/tr_init.c
+index 9a6db68e..52a86620 100644
+--- a/SP/code/renderer/tr_init.c
++++ b/SP/code/renderer/tr_init.c
+@@ -382,7 +382,19 @@ vidmode_t r_vidModes[] =
+ 	{ "Mode 26: 1920x1080  (16:9)",    1920,    1080,    1 },
+ 	{ "Mode 27: 1920x1200 (16:10)",    1920,    1200,    1 },
+ 	{ "Mode 28: 1920x1440   (4:3)",    1920,    1440,    1 },
+-	{ "Mode 29: 2560x1600 (16:10)",    2560,    1600,    1 }
++	{ "Mode 29: 2560x1600 (16:10)",    2560,    1600,    1 },
++	{ "Mode 30: 2560x1440  (16:9)",    2560,    1440,    1 },
++	{ "Mode 31: 3840x2160  (16:9)",    3840,    2160,    1 },
++	{ "Mode 32: 1366x768  (16:9)",     1366,     768,    1 },
++	{ "Mode 33: 2560x1080 (21:9)",     2560,    1080,    1 },
++	{ "Mode 34: 3440x1440 (21:9)",     3440,    1440,    1 },
++	{ "Mode 35: 3840x1600 (21:9)",     3840,    1600,    1 },
++	{ "Mode 36: 5120x1440 (32:9)",     5120,    1440,    1 },
++	{ "Mode 37: 2880x1800 (16:10)",    2880,    1800,    1 },
++	{ "Mode 38: 3200x1800  (16:9)",    3200,    1800,    1 },
++	{ "Mode 39: 3840x1080 (32:9)",     3840,    1080,    1 },
++	{ "Mode 40: 5120x2160 (21:9)",     5120,    2160,    1 },
++	{ "Mode 41: 2048x1152  (16:9)",    2048,    1152,    1 }
+ };
+ static int	s_numVidModes = ARRAY_LEN( r_vidModes );
+ 
+@@ -1616,6 +1628,7 @@ refexport_t *GetRefAPI( int apiVersion, refimport_t *rimp ) {
+ 	re.AddPolysToScene  = RE_AddPolysToScene;
+ 	// done.
+ 	re.AddLightToScene  = RE_AddLightToScene;
++	re.AddSpotLightToScene = RE_AddSpotLightToScene; // codmod
+ //----(SA)
+ 	re.AddCoronaToScene = RE_AddCoronaToScene;
+ 	re.SetFog           = R_SetFog;
