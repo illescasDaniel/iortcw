@@ -1,0 +1,300 @@
+diff --git a/SP/code/cgame/cg_view.c b/SP/code/cgame/cg_view.c
+index 02448b9b..56e3374d 100644
+--- a/SP/code/cgame/cg_view.c
++++ b/SP/code/cgame/cg_view.c
+@@ -594,30 +594,56 @@ static void CG_OffsetFirstPersonView( void ) {
+ 	// add angles based on velocity
+ 	VectorCopy( cg.predictedPlayerState.velocity, predictedVelocity );
+ 
+-	delta = DotProduct( predictedVelocity, cg.refdef.viewaxis[0] );
+-	angles[PITCH] += delta * cg_runpitch.value;
++	{
++		// codmod: stronger runpitch/runroll while sprinting (phase 4.3), lerped with visual
++		// sprint fraction so the weight eases with the gun raise/lower.
++		float runPitch = cg_runpitch.value;
++		float runRoll = cg_runroll.value;
++		float sprintE = BG_CodSmoothstep( CG_CodSprintFrac() );
++
++		if ( sprintE > 0.0f && bg_cod.enable && bg_cod.gaitEnable ) {
++			runPitch *= 1.0f + ( bg_cod.sprintRunPitch - 1.0f ) * sprintE;
++			runRoll *= 1.0f + ( bg_cod.sprintRunRoll - 1.0f ) * sprintE;
++		}
++
++		delta = DotProduct( predictedVelocity, cg.refdef.viewaxis[0] );
++		angles[PITCH] += delta * runPitch;
+ 
+-	delta = DotProduct( predictedVelocity, cg.refdef.viewaxis[1] );
+-	angles[ROLL] -= delta * cg_runroll.value;
++		delta = DotProduct( predictedVelocity, cg.refdef.viewaxis[1] );
++		angles[ROLL] -= delta * runRoll;
++	}
++
++	// codmod: slide view roll (phase 6)
++	if ( bg_cod.enable && bg_cod.slideEnable ) {
++		float slideS = CG_CodSlideFrac();
++		if ( slideS > 0.0f ) {
++			angles[ROLL] += bg_cod.slideRoll * slideS;
++		}
++	}
+ 
+ 	// add angles based on bob
+ 
+ 	// make sure the bob is visible even at low speeds
+ 	speed = cg.xyspeed > 200 ? cg.xyspeed : 200;
+ 
+-	delta = cg.bobfracsin * cg_bobpitch.value * speed;
+-	if ( cg.predictedPlayerState.pm_flags & PMF_DUCKED ) {
+-		delta *= 3;     // crouching
+-	}
+-	angles[PITCH] += delta;
+-	delta = cg.bobfracsin * cg_bobroll.value * speed;
+-	if ( cg.predictedPlayerState.pm_flags & PMF_DUCKED ) {
+-		delta *= 3;     // crouching accentuates roll
+-	}
+-	if ( cg.bobcycle & 1 ) {
+-		delta = -delta;
++	{
++		// codmod: gait bob amplitude (phase 4.2)
++		float gaitAmp = CG_CodGaitBobAmp();
++
++		delta = cg.bobfracsin * cg_bobpitch.value * speed * gaitAmp;
++		if ( cg.predictedPlayerState.pm_flags & PMF_DUCKED ) {
++			delta *= 3;     // crouching
++		}
++		angles[PITCH] += delta;
++		delta = cg.bobfracsin * cg_bobroll.value * speed * gaitAmp;
++		if ( cg.predictedPlayerState.pm_flags & PMF_DUCKED ) {
++			delta *= 3;     // crouching accentuates roll
++		}
++		if ( cg.bobcycle & 1 ) {
++			delta = -delta;
++		}
++		angles[ROLL] += delta;
+ 	}
+-	angles[ROLL] += delta;
+ 
+ //===================================
+ 
+@@ -625,17 +651,42 @@ static void CG_OffsetFirstPersonView( void ) {
+ 	origin[2] += cg.predictedPlayerState.viewheight;
+ 
+ 	// smooth out duck height changes
+-	timeDelta = cg.time - cg.duckTime;
+-	if ( timeDelta < 0 ) { // Ridah
+-		cg.duckTime = cg.time - DUCK_TIME;
+-	}
+-	if ( timeDelta < DUCK_TIME ) {
+-		cg.refdef.vieworg[2] -= cg.duckChange
+-								* ( DUCK_TIME - timeDelta ) / DUCK_TIME;
++	// codmod: cod_duckTime/cod_duckEase (phase 2.2); prone uses proneDown/UpTime set in
++	// CG_TransitionPlayerState when viewheight crosses proneViewHeight (phase 6b).
++	if ( bg_cod.enable ) {
++		if ( cg.codDuckDuration < 1 ) {
++			cg.codDuckDuration = (int)bg_cod.duckTime;
++			if ( cg.codDuckDuration < 1 ) {
++				cg.codDuckDuration = 1;
++			}
++		}
++
++		timeDelta = cg.time - cg.duckTime;
++		if ( timeDelta < 0 ) { // Ridah
++			cg.duckTime = cg.time - cg.codDuckDuration;
++			timeDelta = cg.codDuckDuration;
++		}
++		if ( timeDelta < cg.codDuckDuration ) {
++			f = (float)timeDelta / (float)cg.codDuckDuration;      // 0..1
++			if ( bg_cod.duckEase ) {
++				f = 1.0f - ( 1.0f - f ) * ( 1.0f - f );    // ease-out quad
++			}
++			cg.refdef.vieworg[2] -= cg.duckChange * ( 1.0f - f );
++		}
++	} else {
++		timeDelta = cg.time - cg.duckTime;
++		if ( timeDelta < 0 ) { // Ridah
++			cg.duckTime = cg.time - DUCK_TIME;
++		}
++		if ( timeDelta < DUCK_TIME ) {
++			cg.refdef.vieworg[2] -= cg.duckChange
++									* ( DUCK_TIME - timeDelta ) / DUCK_TIME;
++		}
+ 	}
+ 
+ 	// add bob height
+-	bob = cg.bobfracsin * cg.xyspeed * cg_bobup.value;
++	// codmod: gait amp (phase 4.2)
++	bob = cg.bobfracsin * cg.xyspeed * cg_bobup.value * CG_CodGaitBobAmp();
+ 	if ( bob > 6 ) {
+ 		bob = 6;
+ 	}
+@@ -666,9 +717,31 @@ static void CG_OffsetFirstPersonView( void ) {
+ 	if ( cg.predictedPlayerState.leanf != 0 ) {
+ 		//add leaning offset
+ 		vec3_t right;
+-		cg.refdefViewAngles[2] += cg.predictedPlayerState.leanf / 2.0f;
+-		AngleVectors( cg.refdefViewAngles, NULL, right, NULL );
+-		VectorMA( cg.refdef.vieworg, cg.predictedPlayerState.leanf, right, cg.refdef.vieworg );
++
++		// codmod: cod_leanRollScale camera tilt, with optional smoothstep ease on the
++		// *displayed* fraction so peeking accelerates and settles (phase 2.3.3). cgame-only,
++		// so it can't affect prediction.
++		if ( bg_cod.enable && bg_cod.leanEnable ) {
++			float leanf = cg.predictedPlayerState.leanf;
++			float leanMax = ( bg_cod.leanMax > 0 ) ? bg_cod.leanMax : 1.0f;
++
++			if ( bg_cod.leanEase ) {
++				float s = fabs( leanf ) / leanMax;
++				if ( s > 1.0f ) {
++					s = 1.0f;
++				}
++				s = s * s * ( 3.0f - 2.0f * s );   // smoothstep
++				leanf = ( leanf < 0 ) ? -leanMax * s : leanMax * s;
++			}
++
++			cg.refdefViewAngles[2] += leanf * bg_cod.leanRollScale;
++			AngleVectors( cg.refdefViewAngles, NULL, right, NULL );
++			VectorMA( cg.refdef.vieworg, leanf, right, cg.refdef.vieworg );
++		} else {
++			cg.refdefViewAngles[2] += cg.predictedPlayerState.leanf / 2.0f;
++			AngleVectors( cg.refdefViewAngles, NULL, right, NULL );
++			VectorMA( cg.refdef.vieworg, cg.predictedPlayerState.leanf, right, cg.refdef.vieworg );
++		}
+ 	}
+ 
+ 	// pivot the eye based on a neck length
+@@ -856,6 +929,35 @@ static int CG_CalcFov( void ) {
+ 				fov_x = zoomFov + f * ( fov_x - zoomFov );
+ 			}
+ 		}
++
++		// codmod: ADS FOV zoom (phase 3.6), only when no binocular or scope zoom is active --
++		// those already own fov_x above. e ramps 0..1 with STAT_COD_ADS, smoothstepped to
++		// match the viewmodel/sensitivity easing (CG_CodAdsFrac, cg_cod.c).
++		if ( !cg.zoomedBinoc && !cg.zoomval && bg_cod.enable && bg_cod.adsEnable ) {
++			float e = BG_CodSmoothstep( CG_CodAdsFrac() );
++			if ( e > 0.0f ) {
++				int weapon = cg.predictedPlayerState.weapon;
++				float fovScale = ( bg_cod.adsTune && weapon == cg.weaponSelect )
++								  ? bg_cod.adsTuneFov : BG_CodAdsFovScale( weapon );
++				fov_x *= 1.0f + ( fovScale - 1.0f ) * e;
++			}
++		}
++
++		// codmod: subtle sprint FOV punch (phase 4.3). Skipped while ADS/binoc/scope own fov.
++		if ( !cg.zoomedBinoc && !cg.zoomval && bg_cod.enable && bg_cod.gaitEnable ) {
++			float sprintE = BG_CodSmoothstep( CG_CodSprintFrac() );
++			if ( sprintE > 0.0f && CG_CodAdsFrac() <= 0.01f ) {
++				fov_x *= 1.0f + ( bg_cod.sprintFovScale - 1.0f ) * sprintE;
++			}
++		}
++
++		// codmod: slide FOV kick after ADS (phase 6)
++		if ( !cg.zoomedBinoc && !cg.zoomval && bg_cod.enable && bg_cod.slideEnable ) {
++			float slideS = CG_CodSlideFrac();
++			if ( slideS > 0.0f ) {
++				fov_x *= 1.0f + bg_cod.slideFovKick * slideS;
++			}
++		}
+ 	}
+ 
+ 	// DHM - Nerve :: zoom in for Limbo or Spectator
+@@ -927,7 +1029,19 @@ static int CG_CalcFov( void ) {
+ 			}
+ //				cg.zoomSensitivity = 0.1;
+ 		} else {
++			// codmod: ADS sensitivity scale (phase 3.6), player only, non-zoom branch.
++			// Tracks the FOV zoom (fovScale) times cod_adsSensScale so aim speed matches
++			// the apparent zoom, with the same ease (e) as the FOV change above.
+ 			cg.zoomSensitivity = 1;
++			if ( bg_cod.enable && bg_cod.adsEnable ) {
++				float e = BG_CodSmoothstep( CG_CodAdsFrac() );
++				if ( e > 0.0f ) {
++					int weapon = cg.predictedPlayerState.weapon;
++					float fovScale = ( bg_cod.adsTune && weapon == cg.weaponSelect )
++									  ? bg_cod.adsTuneFov : BG_CodAdsFovScale( weapon );
++					cg.zoomSensitivity = 1.0f + ( fovScale * bg_cod.adsSensScale - 1.0f ) * e;
++				}
++			}
+ 		}
+ 		// -NERVE - SMF
+ 	} else {
+@@ -1115,6 +1229,12 @@ static int CG_CalcViewValues( void ) {
+ 	VectorCopy( ps->origin, cg.refdef.vieworg );
+ 	VectorCopy( ps->viewangles, cg.refdefViewAngles );
+ 
++	// codmod: the game ticks in whole ms but frames land between ticks; carry the
++	// view forward by the sub-ms remainder so paced frames move evenly
++	if ( cg_subMsecLerp.integer && cg.timeFracUs && ps->pm_type == PM_NORMAL && !ps->viewlocked ) {
++		VectorMA( cg.refdef.vieworg, cg.timeFracUs * 0.000001f, ps->velocity, cg.refdef.vieworg );
++	}
++
+ 	// add error decay
+ 	if ( cg_errorDecay.value > 0 ) {
+ 		int t;
+@@ -1444,7 +1564,7 @@ CG_DrawActiveFrame
+ Generates and draws a game scene and status information at the given time.
+ =================
+ */
+-void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback ) {
++void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback, int frameFracUs ) {
+ 	int inwater;
+ 
+ 	cg.cld = 0;         // NERVE - SMF - reset clientDamage
+@@ -1455,10 +1575,16 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
+ #endif
+ 
+ 	cg.time = serverTime;
++	// codmod: microseconds into this game millisecond (paced frames only); visual-only
++	cg.timeFracUs = ( frameFracUs > 0 && frameFracUs < 1000 ) ? frameFracUs : 0;
+ 	cg.demoPlayback = demoPlayback;
+ 
+ 	// update cvars
+ 	CG_UpdateCvars();
++
++	// codmod: cod_adsTune alignment tooling (phase 3.5), see cg_cod.c. Cheap no-op unless
++	// cod_adsTune is set.
++	CG_CodUpdateAdsTune();
+ /*
+ 	// RF, if we should force a weapon, then do so
+ 	if( !cg.weaponSelect ) {
+@@ -1504,6 +1630,22 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
+ 		return;
+ 	}
+ 
++	// codmod: hold-right-click-to-scope (phase 3.8), before the vanilla speed-based
++	// auto-drop below and before the usercmd weapon selection is read, so cg.weaponSelect
++	// reflects this frame's ADS hold. See cg_cod.c.
++	CG_CodUpdateScopeHold();
++
++	// codmod: CoD-style quick knife state machine (phase 5.5)
++	CG_CodUpdateQuickKnife();
++	CG_CodUpdateQuickKick();
++
++	// codmod: toggle crouch auto-stand on jump (phase 5d)
++	CG_CodUpdateToggleCrouch();
++	// codmod: pad hold Circle/B → prone
++	CG_CodUpdateCrouchProne();
++	// codmod: pad tap Square/X reload / hold interact
++	CG_CodUpdateReloadUse();
++
+ 	if ( cg.weaponSelect == WP_FG42SCOPE || cg.weaponSelect == WP_SNOOPERSCOPE || cg.weaponSelect == WP_SNIPERRIFLE ) {
+ 		float spd;
+ 		spd = VectorLength( cg.snap->ps.velocity );
+@@ -1590,6 +1732,8 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
+ 		DEBUGTIME
+ 	}
+ 
++	// codmod: player flashlight dlight (phase 5d), after vieworg is set
++	CG_CodAddFlashlight();
+ 
+ 	CG_AddViewWeapon( &cg.predictedPlayerState );
+ 
+@@ -1630,6 +1774,9 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
+ 	DEBUGTIME
+ 
+ 	// let the client system know what our weapon, holdable item and zoom settings are
++	// codmod: pad aim assist writes cod_padAimSlow / pull cvars for CL_JoystickMove.
++	CG_CodPadAimAssist();
++
+ 	trap_SetUserCmdValue( cg.weaponSelect, cg.holdableSelect, cg.zoomSensitivity, cg.cld );
+ 
+ 	// actually issue the rendering calls
