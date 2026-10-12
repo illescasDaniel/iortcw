@@ -64,6 +64,7 @@ uniform mat4 u_BoneMatrix[MAX_GLSL_BONES];
 #if defined(USE_LIGHT_VECTOR)
 uniform vec4   u_LightOrigin;
 uniform float  u_LightRadius;
+uniform vec4   u_LightSpot; // codmod: xyz dir, w = cos(outer); w < -1.5 = point
 uniform vec3   u_DirectedLight;
 uniform vec3   u_AmbientLight;
 #endif
@@ -233,7 +234,7 @@ void main()
   #if defined(USE_MODELMATRIX)
 	L = (u_ModelMatrix * vec4(L, 0.0)).xyz;
 	L += normal * 0.00001;
-  #endif
+	#endif
 #endif
 
 #if defined(USE_LIGHTMAP)
@@ -247,6 +248,14 @@ void main()
 	float sqrLightDist = dot(L, L);
 	float NL = clamp(dot(normalize(normal), L) / sqrt(sqrLightDist), 0.0, 1.0);
 	float attenuation = CalcLightAttenuation(u_LightOrigin.w, u_LightRadius * u_LightRadius / sqrLightDist);
+	// codmod spotlight
+	if (u_LightSpot.w > -1.5)
+	{
+		vec3 lightToFrag = -L / sqrt(sqrLightDist);
+		float cd = dot(normalize(u_LightSpot.xyz), lightToFrag);
+		float inner = mix(u_LightSpot.w, 1.0, 0.35);
+		attenuation *= smoothstep(u_LightSpot.w, inner, cd);
+	}
 
 	var_Color.rgb *= u_DirectedLight * (attenuation * NL) + u_AmbientLight;
   #else
