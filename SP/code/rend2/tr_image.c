@@ -30,6 +30,10 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "tr_dsa.h"
 
+// SMAA lookup textures (MIT, Jorge Jimenez et al., https://github.com/iryoku/smaa)
+#include "smaa_areatex.h"
+#include "smaa_searchtex.h"
+
 static byte			 s_intensitytable[256];
 static unsigned char s_gammatable[256];
 
@@ -340,8 +344,12 @@ static void ResampleTexture( byte *in, int inwidth, int inheight, byte *out,
 	int		i, j;
 	byte	*inrow, *inrow2;
 	int		frac, fracstep;
-	int		p1[2048], p2[2048];
+	int		*p1, *p2;
 	byte	*pix1, *pix2, *pix3, *pix4;
+
+	// codmod: was p1[2048]/p2[2048] — allocate so HD/4K textures cannot overflow.
+	p1 = ri.Hunk_AllocateTempMemory( outwidth * sizeof( int ) );
+	p2 = ri.Hunk_AllocateTempMemory( outwidth * sizeof( int ) );
 
 	fracstep = inwidth*0x10000/outwidth;
 
@@ -370,6 +378,9 @@ static void ResampleTexture( byte *in, int inwidth, int inheight, byte *out,
 			*out++ = (pix1[3] + pix2[3] + pix3[3] + pix4[3])>>2;
 		}
 	}
+
+	ri.Hunk_FreeTempMemory( p2 );
+	ri.Hunk_FreeTempMemory( p1 );
 }
 
 static void RGBAtoYCoCgA(const byte *in, byte *out, int width, int height)
@@ -2791,6 +2802,49 @@ static void R_CreateDefaultImage( void ) {
 R_CreateBuiltinImages
 ==================
 */
+/*
+==================
+R_CreateSmaaImages
+
+SMAA 1x working images: RGBA8 edges/blend targets and the two precomputed lookup
+textures from the reference implementation (https://github.com/iryoku/smaa, MIT).
+The lookup tables are stored as RG8 and R8; they are expanded to RGBA8 here so the
+regular image upload path can be used (the shaders only read .rg / .r).
+==================
+*/
+static void R_CreateSmaaImages( int width, int height ) {
+	byte *tmp;
+	int i;
+	const imgFlags_t rtFlags = IMGFLAG_NO_COMPRESSION | IMGFLAG_NOLIGHTSCALE | IMGFLAG_CLAMPTOEDGE;
+
+	tr.smaaEdgesImage = R_CreateImage( "*smaaEdges", NULL, width, height, IMGTYPE_DELUXE, rtFlags, GL_RGBA8 );
+	tr.smaaBlendImage = R_CreateImage( "*smaaBlend", NULL, width, height, IMGTYPE_DELUXE, rtFlags, GL_RGBA8 );
+
+	tmp = ri.Hunk_AllocateTempMemory( AREATEX_WIDTH * AREATEX_HEIGHT * 4 );
+	for ( i = 0; i < AREATEX_WIDTH * AREATEX_HEIGHT; i++ ) {
+		tmp[i * 4 + 0] = areaTexBytes[i * 2 + 0];
+		tmp[i * 4 + 1] = areaTexBytes[i * 2 + 1];
+		tmp[i * 4 + 2] = 0;
+		tmp[i * 4 + 3] = 255;
+	}
+	tr.smaaAreaImage = R_CreateImage( "*smaaArea", tmp, AREATEX_WIDTH, AREATEX_HEIGHT, IMGTYPE_DELUXE, rtFlags, GL_RGBA8 );
+	ri.Hunk_FreeTempMemory( tmp );
+
+	tmp = ri.Hunk_AllocateTempMemory( SEARCHTEX_WIDTH * SEARCHTEX_HEIGHT * 4 );
+	for ( i = 0; i < SEARCHTEX_WIDTH * SEARCHTEX_HEIGHT; i++ ) {
+		tmp[i * 4 + 0] = searchTexBytes[i];
+		tmp[i * 4 + 1] = 0;
+		tmp[i * 4 + 2] = 0;
+		tmp[i * 4 + 3] = 255;
+	}
+	tr.smaaSearchImage = R_CreateImage( "*smaaSearch", tmp, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, IMGTYPE_DELUXE, rtFlags, GL_RGBA8 );
+	ri.Hunk_FreeTempMemory( tmp );
+
+	// the search table is read with point sampling semantics
+	qglTextureParameteriEXT( tr.smaaSearchImage->texnum, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	qglTextureParameteriEXT( tr.smaaSearchImage->texnum, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+}
+
 void R_CreateBuiltinImages( void ) {
 	int		x,y;
 	byte	data[DEFAULT_SIZE][DEFAULT_SIZE][4];
@@ -2848,6 +2902,10 @@ void R_CreateBuiltinImages( void ) {
 
 		if (r_shadowBlur->integer || r_hdr->integer)
 			tr.screenScratchImage = R_CreateImage("screenScratch", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, rgbFormat);
+
+		// SMAA needs the scratch image to write its result back through
+		if (tr.screenScratchImage)
+			R_CreateSmaaImages(width, height);
 
 		if (r_shadowBlur->integer || r_ssao->integer)
 			tr.hdrDepthImage = R_CreateImage("*hdrDepth", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_R32F);

@@ -34,6 +34,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
 #include "bg_local.h"
+#include "bg_cod.h"     // codmod: phase 2 tuning
 
 // Rafael gameskill
 int bg_pmove_gameskill_integer;
@@ -141,11 +142,9 @@ PM_StartWeaponAnim
 ==============
 */
 static void PM_StartWeaponAnim( int anim ) {
-	if ( pm->ps->pm_type >= PM_DEAD ) {
-		return;
-	}
+	qboolean isAttack;
 
-	if ( pm->ps->weapAnimTimer > 0 ) {
+	if ( pm->ps->pm_type >= PM_DEAD ) {
 		return;
 	}
 
@@ -153,7 +152,42 @@ static void PM_StartWeaponAnim( int anim ) {
 		return;
 	}
 
+	isAttack = ( anim == WEAP_ATTACK1 || anim == WEAP_ATTACK2
+				 || anim == WEAP_ATTACK_LASTSHOT ) ? qtrue : qfalse;
+
+	// codmod: attack must always restart on fire. weapAnimTimer only blocks
+	// low-priority anims (IDLE via PM_ContinueWeaponAnim) so a quick
+	// click-release can't replace ATTACK with IDLE in the same predict batch
+	// — that was the random "gun doesn't recoil" on hip pistol taps.
+	// Reload is also high-priority (phase 5d): empty-clip auto-reload must
+	// not be suppressed while the attack lock is still ticking.
+	if ( !isAttack && anim != WEAP_RELOAD1 && anim != WEAP_RELOAD2 && anim != WEAP_RELOAD3
+		 && pm->ps->weapAnimTimer > 0 ) {
+		return;
+	}
+
 	pm->ps->weapAnim = ( ( pm->ps->weapAnim & ANIM_TOGGLEBIT ) ^ ANIM_TOGGLEBIT ) | anim;
+
+	if ( isAttack && !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable ) {
+		int lock = 300; // pistol attack ~6 frames @ 20 fps
+
+		switch ( pm->ps->weapon ) {
+		case WP_MAUSER:
+		case WP_GARAND:
+			lock = 750;
+			break;
+		case WP_MP40:
+		case WP_THOMPSON:
+		case WP_STEN:
+		case WP_FG42:
+		case WP_FG42SCOPE:
+			lock = 150;
+			break;
+		default:
+			break;
+		}
+		pm->ps->weapAnimTimer = lock;
+	}
 }
 
 static void PM_ContinueWeaponAnim( int anim ) {
@@ -271,8 +305,17 @@ static void PM_Friction( void ) {
 		if ( pml.walking && !( pml.groundTrace.surfaceFlags & SURF_SLICK ) ) {
 			// if getting knocked back, no friction
 			if ( !( pm->ps->pm_flags & PMF_TIME_KNOCKBACK ) ) {
-				control = speed < pm_stopspeed ? pm_stopspeed : speed;
-				drop += control * pm_friction * pml.frametime;
+				// codmod: player-only ground friction/stopspeed (phase 5 / E17). Do not
+				// mutate file-scope pm_* — AI shares this module in the same process.
+				float friction = pm_friction;
+				float stopspeed = pm_stopspeed;
+
+				if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+					friction = bg_cod.friction;
+					stopspeed = bg_cod.stopspeed;
+				}
+				control = speed < stopspeed ? stopspeed : speed;
+				drop += control * friction * pml.frametime;
 			}
 		}
 	}
@@ -410,10 +453,35 @@ static float PM_CmdScale( usercmd_t *cmd ) {
 				  + cmd->rightmove * cmd->rightmove + cmd->upmove * cmd->upmove );
 	scale = (float)pm->ps->speed * max / ( 127.0 * total );
 
-	if ( pm->cmd.buttons & BUTTON_SPRINT && pm->ps->sprintTime > 50 ) {
+	// codmod: for the player, drive sprint off the networked COD_SF_SPRINTING flag (set by
+	// PM_CodUpdateSprint) instead of re-deriving it from the raw button + sprintTime here.
+	// AI and cod_enable 0 keep the vanilla check. (phase 2.1.c)
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+		if ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) {
+			scale *= pm->ps->sprintSpeedScale;
+		} else {
+			scale *= pm->ps->runSpeedScale;
+		}
+	} else if ( pm->cmd.buttons & BUTTON_SPRINT && pm->ps->sprintTime > 50 ) {
 		scale *= pm->ps->sprintSpeedScale;
 	} else {
 		scale *= pm->ps->runSpeedScale;
+	}
+
+	// codmod: ADS move scale (phase 3.3), player only. Scoped rifles (3.8.8) use the full
+	// move penalty for as long as they're equipped -- the real scope owns their raise/lower,
+	// this is gameplay-only and doesn't ramp with STAT_COD_ADS (which stays 0 for them,
+	// BG_CodCanADS excludes the scope weapons from iron-sight ADS). Everything else ramps
+	// with the networked STAT_COD_ADS fraction set by PM_CodUpdateADS.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.adsEnable ) {
+		if ( BG_CodIsScopeWeapon( pm->ps->weapon ) ) {
+			scale *= BG_CodAdsMoveScale( pm->ps->weapon );
+		} else {
+			float adsFrac = pm->ps->stats[STAT_COD_ADS] / 1000.0f;
+			if ( adsFrac > 0.0f ) {
+				scale *= 1.0f + ( BG_CodAdsMoveScale( pm->ps->weapon ) - 1.0f ) * adsFrac;
+			}
+		}
 	}
 
 	if ( pm->ps->pm_type == PM_NOCLIP ) {
@@ -541,6 +609,19 @@ static qboolean PM_CheckJump( void ) {
 		return qfalse;      // don't allow jump until all buttons are up
 	}
 
+	// codmod: no jump while prone or during prone stand-up/down (phase 6b).
+	// Jump-to-stand must not launch after the exit frame — hold JUMP_HELD until release.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.proneEnable ) {
+		if ( ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE )
+			 || pm->ps->stats[STAT_COD_STANCE] > 0 ) {
+			if ( pm->cmd.upmove >= 10 ) {
+				pm->ps->pm_flags |= PMF_JUMP_HELD;
+				pm->cmd.upmove = 0;
+			}
+			return qfalse;
+		}
+	}
+
 	if ( pm->cmd.upmove < 10 ) {
 		// not holding jump
 		return qfalse;
@@ -558,7 +639,12 @@ static qboolean PM_CheckJump( void ) {
 	pm->ps->pm_flags |= PMF_JUMP_HELD;
 
 	pm->ps->groundEntityNum = ENTITYNUM_NONE;
-	pm->ps->velocity[2] = JUMP_VELOCITY;
+	// codmod: player jump velocity (phase 5 / E7). AI keeps JUMP_VELOCITY 270.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+		pm->ps->velocity[2] = bg_cod.jumpVelocity;
+	} else {
+		pm->ps->velocity[2] = JUMP_VELOCITY;
+	}
 	PM_AddEvent( EV_JUMP );
 
 	if ( pm->cmd.forwardmove >= 0 ) {
@@ -935,7 +1021,13 @@ static void PM_WalkMove( void ) {
 			} else {
 				pm->ps->jumpTime = pm->cmd.serverTime;
 
-				stamtake = 2000;    // amount to take for jump
+				// codmod: player-tunable jump stamina cost (phase 2.1.c, cod_sprintJumpCost,
+				// vanilla default 2000). AI and cod_enable 0 keep the vanilla constant.
+				if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+					stamtake = (int)bg_cod.sprintJumpCost;
+				} else {
+					stamtake = 2000;    // amount to take for jump
+				}
 
 				// take time from powerup before taking it from sprintTime
 				if ( pm->ps->powerups[PW_NOFATIGUE] ) {
@@ -971,6 +1063,21 @@ static void PM_WalkMove( void ) {
 	cmd = pm->cmd;
 	scale = PM_CmdScale( &cmd );
 
+	// codmod: CoD4 direction & walk scales, player only (phase 2.1.b)
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+		if ( fmove < 0 ) {
+			fmove *= bg_cod.backScale;
+		}
+		smove *= bg_cod.strafeScale;
+
+		if ( pm->cmd.buttons & BUTTON_WALKING ) {
+			// the engine sends half-magnitude input for walk (64/127 ~= 0.504, see
+			// cl_input.c:351); undo that and apply our own walk scale so walk speed
+			// ends up exactly runSpeed * walkScale.
+			scale *= bg_cod.walkScale * 127.0f / 64.0f;
+		}
+	}
+
 // Ridah, moved this down, so we use the actual movement direction
 	// set the movementDir so clients can rotate the legs for strafing
 //	PM_SetMovementDir();
@@ -1003,7 +1110,13 @@ static void PM_WalkMove( void ) {
 			wishspeed = pm->ps->speed * pm_duckScale;
 		}
 		*/
-		if ( wishspeed > pm->ps->speed * pm->ps->crouchSpeedScale ) {
+		// codmod: prone crawl speed (phase 6b) — replace crouch clamp while prone
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.proneEnable
+			 && ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+			if ( wishspeed > pm->ps->speed * bg_cod.proneScale ) {
+				wishspeed = pm->ps->speed * bg_cod.proneScale;
+			}
+		} else if ( wishspeed > pm->ps->speed * pm->ps->crouchSpeedScale ) {
 			wishspeed = pm->ps->speed * pm->ps->crouchSpeedScale;
 		}
 	}
@@ -1030,8 +1143,17 @@ static void PM_WalkMove( void ) {
 		accelerate = pm_airaccelerate;
 	} else if ( ( pm->ps->stats[STAT_HEALTH] <= 0 ) && pm->ps->aiChar && ( pml.groundTrace.surfaceFlags & SURF_MONSTERSLICK ) )    {
 		accelerate = pm_airaccelerate;
+	} else if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+		// codmod: player-only ground accelerate (phase 5 / E17)
+		accelerate = bg_cod.accelerate;
 	} else {
 		accelerate = pm_accelerate;
+	}
+
+	// codmod: landing slowdown (phase 5 / E6) — scale wishspeed while STAT_COD_LAND > 0
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable && bg_cod.landSlowEnable
+		 && pm->ps->stats[STAT_COD_LAND] > 0 ) {
+		wishspeed *= bg_cod.landSlowScale;
 	}
 
 	PM_Accelerate( wishdir, wishspeed, accelerate );
@@ -1341,6 +1463,12 @@ static void PM_CrashLand( void ) {
 	// start footstep cycle over
 	pm->ps->bobCycle = 0;
 	pm->ps->footstepCount = 0;
+
+	// codmod: landing slowdown (phase 5 / E6). Any non-trivial land (delta >= 1 already
+	// required above). Player only; timer is networked in STAT_COD_LAND.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable && bg_cod.landSlowEnable ) {
+		pm->ps->stats[STAT_COD_LAND] = (int)bg_cod.landSlowTime;
+	}
 }
 
 
@@ -1629,7 +1757,19 @@ static void PM_CheckDuck( void ) {
 		return;
 	}
 
-	if ( pm->cmd.upmove < 0 ) { // duck
+	// codmod: prone owns bbox/viewheight (phase 6b). PM_CodCheckProne already set them.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.proneEnable
+		 && ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+		pm->ps->pm_flags |= PMF_DUCKED;
+		pm->maxs[2] = bg_cod.proneMaxsZ;
+		pm->ps->viewheight = (int)bg_cod.proneViewHeight;
+		return;
+	}
+
+	// codmod: force crouch bbox/view while sliding even if crouch is released (phase 6)
+	if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+		pm->ps->pm_flags |= PMF_DUCKED;
+	} else if ( pm->cmd.upmove < 0 ) { // duck
 		pm->ps->pm_flags |= PMF_DUCKED;
 	} else
 	{   // stand up if possible
@@ -1639,6 +1779,14 @@ static void PM_CheckDuck( void ) {
 			pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
 			if ( !trace.allsolid ) {
 				pm->ps->pm_flags &= ~PMF_DUCKED;
+				// codmod: crouch → stand via jump must not also hop. Latch JUMP_HELD so
+				// CheckJump ignores this press until the jump key is released.
+				if ( !pm->ps->aiChar && bg_cod.enable ) {
+					pm->ps->pm_flags |= PMF_JUMP_HELD;
+					if ( pm->cmd.upmove > 0 ) {
+						pm->cmd.upmove = 0;
+					}
+				}
 			}
 		}
 	}
@@ -1718,6 +1866,14 @@ static void PM_Footsteps( void ) {
 		return;
 	}
 
+	// codmod: slide — idle crouch legs, no footsteps / bob advance (phase 6)
+	if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+		pm->ps->bobCycle = 0;
+		pm->ps->footstepCount = 0;
+		BG_AnimScriptAnimation( pm->ps, pm->ps->aiState, ANIM_MT_IDLECR, qtrue );
+		return;
+	}
+
 	// if not trying to move
 	if ( !pm->cmd.forwardmove && !pm->cmd.rightmove ) {
 		if (  pm->xyspeed < 5 ) {
@@ -1742,6 +1898,11 @@ static void PM_Footsteps( void ) {
 
 	if ( pm->ps->pm_flags & PMF_DUCKED ) {
 		bobmove = 0.5;  // ducked characters bob much faster
+		// codmod: slower bob, still no footsteps while prone (phase 6b; crouch anims until tier B)
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.proneEnable
+			 && ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+			bobmove *= bg_cod.proneBob;
+		}
 		if ( pm->ps->pm_flags & PMF_BACKWARDS_RUN ) {
 			animResult = BG_AnimScriptAnimation( pm->ps, pm->ps->aiState, ANIM_MT_WALKCRBK, qtrue );
 		} else {
@@ -1834,6 +1995,19 @@ static void PM_Footsteps( void ) {
 
 	// check for footstep / splash sounds
 	animGap = BG_AnimGetFootstepGap( pm->ps, pm->xyspeed );
+
+	// codmod: gait-scaled bob frequency for the player (phase 4.2). Crouch keeps vanilla
+	// bobmove; walk/jog/sprint use cod_bob*Rate. Sprint is no longer identical to jog.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.gaitEnable
+		 && !( pm->ps->pm_flags & PMF_DUCKED ) ) {
+		if ( pm->cmd.buttons & BUTTON_WALKING ) {
+			bobmove = bg_cod.bobWalkRate;
+		} else if ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) {
+			bobmove = bg_cod.bobSprintRate;
+		} else {
+			bobmove = bg_cod.bobRunRate;
+		}
+	}
 
 	// new method
 	if ( animGap > 0 ) {
@@ -2024,7 +2198,10 @@ static void PM_BeginWeaponReload( int weapon ) {
 	}
 
 
-	PM_ContinueWeaponAnim( WEAP_RELOAD1 );
+	// codmod: always restart FP reload anim (phase 5d). Clear attack weapAnimTimer
+	// so StartWeaponAnim is not blocked; Start (not Continue) forces a fresh anim.
+	pm->ps->weapAnimTimer = 0;
+	PM_StartWeaponAnim( WEAP_RELOAD1 );
 
 
 	// okay to reload while overheating without tacking the reload time onto the end of the
@@ -2148,14 +2325,30 @@ static void PM_BeginWeaponChange( int oldweapon, int newweapon, qboolean reload 
 			switchtime = 50;        // fast
 		}
 		break;
+	}
 
-//		case WP_MAUSER:
-//		case WP_SNIPERRIFLE:
-//		case WP_GARAND:
-//		case WP_SNOOPERSCOPE:
-//			if(altswitch)
-//				switchtime  = 100;
-//			break;
+	// codmod: configurable rifle<->scope switch speed (phase 3.8.6), player only. 0 (the
+	// default) keeps the vanilla times above -- FG42<->FG42SCOPE fast (50ms), the other two
+	// pairs at the default 250ms. >0 overrides all three pairs with the same value; measure
+	// vanilla with cod_scopeSwitchTime 0 first (expect ~500ms raise+drop total).
+	if ( altswitch && !pm->ps->aiChar && bg_cod.enable && bg_cod.adsEnable && bg_cod.scopeSwitchTime > 0 ) {
+		switch ( oldweapon ) {
+		case WP_MAUSER:
+		case WP_SNIPERRIFLE:
+		case WP_GARAND:
+		case WP_SNOOPERSCOPE:
+		case WP_FG42:
+		case WP_FG42SCOPE:
+			switchtime = (int)bg_cod.scopeSwitchTime;
+			break;
+		}
+	}
+
+	// codmod: snappy knife in/out for quickknife + weaponbank 1 (phase 5.5). Player only.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.quickKnifeEnable
+		 && bg_cod.knifeSwitchTime > 0
+		 && ( oldweapon == WP_KNIFE || newweapon == WP_KNIFE ) ) {
+		switchtime = (int)bg_cod.knifeSwitchTime;
 	}
 
 	pm->ps->weaponTime += switchtime;
@@ -2229,6 +2422,30 @@ static void PM_FinishWeaponChange( void ) {
 			switchtime = 50;        // fast
 		}
 		break;
+	}
+
+	// codmod: configurable rifle<->scope switch speed (phase 3.8.6), player only -- mirrors
+	// the override in PM_BeginWeaponChange above so the raise half of the switch matches
+	// the drop half.
+	if ( newweapon == weapAlts[oldweapon] && !pm->ps->aiChar && bg_cod.enable && bg_cod.adsEnable
+		 && bg_cod.scopeSwitchTime > 0 ) {
+		switch ( newweapon ) {
+		case WP_MAUSER:
+		case WP_SNIPERRIFLE:
+		case WP_GARAND:
+		case WP_SNOOPERSCOPE:
+		case WP_FG42:
+		case WP_FG42SCOPE:
+			switchtime = (int)bg_cod.scopeSwitchTime;
+			break;
+		}
+	}
+
+	// codmod: snappy knife raise (phase 5.5) — mirrors BeginWeaponChange drop override
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.quickKnifeEnable
+		 && bg_cod.knifeSwitchTime > 0
+		 && ( oldweapon == WP_KNIFE || newweapon == WP_KNIFE ) ) {
+		switchtime = (int)bg_cod.knifeSwitchTime;
 	}
 
 	pm->ps->weaponTime += switchtime;
@@ -2732,6 +2949,13 @@ static void PM_Weapon( void ) {
 	qboolean akimboFire;
 	qboolean gameReloading;
 
+	// codmod: track attack release for click-fire weapons (and pistol tap-fire).
+	// Vanilla only set releasedFire inside pistol-specific blocks; bolt/semi need it too.
+	// Runs before the respawn gate so the first post-spawn click is allowed.
+	if ( !pm->ps->aiChar && !( pm->cmd.buttons & BUTTON_ATTACK ) ) {
+		pm->ps->releasedFire = qtrue;
+	}
+
 	// don't allow attack until all buttons are up
 	if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
 		return;
@@ -2995,6 +3219,21 @@ static void PM_Weapon( void ) {
 	}
 // jpw
 
+	// codmod: SP pistol tap-fire (phase 5). Vanilla SP left the older tap-fire block
+	// commented out; MP-only path above does not run in single player. Player only —
+	// AI keeps the ammoTable 400 ms interval.
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.pistolTapFire
+		 && BG_CodIsPistol( pm->ps->weapon ) ) {
+		if ( pm->ps->releasedFire ) {
+			if ( pm->ps->weaponTime <= (int)bg_cod.pistolTapThreshold
+				 && ( pm->cmd.buttons & BUTTON_ATTACK ) ) {
+				pm->ps->weaponTime = 0;
+			}
+		} else if ( !( pm->cmd.buttons & BUTTON_ATTACK ) && ( pm->ps->weaponTime >= 50 ) ) {
+			pm->ps->releasedFire = qtrue;
+		}
+	}
+
 }
 
 	// check for weapon change
@@ -3085,6 +3324,15 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
+	// codmod: CoD fire modes — pistols / bolt / semi fire once per click; holding only
+	// keeps spraying on automatics (MP40 / Thompson / Sten / FG42 / Venom / flame).
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.semiAutoClick
+		 && BG_CodNeedsClickFire( pm->ps->weapon ) && !delayedFire
+		 && !pm->ps->releasedFire ) {
+		pm->ps->weaponstate = WEAPON_READY;
+		return;
+	}
+
 	if ( gameReloading ) {
 		return;
 	}
@@ -3095,8 +3343,20 @@ static void PM_Weapon( void ) {
 	}
 
 	// player is leaning - no fire
-	if ( pm->ps->leanf != 0 && pm->ps->weapon != WP_GRENADE_LAUNCHER && pm->ps->weapon != WP_GRENADE_PINEAPPLE && pm->ps->weapon != WP_DYNAMITE ) {
+	// codmod: cod_leanAllowFire lets the player (not AI) fire while leaned (phase 2.3.2)
+	if ( pm->ps->leanf != 0 && pm->ps->weapon != WP_GRENADE_LAUNCHER && pm->ps->weapon != WP_GRENADE_PINEAPPLE && pm->ps->weapon != WP_DYNAMITE
+		 && !( !pm->ps->aiChar && bg_cod.enable && bg_cod.leanEnable && bg_cod.leanAllowFire ) ) {
 		return;
+	}
+
+	// codmod: no fire during prone transitions, or while crawling unless allowed (phase 6b)
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.proneEnable ) {
+		if ( pm->ps->stats[STAT_COD_STANCE] > 0 ) {
+			return;
+		}
+		if ( ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE_MOVING ) && !bg_cod.proneCrawlFire ) {
+			return;
+		}
 	}
 
 	// player is underwater - no fire
@@ -3152,7 +3412,13 @@ static void PM_Weapon( void ) {
 			// NERVE's panzerfaust spinup
 //			if (pm->ps->weapon == WP_PANZERFAUST)
 //				PM_AddEvent( EV_SPINUP );
-			pm->ps->weaponDelay = ammoTable[pm->ps->weapon].fireDelayTime;
+			// codmod: snappy pistol first-shot delay (phase 5)
+			if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable
+				 && BG_CodIsPistol( pm->ps->weapon ) ) {
+				pm->ps->weaponDelay = (int)bg_cod.pistolFireDelay;
+			} else {
+				pm->ps->weaponDelay = ammoTable[pm->ps->weapon].fireDelayTime;
+			}
 		} else {
 			BG_AnimScriptEvent( pm->ps, ANIM_ET_FIREWEAPON, qfalse, qtrue );
 		}
@@ -3246,7 +3512,9 @@ static void PM_Weapon( void ) {
 			}
 
 			if ( reloadingW ) {
-				PM_ContinueWeaponAnim( WEAP_RELOAD1 );      //----(SA)
+				// codmod: full reload start (phase 5d follow-up) — ContinueWeaponAnim alone
+				// could skip/skim the FP reload when the attack weapAnimTimer was still set.
+				PM_BeginWeaponReload( pm->ps->weapon );
 			} else {
 				PM_ContinueWeaponAnim( WEAP_IDLE1 );
 				pm->ps->weaponTime += 500;
@@ -3355,10 +3623,17 @@ static void PM_Weapon( void ) {
 		break;
 	case WP_LUGER:
 		addTime = ammoTable[pm->ps->weapon].nextShotTime;
+		// codmod: pistol min interval (phase 5); default 120 vs ammoTable 400
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.pistolNextShot > 0 ) {
+			addTime = (int)bg_cod.pistolNextShot;
+		}
 		aimSpreadScaleAdd = 35;
 		break;
 	case WP_COLT:
 		addTime = ammoTable[pm->ps->weapon].nextShotTime;
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.pistolNextShot > 0 ) {
+			addTime = (int)bg_cod.pistolNextShot;
+		}
 		aimSpreadScaleAdd = 20;
 		break;
 //----(SA)	added
@@ -3424,14 +3699,25 @@ static void PM_Weapon( void ) {
 	case WP_MP40:
 	case WP_THOMPSON:
 		addTime = ammoTable[pm->ps->weapon].nextShotTime;
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.autoFireScale > 0
+			 && bg_cod.autoFireScale != 1.0f ) {
+			addTime = (int)( addTime * bg_cod.autoFireScale );
+		}
 		aimSpreadScaleAdd = 15 + rand() % 10;       // (SA) new values for DM
 		break;
 	case WP_STEN:
 		addTime = ammoTable[pm->ps->weapon].nextShotTime;
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.autoFireScale > 0
+			 && bg_cod.autoFireScale != 1.0f ) {
+			addTime = (int)( addTime * bg_cod.autoFireScale );
+		}
 		aimSpreadScaleAdd = 15 + rand() % 10;       // (SA) new values for DM
 		break;
 	case WP_SILENCER:
 		addTime = ammoTable[pm->ps->weapon].nextShotTime;
+		if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && bg_cod.pistolNextShot > 0 ) {
+			addTime = (int)bg_cod.pistolNextShot;
+		}
 		aimSpreadScaleAdd = 35;
 		break;
 	case WP_VENOM:
@@ -3561,6 +3847,594 @@ static void PM_DropTimers( void ) {
 	}
 }
 
+/*
+================
+PM_CodEndSlide
+
+codmod: clear slide flag, start cooldown (phase 6). Stand up when there is headroom
+(CoD-style — slide does not leave you crouched). Sticky toggle crouch is cleared on the
+client when PMF_COD_SLIDING falls (CG_CodUpdateToggleCrouch).
+================
+*/
+static void PM_CodEndSlide( void ) {
+	int cd;
+	trace_t trace;
+
+	pm->ps->pm_flags &= ~PMF_COD_SLIDING;
+	cd = (int)bg_cod.slideCooldown;
+	if ( cd < 0 ) {
+		cd = 0;
+	}
+	pm->ps->stats[STAT_COD_SLIDE] = -cd;
+	pm->ps->stats[STAT_COD_SLIDE_SPEED] = 0;
+
+	// try to stand (same trace as PM_CheckDuck); stay ducked under a low ceiling
+	pm->maxs[2] = pm->ps->maxs[2];
+	pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
+	if ( !trace.allsolid ) {
+		pm->ps->pm_flags &= ~PMF_DUCKED;
+		pm->ps->viewheight = pm->ps->standViewHeight;
+	} else {
+		pm->maxs[2] = pm->ps->crouchMaxZ;
+		pm->ps->pm_flags |= PMF_DUCKED;
+		pm->ps->viewheight = pm->ps->crouchViewHeight;
+	}
+}
+
+/*
+================
+PM_CodClearProne
+
+codmod: drop all prone bits + stance timer (phase 6b).
+================
+*/
+static void PM_CodClearProne( void ) {
+	pm->ps->stats[STAT_COD_FLAGS] &= ~( COD_SF_PRONE | COD_SF_PRONE_MOVING );
+	pm->ps->stats[STAT_COD_STANCE] = 0;
+}
+
+/*
+================
+PM_CodCheckProne
+
+codmod: CoD4/ET-style prone stance (phase 6b, docs/phase-6b-prone.md). Port of ET
+PM_CheckProne ideas onto networked STAT_COD_* (no eFlags / pmoveExt). Player only.
+Call before PM_CheckDuck so the prone bbox wins.
+
+Attribution: the prone design (enter/exit rules, bounding-box fit tests, forced exit
+in air/water/ladder) is adapted from Wolfenstein: Enemy Territory's PM_CheckProne as
+maintained in ET: Legacy (https://github.com/etlegacy/etlegacy, src/game/bg_pmove.c,
+v2.86.1). Original code Copyright (C) 1999-2010 id Software LLC, a ZeniMax Media
+company, and the ET: Legacy team; licensed under the GNU GPL v3 (see LICENSE and
+docs/credits.md). The state machine here is rewritten for RTCW's networked stats.
+================
+*/
+static void PM_CodCheckProne( void ) {
+	int flags;
+	int stance;
+	qboolean pressed, crouchPressed, jumpPressed;
+	qboolean wantExit, forcedExit;
+	qboolean isProne;
+	trace_t trace;
+	float hspeed;
+	float standMaxZ, crouchMaxZ, proneMaxZ;
+	int downTime, upTime, cooldown;
+
+	flags = pm->ps->stats[STAT_COD_FLAGS];
+
+	if ( pm->ps->aiChar || !( bg_cod.enable && bg_cod.proneEnable ) ) {
+		if ( flags & ( COD_SF_PRONE | COD_SF_PRONE_MOVING | COD_SF_PRONE_HELD | COD_SF_CROUCH_HELD ) ) {
+			pm->ps->stats[STAT_COD_FLAGS] &= ~( COD_SF_PRONE | COD_SF_PRONE_MOVING
+												| COD_SF_PRONE_HELD | COD_SF_CROUCH_HELD );
+		}
+		if ( pm->ps->stats[STAT_COD_STANCE] ) {
+			pm->ps->stats[STAT_COD_STANCE] = 0;
+		}
+		return;
+	}
+
+	if ( pm->ps->pm_type == PM_DEAD ) {
+		PM_CodClearProne();
+		pm->ps->stats[STAT_COD_FLAGS] &= ~( COD_SF_PRONE_HELD | COD_SF_CROUCH_HELD );
+		return;
+	}
+
+	downTime = (int)bg_cod.proneDownTime;
+	upTime = (int)bg_cod.proneUpTime;
+	cooldown = (int)bg_cod.proneCooldown;
+	if ( downTime < 1 ) {
+		downTime = 1;
+	}
+	if ( upTime < 1 ) {
+		upTime = 1;
+	}
+	if ( cooldown < 0 ) {
+		cooldown = 0;
+	}
+
+	// timer tick: >0 transition ms left; <0 cooldown counting up to 0
+	stance = pm->ps->stats[STAT_COD_STANCE];
+	if ( stance > 0 ) {
+		stance -= pml.msec;
+		if ( stance <= 0 ) {
+			stance = -cooldown;
+		}
+	} else if ( stance < 0 ) {
+		stance += pml.msec;
+		if ( stance > 0 ) {
+			stance = 0;
+		}
+	}
+	pm->ps->stats[STAT_COD_STANCE] = stance;
+
+	pressed = ( ( pm->cmd.wbuttons & WBUTTON_COD_PRONE ) && !( flags & COD_SF_PRONE_HELD ) ) ? qtrue : qfalse;
+	crouchPressed = ( pm->cmd.upmove < 0 && !( flags & COD_SF_CROUCH_HELD ) ) ? qtrue : qfalse;
+	jumpPressed = ( pm->cmd.upmove > 0 && !( pm->ps->pm_flags & PMF_JUMP_HELD ) ) ? qtrue : qfalse;
+
+	if ( pm->cmd.wbuttons & WBUTTON_COD_PRONE ) {
+		flags |= COD_SF_PRONE_HELD;
+	} else {
+		flags &= ~COD_SF_PRONE_HELD;
+	}
+	if ( pm->cmd.upmove < 0 ) {
+		flags |= COD_SF_CROUCH_HELD;
+	} else {
+		flags &= ~COD_SF_CROUCH_HELD;
+	}
+
+	isProne = ( flags & COD_SF_PRONE ) ? qtrue : qfalse;
+	standMaxZ = pm->ps->maxs[2];
+	crouchMaxZ = pm->ps->crouchMaxZ;
+	proneMaxZ = bg_cod.proneMaxsZ;
+
+	forcedExit = qfalse;
+	if ( isProne ) {
+		if ( pm->ps->groundEntityNum == ENTITYNUM_NONE
+			 || pm->waterlevel >= 2
+			 || ( pm->ps->pm_flags & PMF_LADDER )
+			 || pml.ladder
+			 || pm->ps->pm_type != PM_NORMAL
+			 || ( pm->ps->eFlags & EF_VIEWING_CAMERA )
+			 || ( pm->ps->eFlags & EF_MG42_ACTIVE ) ) {
+			forcedExit = qtrue;
+		}
+	}
+
+	wantExit = qfalse;
+	// Allow exit during cooldown (stance < 0) so taps aren't eaten after stand-up.
+	if ( isProne && stance <= 0 && ( pressed || jumpPressed || crouchPressed ) ) {
+		wantExit = qtrue;
+	}
+
+	// enter — allow during cooldown so re-prone isn't delayed after a quick stand
+	if ( !isProne && pressed && stance <= 0 ) {
+		qboolean canEnter = qtrue;
+
+		if ( pm->ps->groundEntityNum == ENTITYNUM_NONE
+			 || pm->waterlevel >= 2
+			 || ( pm->ps->pm_flags & PMF_LADDER )
+			 || ( pm->ps->eFlags & EF_MG42_ACTIVE )
+			 || ( pm->ps->eFlags & EF_VIEWING_CAMERA ) ) {
+			canEnter = qfalse;
+		}
+		if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+			if ( bg_cod.slideToProne ) {
+				PM_CodEndSlide();
+			} else {
+				canEnter = qfalse;
+			}
+		}
+
+		if ( canEnter ) {
+			pm->maxs[2] = proneMaxZ;
+			pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
+			if ( !trace.allsolid ) {
+				flags |= COD_SF_PRONE;
+				flags &= ~( COD_SF_SPRINTING | COD_SF_PRONE_MOVING );
+				pm->ps->stats[STAT_COD_STANCE] = downTime;
+				pm->ps->stats[STAT_COD_ADS] = 0;
+				pm->ps->leanf = 0;
+				pm->ps->velocity[0] = 0;
+				pm->ps->velocity[1] = 0;
+				pm->ps->pm_flags |= PMF_DUCKED;
+				isProne = qtrue;
+				stance = downTime;
+			}
+			pm->maxs[2] = standMaxZ; // CheckDuck / prone apply below will set real maxs
+		}
+	}
+
+	// exit
+	if ( isProne && ( wantExit || forcedExit ) ) {
+		qboolean standOk = qfalse;
+		qboolean crouchOk = qfalse;
+		int exitTime;
+
+		pm->maxs[2] = standMaxZ;
+		pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
+		standOk = !trace.allsolid ? qtrue : qfalse;
+
+		pm->maxs[2] = crouchMaxZ;
+		pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
+		crouchOk = !trace.allsolid ? qtrue : qfalse;
+
+		if ( standOk || crouchOk ) {
+			flags &= ~( COD_SF_PRONE | COD_SF_PRONE_MOVING );
+			exitTime = forcedExit ? 0 : upTime;
+			pm->ps->stats[STAT_COD_STANCE] = exitTime;
+			stance = exitTime;
+			isProne = qfalse;
+
+			if ( standOk && pm->cmd.upmove >= 0 ) {
+				pm->ps->pm_flags &= ~PMF_DUCKED;
+			} else {
+				pm->ps->pm_flags |= PMF_DUCKED;
+			}
+
+			// Consume jump until release so stand-up does not also launch.
+			if ( jumpPressed ) {
+				pm->cmd.upmove = 0;
+				pm->ps->pm_flags |= PMF_JUMP_HELD;
+			}
+		}
+		// else stay prone — nothing fits
+	}
+
+	// while prone: crawl hysteresis + force ducked bbox
+	if ( isProne ) {
+		hspeed = sqrt( pm->ps->velocity[0] * pm->ps->velocity[0]
+					   + pm->ps->velocity[1] * pm->ps->velocity[1] );
+		if ( ( pm->cmd.forwardmove || pm->cmd.rightmove ) && hspeed > 40.0f ) {
+			flags |= COD_SF_PRONE_MOVING;
+		} else if ( !( pm->cmd.forwardmove || pm->cmd.rightmove ) && hspeed < 20.0f ) {
+			flags &= ~COD_SF_PRONE_MOVING;
+		}
+
+		pm->ps->pm_flags |= PMF_DUCKED;
+		pm->maxs[2] = proneMaxZ;
+		pm->ps->viewheight = (int)bg_cod.proneViewHeight;
+	}
+
+	// lock movement during transitions
+	if ( pm->ps->stats[STAT_COD_STANCE] > 0 ) {
+		pm->cmd.forwardmove = 0;
+		pm->cmd.rightmove = 0;
+	}
+
+	pm->ps->stats[STAT_COD_FLAGS] = flags;
+}
+
+/*
+================
+PM_CodCheckSlideStart
+
+codmod: sprint + crouch press edge → tactical slide (phase 6). Uses COD_SF_SPRINTING from
+the previous command (before PM_CodUpdateSprint), so call this before UpdateSprint.
+================
+*/
+static void PM_CodCheckSlideStart( void ) {
+	float hspeed;
+	float start;
+	vec3_t horiz;
+
+	if ( pm->ps->aiChar || !( bg_cod.enable && bg_cod.slideEnable ) ) {
+		return;
+	}
+	if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+		return;
+	}
+	if ( pm->ps->stats[STAT_COD_SLIDE] < 0 ) {
+		return; // cooldown
+	}
+	if ( !( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) ) {
+		return;
+	}
+	if ( pm->cmd.upmove >= 0 || pml.codWasDucked ) {
+		return; // need crouch press edge while previously standing
+	}
+	if ( !pml.walking || pm->cmd.forwardmove <= 0 || pm->waterlevel >= 2 || pml.ladder ) {
+		return;
+	}
+
+	horiz[0] = pm->ps->velocity[0];
+	horiz[1] = pm->ps->velocity[1];
+	horiz[2] = 0.0f;
+	hspeed = VectorLength( horiz );
+	if ( hspeed < bg_cod.slideMinSpeed ) {
+		return;
+	}
+
+	start = hspeed + bg_cod.slideBoost;
+	if ( start > bg_cod.slideMaxSpeed ) {
+		start = bg_cod.slideMaxSpeed;
+	}
+
+	pm->ps->pm_flags |= PMF_COD_SLIDING;
+	pm->ps->pm_flags |= PMF_DUCKED;
+	pm->ps->stats[STAT_COD_SLIDE] = (int)bg_cod.slideTime;
+	pm->ps->stats[STAT_COD_SLIDE_SPEED] = (int)( start + 0.5f );
+	pm->ps->stats[STAT_COD_FLAGS] &= ~COD_SF_SPRINTING;
+
+	if ( hspeed > 1.0f ) {
+		VectorNormalize( horiz );
+		pm->ps->velocity[0] = horiz[0] * start;
+		pm->ps->velocity[1] = horiz[1] * start;
+	} else {
+		pm->ps->velocity[0] = pml.forward[0] * start;
+		pm->ps->velocity[1] = pml.forward[1] * start;
+	}
+
+	if ( bg_cod.slideStaminaCost > 0.0f ) {
+		pm->ps->sprintTime -= (int)bg_cod.slideStaminaCost;
+		if ( pm->ps->sprintTime < 0 ) {
+			pm->ps->sprintTime = 0;
+		}
+	}
+
+	PM_AddEvent( EV_COD_SLIDE );
+}
+
+/*
+================
+PM_CodSlideMove
+
+codmod: frictionless linear decay slide with limited steering (phase 6). Replaces
+PM_WalkMove while PMF_COD_SLIDING && walking.
+================
+*/
+static void PM_CodSlideMove( void ) {
+	int i;
+	float fmove, smove;
+	float t, speed, slideTime, endSpeed, startSpeed, hspeed;
+	vec3_t wishvel, wishdir, dir, horiz;
+	float wishLen;
+	trace_t trace;
+
+	if ( bg_cod.slideJumpCancel && PM_CheckJump() ) {
+		PM_CodEndSlide();
+		// stand up if there is headroom (same idea as PM_CheckDuck)
+		pm->maxs[2] = pm->ps->maxs[2];
+		pm->trace( &trace, pm->ps->origin, pm->mins, pm->maxs, pm->ps->origin, pm->ps->clientNum, pm->tracemask );
+		if ( !trace.allsolid ) {
+			pm->ps->pm_flags &= ~PMF_DUCKED;
+			pm->ps->viewheight = pm->ps->standViewHeight;
+		} else {
+			pm->maxs[2] = pm->ps->crouchMaxZ;
+			pm->ps->viewheight = pm->ps->crouchViewHeight;
+		}
+		PM_AirMove();
+		return;
+	}
+
+	slideTime = bg_cod.slideTime;
+	if ( slideTime < 1.0f ) {
+		slideTime = 1.0f;
+	}
+	endSpeed = bg_cod.slideEndSpeed;
+	startSpeed = (float)pm->ps->stats[STAT_COD_SLIDE_SPEED];
+
+	// optional slope: nudge stored start speed downhill so decay stays linear but longer/faster
+	if ( bg_cod.slideSlope != 0.0f && pml.groundPlane ) {
+		float down = -pml.groundTrace.plane.normal[2];
+		if ( down > 0.0f ) {
+			startSpeed += bg_cod.gravity * bg_cod.slideSlope * down * pml.frametime;
+			pm->ps->stats[STAT_COD_SLIDE_SPEED] = (int)( startSpeed + 0.5f );
+		}
+	}
+
+	pm->ps->stats[STAT_COD_SLIDE] -= pml.msec;
+	t = (float)pm->ps->stats[STAT_COD_SLIDE] / slideTime;
+	if ( t < 0.0f ) {
+		t = 0.0f;
+	}
+	if ( t > 1.0f ) {
+		t = 1.0f;
+	}
+	speed = endSpeed + ( startSpeed - endSpeed ) * t;
+
+	// current horizontal direction
+	dir[0] = pm->ps->velocity[0];
+	dir[1] = pm->ps->velocity[1];
+	dir[2] = 0.0f;
+	if ( VectorNormalize( dir ) < 1.0f ) {
+		dir[0] = pml.forward[0];
+		dir[1] = pml.forward[1];
+		dir[2] = 0.0f;
+		VectorNormalize( dir );
+	}
+
+	// wishdir from look + cmd (same projection idea as PM_WalkMove)
+	fmove = pm->cmd.forwardmove;
+	smove = pm->cmd.rightmove;
+	pml.forward[2] = 0.0f;
+	pml.right[2] = 0.0f;
+	PM_ClipVelocity( pml.forward, pml.groundTrace.plane.normal, pml.forward, OVERCLIP );
+	PM_ClipVelocity( pml.right, pml.groundTrace.plane.normal, pml.right, OVERCLIP );
+	VectorNormalize( pml.forward );
+	VectorNormalize( pml.right );
+	for ( i = 0; i < 3; i++ ) {
+		wishvel[i] = pml.forward[i] * fmove + pml.right[i] * smove;
+	}
+	wishvel[2] = 0.0f;
+	wishLen = VectorNormalize2( wishvel, wishdir );
+	if ( wishLen > 0.0f && bg_cod.slideSteer > 0.0f ) {
+		dir[0] += wishdir[0] * bg_cod.slideSteer * pml.frametime * 4.0f;
+		dir[1] += wishdir[1] * bg_cod.slideSteer * pml.frametime * 4.0f;
+		dir[2] = 0.0f;
+		VectorNormalize( dir );
+	}
+
+	pm->ps->velocity[0] = dir[0] * speed;
+	pm->ps->velocity[1] = dir[1] * speed;
+	PM_ClipVelocity( pm->ps->velocity, pml.groundTrace.plane.normal, pm->ps->velocity, OVERCLIP );
+	PM_StepSlideMove( qfalse );
+
+	horiz[0] = pm->ps->velocity[0];
+	horiz[1] = pm->ps->velocity[1];
+	horiz[2] = 0.0f;
+	hspeed = VectorLength( horiz );
+
+	if ( pm->ps->stats[STAT_COD_SLIDE] <= 0 || hspeed <= endSpeed + 1.0f ) {
+		// snap to end speed along remaining direction for a clean crouch hand-off
+		if ( hspeed > 0.1f ) {
+			VectorNormalize( horiz );
+			pm->ps->velocity[0] = horiz[0] * endSpeed;
+			pm->ps->velocity[1] = horiz[1] * endSpeed;
+		}
+		PM_CodEndSlide();
+	}
+}
+
+/*
+================
+PM_CodSlideFrame
+
+codmod: per-command slide bookkeeping (phase 6). Cooldown tick, savegame clamp, forced end
+on leave-ground/water/ladder, then start check. Call after GroundTrace, before UpdateSprint.
+================
+*/
+static void PM_CodSlideFrame( void ) {
+	if ( pm->ps->aiChar ) {
+		return;
+	}
+
+	// savegame: stats survive load, pm_flags do not — drop orphan slide timers
+	if ( pm->ps->stats[STAT_COD_SLIDE] > 0 && !( pm->ps->pm_flags & PMF_COD_SLIDING ) ) {
+		pm->ps->stats[STAT_COD_SLIDE] = 0;
+		pm->ps->stats[STAT_COD_SLIDE_SPEED] = 0;
+	}
+
+	if ( !( bg_cod.enable && bg_cod.slideEnable ) ) {
+		if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+			PM_CodEndSlide();
+		}
+		return;
+	}
+
+	if ( pm->ps->stats[STAT_COD_SLIDE] < 0 ) {
+		pm->ps->stats[STAT_COD_SLIDE] += pml.msec;
+		if ( pm->ps->stats[STAT_COD_SLIDE] > 0 ) {
+			pm->ps->stats[STAT_COD_SLIDE] = 0;
+		}
+	}
+
+	if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+		if ( !pml.walking || pm->waterlevel >= 2 || pml.ladder ) {
+			PM_CodEndSlide();
+			return;
+		}
+	}
+
+	PM_CodCheckSlideStart();
+}
+
+/*
+================
+PM_CodUpdateADS
+
+codmod: advances the player's networked ADS fraction (ps->stats[STAT_COD_ADS], 0..1000)
+toward 1000 while the ADS button is held and eligible, else back toward 0 (phase 3.3).
+Called from PmoveSingle before PM_CodUpdateSprint (ADS has priority: PM_CodUpdateSprint
+below reads WBUTTON_COD_ADS off pm->cmd directly to block sprint while ADS is held).
+
+BG_CodCanADS (bg_cod.c) covers everything derivable from playerState_t alone; this adds
+the waterlevel/ladder checks from docs/phase-3-ads.md section 3.2, which live in
+pmove_t/pml_t and aren't networked. AI never ADS -- their fraction is forced to 0 so the
+rest of the ADS code (spread in g_weapon.c, cgame visuals) is a no-op for them.
+================
+*/
+static void PM_CodUpdateADS( void ) {
+	qboolean want;
+	int frac;
+	int rate;
+
+	if ( pm->ps->aiChar ) {
+		pm->ps->stats[STAT_COD_ADS] = 0;
+		return;
+	}
+
+	want = ( ( pm->cmd.wbuttons & WBUTTON_COD_ADS ) && BG_CodCanADS( pm->ps )
+			 && pm->waterlevel < 3 && !pml.ladder ) ? qtrue : qfalse;
+
+	frac = pm->ps->stats[STAT_COD_ADS];
+
+	if ( want ) {
+		rate = BG_CodAdsTimeIn( pm->ps->weapon );
+		if ( rate < 1 ) {
+			rate = 1;
+		}
+		frac += (int)( 1000.0f * pml.msec / rate );
+		if ( frac > 1000 ) {
+			frac = 1000;
+		}
+	} else {
+		// codmod: still the *old* weapon here while WEAPON_DROPPING (ps->weapon only
+		// changes in PM_FinishWeaponChange), so a mid-switch ease-out uses the right rate.
+		rate = BG_CodAdsTimeOut( pm->ps->weapon );
+		if ( rate < 1 ) {
+			rate = 1;
+		}
+		frac -= (int)( 1000.0f * pml.msec / rate );
+		if ( frac < 0 ) {
+			frac = 0;
+		}
+	}
+
+	pm->ps->stats[STAT_COD_ADS] = frac;
+}
+
+/*
+================
+PM_CodUpdateSprint
+
+codmod: decides whether the player is sprinting *this command* and writes the result to
+the networked ps->stats[STAT_COD_FLAGS] COD_SF_SPRINTING bit (phase 2.1.c). Called from
+PmoveSingle right after PM_DropTimers(), before the move-type dispatch, so PM_CmdScale and
+PM_WalkMove/PM_Sprint all see the same decision this frame.
+
+Vanilla's "BUTTON_SPRINT && sprintTime > 50" is frame-rate dependent and lets you sprint
+backwards/sideways/crouched/underwater. This fixes that for the player only; AI never
+reads COD_SF_SPRINTING (ai_cast_think.c sets its own speeds).
+================
+*/
+static void PM_CodUpdateSprint( void ) {
+	qboolean moving;
+	qboolean wantSprint;
+	qboolean wasSprinting;
+	float minSprintTime;
+
+	if ( pm->ps->aiChar || !( bg_cod.enable && bg_cod.moveEnable ) ) {
+		// vanilla: leave the flag clear, PM_CmdScale/PM_Sprint fall back to the old check
+		pm->ps->stats[STAT_COD_FLAGS] &= ~COD_SF_SPRINTING;
+		return;
+	}
+
+	moving = ( pm->cmd.forwardmove || pm->cmd.rightmove ) ? qtrue : qfalse;
+
+	// codmod: ADS blocks sprint (phase 3.3). Attack cancels sprint the same frame so
+	// PM_Weapon (later in PmoveSingle) still sees BUTTON_ATTACK and fires (phase 4.1).
+	wantSprint = ( pm->cmd.buttons & BUTTON_SPRINT )
+				 && ( bg_cod.sprintForwardOnly ? ( pm->cmd.forwardmove > 0 ) : moving )
+				 && !( pm->ps->pm_flags & PMF_DUCKED )
+				 && !( pm->ps->pm_flags & PMF_COD_SLIDING )
+				 && !( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE )
+				 && pm->ps->stats[STAT_COD_STANCE] <= 0
+				 && pm->waterlevel < 2
+				 && !( pm->cmd.buttons & BUTTON_WALKING )
+				 && !( pm->cmd.wbuttons & WBUTTON_COD_ADS )
+				 && !( pm->cmd.buttons & BUTTON_ATTACK );
+
+	wasSprinting = ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) ? qtrue : qfalse;
+	minSprintTime = bg_cod.sprintMinTime * 1000.0f;    // seconds -> stamina units (0..20000 range)
+
+	if ( wantSprint && ( ( wasSprinting && pm->ps->sprintTime > 0 )
+						 || ( !wasSprinting && pm->ps->sprintTime >= minSprintTime ) ) ) {
+		pm->ps->stats[STAT_COD_FLAGS] |= COD_SF_SPRINTING;
+	} else {
+		pm->ps->stats[STAT_COD_FLAGS] &= ~COD_SF_SPRINTING;
+	}
+}
+
 
 
 #define LEAN_MAX    28.0f
@@ -3579,10 +4453,20 @@ void PM_UpdateLean( playerState_t *ps, usercmd_t *cmd, pmove_t *tpm ) {
 	float leanofs = 0;
 	vec3_t viewangles;
 	trace_t trace;
+	qboolean codLean;
+	float leanMax, leanTimeTo, leanTimeFr;
 
 	if ( ps->aiChar ) {
 		return;
 	}
+
+	// codmod: cod_leanMax/leanTimeIn/leanTimeOut when enabled (phase 2.3.1). Reads only
+	// bg_cod, not pm, because this also runs from PM_UpdateViewAngles with pm == NULL
+	// (the tpm path below).
+	codLean = ( bg_cod.enable && bg_cod.leanEnable ) ? qtrue : qfalse;
+	leanMax    = codLean ? bg_cod.leanMax    : LEAN_MAX;
+	leanTimeTo = codLean ? bg_cod.leanTimeIn  : LEAN_TIME_TO;
+	leanTimeFr = codLean ? bg_cod.leanTimeOut : LEAN_TIME_FR;
 
 	if ( ( cmd->wbuttons & ( WBUTTON_LEANLEFT | WBUTTON_LEANRIGHT ) )  && !cmd->forwardmove && cmd->upmove <= 0 ) {
 		// if both are pressed, result is no lean
@@ -3596,8 +4480,19 @@ void PM_UpdateLean( playerState_t *ps, usercmd_t *cmd, pmove_t *tpm ) {
 
 	// not allowed when...
 	if ( ( ps->eFlags & ( EF_MELEE_ACTIVE |   // ...holding a chair
-						  EF_MG42_ACTIVE  | // ...on mg42
-						  EF_FIRING ) ) ) { // ...firing
+						  EF_MG42_ACTIVE ) ) ) { // ...on mg42
+		leaning = 0;
+	}
+	// codmod: no lean while sliding (phase 6)
+	if ( ps->pm_flags & PMF_COD_SLIDING ) {
+		leaning = 0;
+	}
+	// codmod: no lean while prone (phase 6b)
+	if ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) {
+		leaning = 0;
+	}
+	// codmod: cod_leanAllowFire lets the player keep leaning while firing (phase 2.3.2)
+	if ( ( ps->eFlags & EF_FIRING ) && !( codLean && bg_cod.leanAllowFire ) ) { // ...firing
 		leaning = 0;
 	}
 
@@ -3606,13 +4501,13 @@ void PM_UpdateLean( playerState_t *ps, usercmd_t *cmd, pmove_t *tpm ) {
 	if ( !leaning ) {  // go back to center position
 		if ( leanofs > 0 ) {        // right
 			//FIXME: play lean anim backwards?
-			leanofs -= ( ( (float)pml.msec / LEAN_TIME_FR ) * LEAN_MAX );
+			leanofs -= ( ( (float)pml.msec / leanTimeFr ) * leanMax );
 			if ( leanofs < 0 ) {
 				leanofs = 0;
 			}
 		} else if ( leanofs < 0 )   { // left
 			//FIXME: play lean anim backwards?
-			leanofs += ( ( (float)pml.msec / LEAN_TIME_FR ) * LEAN_MAX );
+			leanofs += ( ( (float)pml.msec / leanTimeFr ) * leanMax );
 			if ( leanofs > 0 ) {
 				leanofs = 0;
 			}
@@ -3621,21 +4516,21 @@ void PM_UpdateLean( playerState_t *ps, usercmd_t *cmd, pmove_t *tpm ) {
 
 	if ( leaning ) {
 		if ( leaning > 0 ) {   // right
-			if ( leanofs < LEAN_MAX ) {
-				leanofs += ( ( (float)pml.msec / LEAN_TIME_TO ) * LEAN_MAX );
+			if ( leanofs < leanMax ) {
+				leanofs += ( ( (float)pml.msec / leanTimeTo ) * leanMax );
 			}
 
-			if ( leanofs > LEAN_MAX ) {
-				leanofs = LEAN_MAX;
+			if ( leanofs > leanMax ) {
+				leanofs = leanMax;
 			}
 
 		} else {              // left
-			if ( leanofs > -LEAN_MAX ) {
-				leanofs -= ( ( (float)pml.msec / LEAN_TIME_TO ) * LEAN_MAX );
+			if ( leanofs > -leanMax ) {
+				leanofs -= ( ( (float)pml.msec / leanTimeTo ) * leanMax );
 			}
 
-			if ( leanofs < -LEAN_MAX ) {
-				leanofs = -LEAN_MAX;
+			if ( leanofs < -leanMax ) {
+				leanofs = -leanMax;
 			}
 
 		}
@@ -3714,6 +4609,21 @@ void PM_UpdateViewAngles( playerState_t *ps, usercmd_t *cmd, void( trace ) ( tra
 		ps->viewangles[i] = SHORT2ANGLE( temp );
 	}
 
+	// codmod: clamp pitch while prone (phase 6b). ET ±40°; no yaw limit in tier A.
+	if ( !ps->aiChar && bg_cod.enable && bg_cod.proneEnable
+		 && ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+		float pitch = ps->viewangles[PITCH];
+		float up = bg_cod.pronePitchUp;
+		float down = bg_cod.pronePitchDown;
+
+		if ( pitch > down ) {
+			pitch = down;
+		} else if ( pitch < -up ) {
+			pitch = -up;
+		}
+		ps->viewangles[PITCH] = pitch;
+		ps->delta_angles[PITCH] = ANGLE2SHORT( pitch ) - cmd->angles[PITCH];
+	}
 
 	tpm.trace = trace;
 //	tpm.trace (&trace, start, tmins, tmaxs, end, ps->clientNum, MASK_PLAYERSOLID);
@@ -3946,6 +4856,81 @@ PM_Sprint
 */
 //----(SA)	cleaned up for SP (10/22/01)
 void PM_Sprint( void ) {
+	// codmod: time-based drain/recharge for the player, driven by COD_SF_SPRINTING
+	// (set by PM_CodUpdateSprint) instead of re-checking the raw button here. Vanilla
+	// drains/recharges a fixed amount *per call*, which is frame-rate dependent; this
+	// uses pml.frametime so a full bar lasts cod_sprintTime seconds at any frame rate.
+	// AI and cod_enable 0 fall through to the unmodified vanilla path below. (phase 2.1.c)
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+		float sprintRate;
+		qboolean codLinear;
+
+		// codmod: CoD-like single-rate recharge + post-sprint delay (phase 5b)
+		codLinear = ( bg_cod.vitalsEnable && bg_cod.sprintLinear ) ? qtrue : qfalse;
+
+		if ( pm->ps->stats[STAT_COD_FLAGS] & COD_SF_SPRINTING ) {
+			if ( pm->ps->powerups[PW_NOFATIGUE] ) {    // take time from powerup before taking it from sprintTime
+				pm->ps->powerups[PW_NOFATIGUE] -= 50;
+
+				pm->ps->sprintTime += 10;           // (SA) go ahead and continue to recharge stamina at double rate with stamina powerup even when exerting
+				if ( pm->ps->sprintTime > 20000 ) {
+					pm->ps->sprintTime = 20000;
+				}
+
+				if ( pm->ps->powerups[PW_NOFATIGUE] < 0 ) {
+					pm->ps->powerups[PW_NOFATIGUE] = 0;
+				}
+			} else if ( VectorLength( pm->ps->velocity ) > 128 ) { // (SA) check for a bit more movement
+				sprintRate = bg_cod.sprintTime > 0 ? bg_cod.sprintTime : 1.0f;
+				pm->ps->sprintTime -= ( 20000.0f / sprintRate ) * pml.frametime;
+			}
+
+			if ( pm->ps->sprintTime < 0 ) {
+				pm->ps->sprintTime = 0;
+			}
+
+			if ( !pm->ps->sprintExertTime ) {
+				pm->ps->sprintExertTime = 1;
+			}
+
+			// Arm recharge delay so it starts counting only after sprint ends.
+			if ( codLinear && bg_cod.sprintRechargeDelay > 0 ) {
+				pm->ps->stats[STAT_COD_STAM_DELAY] = (int)bg_cod.sprintRechargeDelay;
+			}
+		} else {
+			sprintRate = bg_cod.sprintRechargeTime > 0 ? bg_cod.sprintRechargeTime : 1.0f;
+
+			if ( codLinear ) {
+				if ( pm->ps->stats[STAT_COD_STAM_DELAY] > 0 ) {
+					pm->ps->stats[STAT_COD_STAM_DELAY] -= (int)( pml.frametime * 1000.0f );
+					if ( pm->ps->stats[STAT_COD_STAM_DELAY] < 0 ) {
+						pm->ps->stats[STAT_COD_STAM_DELAY] = 0;
+					}
+				} else {
+					pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
+				}
+			} else {
+				// Phase 2 multi-tier recharge (vanilla-shaped bonuses)
+				pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
+
+				if ( pm->ps->sprintTime > 5000 || pm->ps->powerups[PW_NOFATIGUE] ) {
+					pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
+				}
+
+				if ( !( pm->cmd.forwardmove || pm->cmd.rightmove ) ) {
+					pm->ps->sprintTime += ( 20000.0f / sprintRate ) * pml.frametime;
+				}
+			}
+
+			if ( pm->ps->sprintTime > 20000 ) {
+				pm->ps->sprintTime = 20000;
+			}
+
+			pm->ps->sprintExertTime = 0;
+		}
+		return;
+	}
+
 	if (    ( pm->cmd.buttons & BUTTON_SPRINT ) &&
 			( pm->cmd.forwardmove || pm->cmd.rightmove ) &&
 			!( pm->ps->pm_flags & PMF_DUCKED ) &&
@@ -4110,6 +5095,10 @@ void PmoveSingle( pmove_t *pmove ) {
 	// clear all pmove local vars
 	memset( &pml, 0, sizeof( pml ) );
 
+	// codmod: remember pre-duck PMF_DUCKED for slide start edge (phase 6). Set after
+	// memset — pml is zeroed each call.
+	pml.codWasDucked = ( pm->ps->pm_flags & PMF_DUCKED ) ? qtrue : qfalse;
+
 	// determine the time
 	pml.msec = pmove->cmd.serverTime - pm->ps->commandTime;
 	if ( !isDummy ) {
@@ -4159,6 +5148,7 @@ void PmoveSingle( pmove_t *pmove ) {
 	}
 
 	if ( ( pm->ps->pm_type == PM_SPECTATOR ) || ( pm->ps->pm_flags & PMF_LIMBO ) ) { // JPW NERVE for limbo mode chase
+		PM_CodCheckProne();
 		PM_CheckDuck();
 		PM_FlyMove();
 		PM_DropTimers();
@@ -4183,6 +5173,9 @@ void PmoveSingle( pmove_t *pmove ) {
 	PM_SetWaterLevel();
 	pml.previous_waterlevel = pmove->waterlevel;
 
+	// codmod: prone before duck so prone bbox/viewheight win (phase 6b)
+	PM_CodCheckProne();
+
 	// set mins, maxs, and viewheight
 	PM_CheckDuck();
 
@@ -4198,6 +5191,26 @@ void PmoveSingle( pmove_t *pmove ) {
 
 	if ( !isDummy ) {
 		PM_DropTimers();
+	}
+
+	// codmod: ADS has priority over sprint (phase 3.3), so update it first; PM_CodUpdateSprint
+	// reads WBUTTON_COD_ADS off pm->cmd directly to block/cancel sprint while ADS is held.
+	PM_CodUpdateADS();
+
+	// codmod: slide bookkeeping before UpdateSprint so COD_SF_SPRINTING from the previous
+	// command is still set for the sprint→crouch start edge (phase 6).
+	PM_CodSlideFrame();
+
+	// codmod: decide sprint state before the move dispatch so PM_CmdScale/PM_WalkMove/
+	// PM_Sprint all agree this frame (phase 2.1.c)
+	PM_CodUpdateSprint();
+
+	// codmod: tick landing slowdown timer (phase 5 / E6)
+	if ( !pm->ps->aiChar && pm->ps->stats[STAT_COD_LAND] > 0 ) {
+		pm->ps->stats[STAT_COD_LAND] -= pml.msec;
+		if ( pm->ps->stats[STAT_COD_LAND] < 0 ) {
+			pm->ps->stats[STAT_COD_LAND] = 0;
+		}
 	}
 
 	if ( pm->ps->powerups[PW_FLIGHT] ) {
@@ -4221,9 +5234,17 @@ void PmoveSingle( pmove_t *pmove ) {
 		PM_WaterMove();
 	} else if ( pml.walking ) {
 		// walking on ground
-		PM_WalkMove();
+		// codmod: slide replaces walk while PMF_COD_SLIDING (phase 6)
+		if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+			PM_CodSlideMove();
+		} else {
+			PM_WalkMove();
+		}
 	} else {
-		// airborne
+		// airborne — leave-ground also ends slide in PM_CodSlideFrame; belt-and-suspenders here
+		if ( pm->ps->pm_flags & PMF_COD_SLIDING ) {
+			PM_CodEndSlide();
+		}
 		PM_AirMove();
 	}
 

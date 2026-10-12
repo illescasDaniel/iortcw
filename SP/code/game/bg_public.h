@@ -263,6 +263,7 @@ typedef enum {
 #define PMF_BACKWARDS_RUN   16      // coast down to backwards run
 #define PMF_TIME_LAND       32      // pm_time is time before rejump
 #define PMF_TIME_KNOCKBACK  64      // pm_time is an air-accelerate only time
+#define PMF_COD_SLIDING     128     // codmod: phase 6 tactical slide (bit 128 was free at 438e7d4)
 #define PMF_TIME_WATERJUMP  256     // pm_time is waterjump
 #define PMF_RESPAWNED       512     // clear after attack and jump buttons come up
 #define PMF_USE_ITEM_HELD   1024
@@ -336,8 +337,39 @@ typedef enum {
 	STAT_DEAD_YAW,                  // look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,             // bit mask of clients wishing to exit the intermission (FIXME: configstring?)
 	STAT_MAX_HEALTH,                // health / armor limit, changable by handicap
-	STAT_PLAYER_CLASS               // DHM - Nerve :: player class in multiplayer
+	STAT_PLAYER_CLASS,              // DHM - Nerve :: player class in multiplayer
+
+	// codmod: networked state for CoD-style movement (phase 2+). stats[] entries are
+	// plain ints here, but msg.c only delta-encodes 16 bits of change per entry, so treat
+	// these as shorts (-32768..32767). See docs/architecture.md section 3.
+	STAT_COD_ADS = 8,        // phase 3: ADS fraction * 1000
+	STAT_COD_SLIDE,          // phase 6: >0 slide ms left, <0 cooldown ms
+	STAT_COD_FLAGS,          // bitfield, see COD_SF_*
+	STAT_COD_SLIDE_SPEED,    // phase 6: start speed of the current slide, u/s
+	STAT_COD_STANCE,         // phase 6b: >0 prone transition ms left, <0 prone cooldown ms
+	STAT_COD_LAND,           // phase 5: >0 landing slowdown ms left
+	STAT_COD_STAM_DELAY      // phase 5b: ms left before stamina recharge starts
 } statIndex_t;
+
+// codmod: compile-time check that STAT_COD_* stay inside ps->stats[MAX_STATS] (q_shared.h).
+// A negative array size here is a compile error, which is the point.
+typedef char bg_cod_statIndexRangeCheck_t[ ( STAT_COD_STAM_DELAY < MAX_STATS ) ? 1 : -1 ];
+
+// codmod: ps->stats[STAT_COD_FLAGS] bits (phase 2+)
+#define COD_SF_SPRINTING    1
+#define COD_SF_PRONE        2   // phase 6b: prone stance (bbox + viewheight)
+#define COD_SF_PRONE_MOVING 4   // phase 6b: crawling (gun tilt / fire block)
+#define COD_SF_PRONE_HELD   8   // phase 6b: last-frame +prone latch (edge detect)
+#define COD_SF_CROUCH_HELD  16  // phase 6b: last-frame crouch latch (edge detect)
+
+// codmod: ADS input (phase 3.1). WBUTTON_EXTRA6 (q_shared.h) has no other users at
+// ioRTCW 438e7d4 (verified with grep) -- bound to "+wbutton6" (client/cl_input.c) and
+// aliased to "+ads"/"-ads" in mod/codmod/codmod.cfg, bound to MOUSE2 in codmod_binds.cfg.
+#define WBUTTON_COD_ADS WBUTTON_EXTRA6
+
+// codmod: prone input (phase 6b). WBUTTON_EXTRA7 (+wbutton7) — engine +prone/-prone
+// aliases in cl_input.c; bound to CTRL in codmod_binds.cfg.
+#define WBUTTON_COD_PRONE WBUTTON_EXTRA7
 
 
 // player_state->persistant[] indexes
@@ -822,6 +854,8 @@ typedef enum {
 	EV_GIVEPAGE,    //----(SA)	added
 	EV_CLOSEMENU,   //----(SA)	added
 	EV_SPAWN_SPIRIT,
+
+	EV_COD_SLIDE,   // codmod: phase 6 — tactical slide start (scrape sound)
 
 	EV_MAX_EVENTS   // just added as an 'endcap'
 

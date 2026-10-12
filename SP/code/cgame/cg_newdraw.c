@@ -299,6 +299,8 @@ static void CG_DrawPlayerWeaponIcon( rectDef_t *rect, qboolean drawHighlighted, 
 	size = weapIconDrawSize( realweap );
 
 	if ( !size ) {
+		// knife / hidden weapons: still show flashlight on-indicator at the icon slot
+		CG_CodDrawFlashlightHudIcon( rect->x, rect->y, rect->w * 0.5f, rect->h );
 		return;
 	}
 
@@ -349,35 +351,33 @@ static void CG_DrawPlayerWeaponIcon( rectDef_t *rect, qboolean drawHighlighted, 
 	if ( icon ) {
 		float x, y, w, h;
 
-		if ( size == 1 ) { // draw half width to match the icon asset
-
-			// start at left
-			x = rect->x - halfScale;
-			y = rect->y - halfScale;
-			w = rect->w / 2 + scale;
-			h = rect->h + scale;
-
-			switch ( align ) {
-			case ITEM_ALIGN_CENTER:
-				x += rect->w / 4;
-				break;
-			case ITEM_ALIGN_RIGHT:
-				x += rect->w / 2;
-				break;
-			case ITEM_ALIGN_LEFT:
-			default:
-				break;
-			}
-
+		// Icon TGA aspects: size 1 = square (64x64), size 2 = wide (128x64).
+		// Vanilla used w=rect->w/2 assuming a double-wide slot (so half-width == height).
+		// CoD HUD uses a near-square slot — keep native aspect instead of squashing.
+		h = rect->h + scale;
+		if ( size == 1 ) {
+			w = h; // 1:1
 		} else {
+			w = h * 2.0f; // 2:1
+		}
+		y = rect->y - halfScale;
+
+		switch ( align ) {
+		case ITEM_ALIGN_CENTER:
+			x = rect->x + ( rect->w - w ) * 0.5f - halfScale;
+			break;
+		case ITEM_ALIGN_RIGHT:
+			x = rect->x + rect->w - w - halfScale;
+			break;
+		case ITEM_ALIGN_LEFT:
+		default:
 			x = rect->x - halfScale;
-			y = rect->y - halfScale;
-			w = rect->w + scale;
-			h = rect->h + scale;
+			break;
 		}
 
-
 		CG_DrawPic( x, y, w, h, icon );
+		// codmod: flashlight on-indicator to the left of the weapon icon
+		CG_CodDrawFlashlightHudIcon( x, y, w, h );
 	}
 }
 
@@ -526,6 +526,93 @@ static void CG_DrawCursorhint( rectDef_t *rect ) {
 
 	trap_R_SetColor( NULL );
 
+	// codmod: label above the cursor-hint icon (phase 5b). Keyboard shows "Press F…";
+	// pad last-input shows hold X / Square glyph (CoD-style use) + "Hold … to interact".
+	// Breakable props are look-only (shoot to destroy) — short status, not a use prompt.
+	if ( bg_cod.enable && bg_cod.vitalsEnable && bg_cod.interactHint ) {
+		const char *hintText = NULL;
+		int hint = cg.cursorHintIcon;
+		qboolean usePadGlyph = qfalse;
+		qhandle_t padGlyph = 0;
+
+		// Chair while armed with a two-hander draws NOACTIVATE — no prompt.
+		if ( hint == HINT_CHAIR
+			 && cg.predictedPlayerState.weapon
+			 && !( WEAPS_ONE_HANDED & ( 1 << ( cg.predictedPlayerState.weapon ) ) ) ) {
+			hint = HINT_NOACTIVATE;
+		}
+
+		switch ( hint ) {
+		case HINT_NONE:
+		case HINT_FORCENONE:
+		case HINT_NOACTIVATE:
+		case HINT_PLAYER:       // draws as NOACTIVATE
+		case HINT_PLYR_FRIEND:
+		case HINT_PLYR_NEUTRAL:
+		case HINT_PLYR_ENEMY:
+		case HINT_PLYR_UNKNOWN:
+		case HINT_EXIT:
+		case HINT_NOEXIT:
+		case HINT_EXIT_FAR:
+		case HINT_NOEXIT_FAR:
+			break;
+		case HINT_BREAKABLE:
+		case HINT_BREAKABLE_DYNAMITE:
+			hintText = "Breakable";
+			break;
+		default:
+			// Doors, buttons, MG42, pickups, ladders, etc.
+			if ( bg_cod.padGlyphs ) {
+				char lastIn[16];
+				char family[16];
+
+				trap_Cvar_VariableStringBuffer( "in_lastInput", lastIn, sizeof( lastIn ) );
+				trap_Cvar_VariableStringBuffer( "in_gamepadFamily", family, sizeof( family ) );
+				if ( !Q_stricmp( lastIn, "pad" ) && Q_stricmp( family, "none" ) ) {
+					usePadGlyph = qtrue;
+					if ( !Q_stricmp( family, "ps" ) && cgs.media.padPsSquare ) {
+						padGlyph = cgs.media.padPsSquare;
+					} else if ( cgs.media.padXboxX ) {
+						padGlyph = cgs.media.padXboxX; // xbox + generic
+					}
+					if ( !padGlyph ) {
+						usePadGlyph = qfalse;
+					}
+				}
+			}
+			if ( usePadGlyph ) {
+				hintText = "Hold to interact";
+			} else {
+				hintText = "Press F to interact";
+			}
+			break;
+		}
+
+		if ( hintText ) {
+			int textW, textX, textY;
+			vec4_t textColor;
+			const int glyphSize = SMALLCHAR_HEIGHT + 4;
+
+			Vector4Copy( color, textColor );
+			textW = CG_DrawStrlen( hintText ) * SMALLCHAR_WIDTH;
+			textY = (int)( rect->y - halfscale ) - SMALLCHAR_HEIGHT - 2;
+
+			if ( usePadGlyph && padGlyph ) {
+				int totalW = glyphSize + 4 + textW;
+				int startX = (int)( rect->x + rect->w * 0.5f ) - totalW / 2;
+				int glyphY = textY - 2;
+
+				trap_R_SetColor( color );
+				CG_DrawPic( startX, glyphY, glyphSize, glyphSize, padGlyph );
+				trap_R_SetColor( NULL );
+				textX = startX + glyphSize + 4;
+			} else {
+				textX = (int)( rect->x + rect->w * 0.5f ) - textW / 2;
+			}
+			CG_DrawSmallStringColor( textX, textY, hintText, textColor );
+		}
+	}
+
 	// draw status bar under the cursor hint
 	if ( cg.cursorHintValue && ( !( cg.time - cg.cursorHintTime ) ) ) {    // don't fade bar out w/ hint icon
 		if ( redbar ) {
@@ -567,18 +654,69 @@ static void CG_DrawMessageIcon( rectDef_t *rect ) {
 
 /*
 ==============
+CG_CodAmmoThreatColor
+
+codmod: ammo text colour — heat (if any) else low-clip ramp (phase 5c).
+==============
+*/
+static void CG_CodAmmoThreatColor( int weap, int clip, vec4_t color ) {
+	float t;
+	int maxClip;
+	weapon_t clipWeap;
+
+	if ( bg_cod.hudHeatColor && weap > WP_NONE && weap < WP_NUM_WEAPONS
+		 && ammoTable[weap].maxHeat > 0 && cg.snap->ps.curWeapHeat > 0 ) {
+		t = (float)cg.snap->ps.curWeapHeat / 255.0f;
+		CG_CodThreatColor( t, color );
+		return;
+	}
+
+	clipWeap = BG_FindClipForWeapon( weap );
+	maxClip = ( clipWeap > WP_NONE && clipWeap < WP_NUM_WEAPONS ) ? ammoTable[clipWeap].maxclip : 0;
+	if ( maxClip < 1 ) {
+		maxClip = ( weap > WP_NONE && weap < WP_NUM_WEAPONS ) ? ammoTable[weap].maxclip : 0;
+	}
+	if ( maxClip > 0 && clip * 10 < maxClip * 4 ) {
+		// below 40% mag: map remaining clip into the threat ramp
+		t = 1.0f - ( (float)clip / ( (float)maxClip * 0.4f ) );
+		if ( t < 0.0f ) {
+			t = 0.0f;
+		} else if ( t > 1.0f ) {
+			t = 1.0f;
+		}
+		CG_CodThreatColor( t, color );
+		return;
+	}
+
+	// cool + healthy mag → white
+	color[0] = color[1] = color[2] = 1.0f;
+	color[3] = 1.0f;
+}
+
+/*
+==============
 CG_DrawPlayerAmmoValue
 	0 - ammo
 	1 - clip
+codmod: when cod_hudAmmoStyle 1, type 1 draws "clip/reserve" (phase 5c); type 0 is skipped.
 ==============
 */
 static void CG_DrawPlayerAmmoValue( rectDef_t *rect, int font, float scale, vec4_t color, qhandle_t shader, int textStyle, int type ) {
-	char num[16];
+	char num[32];
+	char clipStr[16];
+	char restStr[16];
 	int value, value2 = 0;
+	int clip, reserve;
+	int clipW, restW, totalW;
+	float x, y;
+	float restScale;
 	centity_t   *cent;
 	playerState_t   *ps;
 	int weap;
 	qboolean special = qfalse;
+	qboolean clipOnly = qfalse;
+	qboolean codAmmo;
+	vec4_t drawColor;
 
 	cent = &cg_entities[cg.snap->ps.clientNum];
 	ps = &cg.snap->ps;
@@ -589,7 +727,15 @@ static void CG_DrawPlayerAmmoValue( rectDef_t *rect, int font, float scale, vec4
 		return;
 	}
 
-	if ( ps->weaponstate == WEAPON_RELOADING && type != 0 ) {
+	codAmmo = ( bg_cod.enable && bg_cod.hudEnable && bg_cod.hudAmmoStyle );
+
+	// Combined style: only the clip ownerdraw paints; reserve item is a no-op.
+	if ( codAmmo && type == 0 ) {
+		return;
+	}
+
+	// CoD ammo stays visible while reloading (vanilla hid the clip number).
+	if ( !codAmmo && ps->weaponstate == WEAPON_RELOADING && type != 0 ) {
 		return;
 	}
 
@@ -611,7 +757,8 @@ static void CG_DrawPlayerAmmoValue( rectDef_t *rect, int font, float scale, vec4
 	case WP_DYNAMITE:
 	case WP_TESLA:
 	case WP_FLAMETHROWER:
-		if ( type == 0 ) {  // don't draw reserve value, just clip (since these weapons have all their ammo in the clip)
+		clipOnly = qtrue;
+		if ( !codAmmo && type == 0 ) {  // don't draw reserve value, just clip
 			return;
 		}
 		break;
@@ -620,6 +767,51 @@ static void CG_DrawPlayerAmmoValue( rectDef_t *rect, int font, float scale, vec4
 		break;
 	}
 
+	if ( codAmmo ) {
+		clip = ps->ammoclip[BG_FindClipForWeapon( weap )];
+		reserve = cg.snap->ps.ammo[BG_FindAmmoForWeapon( weap )];
+
+		if ( shader ) {
+			trap_R_SetColor( color );
+			CG_DrawPic( rect->x, rect->y, rect->w, rect->h, shader );
+			trap_R_SetColor( NULL );
+			return;
+		}
+
+		Vector4Copy( color, drawColor );
+		CG_CodAmmoThreatColor( weap, clip, drawColor );
+
+		y = rect->y + rect->h;
+		restScale = scale * 0.72f;
+
+		restStr[0] = '\0';
+		if ( special ) {
+			value2 = clip;
+			value = clip;
+			if ( weapAlts[weap] ) {
+				value = ps->ammoclip[weapAlts[weap]];
+			}
+			Com_sprintf( clipStr, sizeof( clipStr ), "%i+%i", value2, value );
+			if ( !clipOnly ) {
+				Com_sprintf( restStr, sizeof( restStr ), "/%i", reserve );
+			}
+		} else if ( clipOnly ) {
+			Com_sprintf( clipStr, sizeof( clipStr ), "%i", clip );
+		} else {
+			Com_sprintf( clipStr, sizeof( clipStr ), "%i", clip );
+			Com_sprintf( restStr, sizeof( restStr ), "/%i", reserve );
+		}
+
+		clipW = CG_Text_Width( clipStr, font, scale, 0 );
+		restW = restStr[0] ? CG_Text_Width( restStr, font, restScale, 0 ) : 0;
+		totalW = clipW + restW;
+		x = rect->x + rect->w - totalW;
+		CG_Text_Paint( x, y, font, scale, drawColor, clipStr, 0, 0, textStyle );
+		if ( restStr[0] ) {
+			CG_Text_Paint( x + clipW, y, font, restScale, drawColor, restStr, 0, 0, textStyle );
+		}
+		return;
+	}
 
 	if ( type == 0 ) { // ammo
 		value = cg.snap->ps.ammo[BG_FindAmmoForWeapon( weap )];
@@ -1060,6 +1252,9 @@ static void CG_DrawPlayerHealth( rectDef_t *rect, int font, float scale, vec4_t 
 	playerState_t   *ps;
 	int value;
 	char num[16];
+	int flags;
+	float frac;
+	int maxHealth;
 
 	ps = &cg.snap->ps;
 
@@ -1067,6 +1262,31 @@ static void CG_DrawPlayerHealth( rectDef_t *rect, int font, float scale, vec4_t 
 
 	if ( cg_fixedAspect.integer == 2 ) {
 		CG_SetScreenPlacement(PLACE_LEFT, PLACE_BOTTOM);
+	}
+
+	// codmod: CoD-style health bar when vitals HUD is on and the menu gave us a bar-shaped
+	// rect (wider than tall). Forced red fill. Number-only fallback otherwise. (phase 5b)
+	if ( bg_cod.enable && bg_cod.vitalsEnable && !shader && rect->w >= rect->h && rect->h > 0 ) {
+		vec4_t barRed = { 0.9f, 0.12f, 0.12f, 0.9f };
+
+		maxHealth = ps->stats[STAT_MAX_HEALTH];
+		if ( maxHealth < 1 ) {
+			maxHealth = 100;
+		}
+		frac = (float)value / (float)maxHealth;
+		if ( frac < 0 ) {
+			frac = 0;
+		}
+		if ( frac > 1 ) {
+			frac = 1;
+		}
+		flags = 16; // BAR_BG — draw contrast box (cg_drawtools.c)
+		CG_FilledBar( rect->x, rect->y, rect->w, rect->h, barRed, NULL, NULL, frac, flags );
+		if ( bg_cod.healthBarNumber ) {
+			Com_sprintf( num, sizeof( num ), "%i", value );
+			CG_Text_Paint( rect->x + 2, rect->y + rect->h - 1, font, scale * 0.7f, barRed, num, 0, 0, textStyle );
+		}
+		return;
 	}
 
 	if ( shader ) {
@@ -2194,6 +2414,11 @@ static void CG_DrawFatigue( rectDef_t *rect, vec4_t color, int align ) {
 
 	if ( cg_fixedAspect.integer == 2 ) {
 		CG_SetScreenPlacement(PLACE_LEFT, PLACE_BOTTOM);
+	}
+
+	// codmod: vitals HUD is always horizontal (phase 5b), even if an old menu omitted align.
+	if ( bg_cod.enable && bg_cod.vitalsEnable ) {
+		align = HUD_HORIZONTAL;
 	}
 
 	if ( align != HUD_HORIZONTAL ) {

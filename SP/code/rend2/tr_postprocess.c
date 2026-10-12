@@ -22,6 +22,73 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "tr_local.h"
 
+/*
+=============
+RB_SMAA
+
+Subpixel Morphological Anti-Aliasing, 1x (Jimenez et al., http://www.iryoku.com/smaa/).
+Runs in place on srcFbo's color image after tone mapping and before any 2D, so the HUD stays crisp.
+  1. luma edge detection        srcFbo   -> smaaEdgesFbo
+  2. blending weight calculation edges   -> smaaBlendFbo
+  3. neighborhood blending       srcFbo+weights -> screenScratchFbo, then copied back to srcFbo
+r_smaa selects the preset (1 low .. 4 ultra); r_smaaDebug 1/2 shows the edges/weights buffer instead.
+=============
+*/
+void RB_SMAA(FBO_t *srcFbo, ivec4_t srcBox)
+{
+	int preset = r_smaa->integer - 1;
+	vec4_t metrics;
+
+	if (preset < 0 || preset > 3)
+		return;
+
+	if (!tr.smaaAvailable || !srcFbo || !tr.smaaEdgesFbo || !tr.smaaBlendFbo || !tr.screenScratchFbo ||
+		srcFbo->width != tr.smaaEdgesFbo->width || srcFbo->height != tr.smaaEdgesFbo->height)
+		return;
+
+	metrics[0] = 1.0f / srcFbo->width;
+	metrics[1] = 1.0f / srcFbo->height;
+	metrics[2] = (float)srcFbo->width;
+	metrics[3] = (float)srcFbo->height;
+
+	// the edge shader discards pixels without an edge, so the target must start at zero
+	FBO_Bind(tr.smaaEdgesFbo);
+	qglScissor(0, 0, tr.smaaEdgesFbo->width, tr.smaaEdgesFbo->height);
+	qglClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	qglClear(GL_COLOR_BUFFER_BIT);
+	qglClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
+	GLSL_BindProgram(&tr.smaaEdgeShader[preset]);
+	GLSL_SetUniformVec4(&tr.smaaEdgeShader[preset], UNIFORM_SMAAMETRICS, metrics);
+	FBO_Blit(srcFbo, srcBox, NULL, tr.smaaEdgesFbo, srcBox, &tr.smaaEdgeShader[preset], NULL, 0);
+
+	if (r_smaaDebug->integer == 1)
+	{
+		FBO_FastBlit(tr.smaaEdgesFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		return;
+	}
+
+	GL_BindToTMU(tr.smaaAreaImage,   TB_LEVELSMAP);
+	GL_BindToTMU(tr.smaaSearchImage, TB_NORMALMAP);
+
+	GLSL_BindProgram(&tr.smaaWeightsShader[preset]);
+	GLSL_SetUniformVec4(&tr.smaaWeightsShader[preset], UNIFORM_SMAAMETRICS, metrics);
+	FBO_Blit(tr.smaaEdgesFbo, srcBox, NULL, tr.smaaBlendFbo, srcBox, &tr.smaaWeightsShader[preset], NULL, 0);
+
+	if (r_smaaDebug->integer == 2)
+	{
+		FBO_FastBlit(tr.smaaBlendFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		return;
+	}
+
+	GL_BindToTMU(tr.smaaBlendImage, TB_LEVELSMAP);
+
+	GLSL_BindProgram(&tr.smaaBlendShader);
+	GLSL_SetUniformVec4(&tr.smaaBlendShader, UNIFORM_SMAAMETRICS, metrics);
+	FBO_Blit(srcFbo, srcBox, NULL, tr.screenScratchFbo, srcBox, &tr.smaaBlendShader, NULL, 0);
+	FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+}
+
 void RB_ToneMap(FBO_t *hdrFbo, ivec4_t hdrBox, FBO_t *ldrFbo, ivec4_t ldrBox, int autoExposure)
 {
 	ivec4_t srcBox, dstBox;

@@ -29,6 +29,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 #include "../client/client.h"
 #include "../sys/sys_local.h"
@@ -60,6 +65,87 @@ static int in_eventTime = 0;
 static SDL_Window *SDL_window = NULL;
 
 #define CTRL(a) ((a)-'a'+1)
+
+/*
+===============
+IN_SetLastInput
+
+codmod: "kb" or "pad" — used by interact-hint glyphs.
+===============
+*/
+static void IN_SetLastInput( const char *which )
+{
+	cvar_t *cv;
+
+	if ( !which || !which[0] ) {
+		return;
+	}
+	cv = Cvar_Get( "in_lastInput", "kb", CVAR_ROM );
+	if ( Q_stricmp( cv->string, which ) != 0 ) {
+		Cvar_Set( "in_lastInput", which );
+	}
+}
+
+/*
+===============
+IN_UpdateGamepadFamily
+
+codmod: ROM cvar in_gamepadFamily = xbox | ps | generic | none
+===============
+*/
+static void IN_UpdateGamepadFamily( void )
+{
+	const char *family = "none";
+	const char *name = NULL;
+
+	Cvar_Get( "in_gamepadFamily", "none", CVAR_ROM );
+
+	if ( !gamepad ) {
+		Cvar_Set( "in_gamepadFamily", "none" );
+		return;
+	}
+
+#if SDL_VERSION_ATLEAST( 2, 0, 12 )
+	{
+		SDL_GameControllerType t = SDL_GameControllerGetType( gamepad );
+		switch ( t ) {
+		case SDL_CONTROLLER_TYPE_XBOX360:
+		case SDL_CONTROLLER_TYPE_XBOXONE:
+			family = "xbox";
+			break;
+		case SDL_CONTROLLER_TYPE_PS3:
+		case SDL_CONTROLLER_TYPE_PS4:
+		case SDL_CONTROLLER_TYPE_PS5:
+			family = "ps";
+			break;
+		default:
+			family = "generic";
+			break;
+		}
+	}
+#else
+	family = "generic";
+#endif
+
+	// Name fallback when SDL reports UNKNOWN/generic (common for some Bluetooth pads).
+	if ( !Q_stricmp( family, "generic" ) ) {
+		name = SDL_GameControllerName( gamepad );
+		if ( name ) {
+			if ( Q_stristr( name, "DualShock" ) || Q_stristr( name, "DualSense" )
+				 || Q_stristr( name, "PlayStation" ) || Q_stristr( name, "PS3" )
+				 || Q_stristr( name, "PS4" ) || Q_stristr( name, "PS5" )
+				 || Q_stristr( name, "Wireless Controller" ) ) {
+				family = "ps";
+			} else if ( Q_stristr( name, "Xbox" ) || Q_stristr( name, "XInput" )
+						|| Q_stristr( name, "XBox" ) ) {
+				family = "xbox";
+			}
+		}
+	}
+
+	Cvar_Set( "in_gamepadFamily", family );
+	Com_DPrintf( "Gamepad family: %s\n", family );
+}
 
 /*
 ===============
@@ -443,7 +529,156 @@ struct
 	unsigned int oldaxes;
 	int oldaaxes[MAX_JOYSTICK_AXIS];
 	unsigned int oldhats;
+	// codmod: filtered stick state (EMA). [0]=LX [1]=LY [2]=RX [3]=RY in -1..1
+	float filt[4];
+	qboolean filtInit;
 } stick_state;
+
+// Axial snap half-angle (deg): look stick locks to pure H/V inside this band.
+#define COD_PAD_AXIAL_SNAP_DEG     12.0f
+// Cardinal snap half-angle (deg): move stick snaps to N/E/S/W inside this band.
+#define COD_PAD_CARDINAL_SNAP_DEG  22.0f
+// EMA blend toward new sample each frame (higher = snappier, lower = smoother).
+#define COD_PAD_SMOOTH_ALPHA       0.42f
+
+/*
+===============
+IN_CodApplyRadialDeadzone
+
+in: -1..1 stick; out: deadzone-shaped -1..1 (same shape as engine threshold ramp).
+===============
+*/
+static void IN_CodApplyRadialDeadzone( float *x, float *y, float threshold )
+{
+	float mag, f;
+
+	mag = (float)sqrt( (double)( ( *x ) * ( *x ) + ( *y ) * ( *y ) ) );
+	if ( mag < 1e-6f ) {
+		*x = 0.0f;
+		*y = 0.0f;
+		return;
+	}
+	if ( mag <= threshold ) {
+		*x = 0.0f;
+		*y = 0.0f;
+		return;
+	}
+	f = ( mag - threshold ) / ( 1.0f - threshold );
+	if ( f > 1.0f ) {
+		f = 1.0f;
+	}
+	*x = ( *x / mag ) * f;
+	*y = ( *y / mag ) * f;
+}
+
+/*
+===============
+IN_CodSmoothStick
+
+Exponential moving average on a stick pair.
+===============
+*/
+static void IN_CodSmoothStick( int filtIndex, float *x, float *y )
+{
+	float a = COD_PAD_SMOOTH_ALPHA;
+
+	if ( !stick_state.filtInit ) {
+		stick_state.filt[0] = stick_state.filt[1] = 0.0f;
+		stick_state.filt[2] = stick_state.filt[3] = 0.0f;
+		stick_state.filtInit = qtrue;
+	}
+	stick_state.filt[filtIndex]     = stick_state.filt[filtIndex] * ( 1.0f - a ) + ( *x ) * a;
+	stick_state.filt[filtIndex + 1] = stick_state.filt[filtIndex + 1] * ( 1.0f - a ) + ( *y ) * a;
+	*x = stick_state.filt[filtIndex];
+	*y = stick_state.filt[filtIndex + 1];
+}
+
+/*
+===============
+IN_CodAxialSnap
+
+Look-stick axial deadzones: near-horizontal zeros Y; near-vertical zeros X.
+===============
+*/
+static void IN_CodAxialSnap( float *x, float *y )
+{
+	float ax, ay, ang, snap;
+
+	ax = fabs( *x );
+	ay = fabs( *y );
+	if ( ax < 1e-5f && ay < 1e-5f ) {
+		return;
+	}
+	ang = (float)( atan2( (double)ay, (double)ax ) * ( 180.0 / M_PI ) ); // 0 = horizontal, 90 = vertical
+	snap = COD_PAD_AXIAL_SNAP_DEG;
+	if ( ang < snap ) {
+		*y = 0.0f; // lock to horizontal
+	} else if ( ang > ( 90.0f - snap ) ) {
+		*x = 0.0f; // lock to vertical
+	}
+}
+
+/*
+===============
+IN_CodCardinalSnap
+
+Move-stick cardinal locking: widen pure forward/back/strafe cones.
+===============
+*/
+static void IN_CodCardinalSnap( float *x, float *y )
+{
+	float mag, ang, snap, sector;
+
+	mag = (float)sqrt( (double)( ( *x ) * ( *x ) + ( *y ) * ( *y ) ) );
+	if ( mag < 1e-5f ) {
+		return;
+	}
+	// atan2(x, -y): 0 = forward (up on stick / -Y), 90 = right, etc.
+	ang = (float)( atan2( (double)( *x ), (double)( -( *y ) ) ) * ( 180.0 / M_PI ) );
+	snap = COD_PAD_CARDINAL_SNAP_DEG;
+	sector = ang;
+	if ( sector < 0.0f ) {
+		sector += 360.0f;
+	}
+	if ( sector < snap || sector > ( 360.0f - snap ) ) {
+		*x = 0.0f;
+		*y = -mag; // forward
+	} else if ( fabs( sector - 90.0f ) < snap ) {
+		*x = mag;
+		*y = 0.0f; // right
+	} else if ( fabs( sector - 180.0f ) < snap ) {
+		*x = 0.0f;
+		*y = mag; // back
+	} else if ( fabs( sector - 270.0f ) < snap ) {
+		*x = -mag;
+		*y = 0.0f; // left
+	}
+}
+
+/*
+===============
+IN_CodStickToAxisInt
+
+Convert filtered -1..1 stick axis to signed 0..32767 engine axis units.
+===============
+*/
+static int IN_CodStickToAxisInt( float v )
+{
+	int a;
+
+	if ( v > 1.0f ) {
+		v = 1.0f;
+	} else if ( v < -1.0f ) {
+		v = -1.0f;
+	}
+	a = (int)( v * 32767.0f );
+	if ( a > 32767 ) {
+		a = 32767;
+	} else if ( a < -32767 ) {
+		a = -32767;
+	}
+	return a;
+}
 
 
 /*
@@ -466,6 +701,10 @@ static void IN_InitJoystick( void )
 	stick = NULL;
 	gamepad = NULL;
 	memset(&stick_state, '\0', sizeof (stick_state));
+	stick_state.filtInit = qfalse;
+	Cvar_Get( "in_gamepadFamily", "none", CVAR_ROM );
+	Cvar_Set( "in_gamepadFamily", "none" );
+	Cvar_Get( "in_lastInput", "kb", CVAR_ROM );
 
 	// SDL 2.0.4 requires SDL_INIT_JOYSTICK to be initialized separately from
 	// SDL_INIT_GAMECONTROLLER for SDL_JoystickOpen() to work correctly,
@@ -531,6 +770,8 @@ static void IN_InitJoystick( void )
 	if (SDL_IsGameController(in_joystickNo->integer))
 		gamepad = SDL_GameControllerOpen(in_joystickNo->integer);
 
+	IN_UpdateGamepadFamily();
+
 	Com_DPrintf( "Joystick %d opened\n", in_joystickNo->integer );
 	Com_DPrintf( "Name:       %s\n", SDL_JoystickNameForIndex(in_joystickNo->integer) );
 	Com_DPrintf( "Axes:       %d\n", SDL_JoystickNumAxes(stick) );
@@ -562,6 +803,9 @@ static void IN_ShutdownJoystick( void )
 		SDL_GameControllerClose(gamepad);
 		gamepad = NULL;
 	}
+
+	Cvar_Get( "in_gamepadFamily", "none", CVAR_ROM );
+	Cvar_Set( "in_gamepadFamily", "none" );
 
 	if (stick)
 	{
@@ -652,6 +896,7 @@ static void IN_GamepadMove( void )
 	int i;
 	int translatedAxes[MAX_JOYSTICK_AXIS];
 	qboolean translatedAxesSet[MAX_JOYSTICK_AXIS];
+	qboolean padActivity = qfalse;
 
 	SDL_GameControllerUpdate();
 
@@ -670,6 +915,9 @@ static void IN_GamepadMove( void )
 				Com_QueueEvent(in_eventTime, SE_KEY, K_PAD0_A + i, pressed, 0, NULL);
 			}
 			stick_state.buttons[i] = pressed;
+			if ( pressed ) {
+				padActivity = qtrue;
+			}
 		}
 	}
 
@@ -684,85 +932,96 @@ static void IN_GamepadMove( void )
 		}
 	}
 
-	// check axes
-	for (i = 0; i < SDL_CONTROLLER_AXIS_MAX; i++)
+	// --- codmod: read sticks, deadzone, smooth, cardinal/axial snap, then emit ---
 	{
-		int axis = SDL_GameControllerGetAxis(gamepad, SDL_CONTROLLER_AXIS_LEFTX + i);
-		int oldAxis = stick_state.oldaaxes[i];
+		float lx, ly, rx, ry;
+		float thr = in_joystickThreshold->value;
+		int axesOut[SDL_CONTROLLER_AXIS_MAX];
 
-		// Smoothly ramp from dead zone to maximum value
-		float f = ((float)abs(axis) / 32767.0f - in_joystickThreshold->value) / (1.0f - in_joystickThreshold->value);
+		lx = SDL_GameControllerGetAxis( gamepad, SDL_CONTROLLER_AXIS_LEFTX ) / 32767.0f;
+		ly = SDL_GameControllerGetAxis( gamepad, SDL_CONTROLLER_AXIS_LEFTY ) / 32767.0f;
+		rx = SDL_GameControllerGetAxis( gamepad, SDL_CONTROLLER_AXIS_RIGHTX ) / 32767.0f;
+		ry = SDL_GameControllerGetAxis( gamepad, SDL_CONTROLLER_AXIS_RIGHTY ) / 32767.0f;
 
-		if (f < 0.0f)
-			f = 0.0f;
+		IN_CodApplyRadialDeadzone( &lx, &ly, thr );
+		IN_CodApplyRadialDeadzone( &rx, &ry, thr );
+		IN_CodSmoothStick( 0, &lx, &ly );
+		IN_CodSmoothStick( 2, &rx, &ry );
+		IN_CodCardinalSnap( &lx, &ly ); // movement
+		IN_CodAxialSnap( &rx, &ry );    // look
 
-		axis = (int)(32767 * ((axis < 0) ? -f : f));
+		axesOut[SDL_CONTROLLER_AXIS_LEFTX] = IN_CodStickToAxisInt( lx );
+		axesOut[SDL_CONTROLLER_AXIS_LEFTY] = IN_CodStickToAxisInt( ly );
+		axesOut[SDL_CONTROLLER_AXIS_RIGHTX] = IN_CodStickToAxisInt( rx );
+		axesOut[SDL_CONTROLLER_AXIS_RIGHTY] = IN_CodStickToAxisInt( ry );
 
-		if (axis != oldAxis)
-		{
-			const int negMap[SDL_CONTROLLER_AXIS_MAX] = { K_PAD0_LEFTSTICK_LEFT,  K_PAD0_LEFTSTICK_UP,   K_PAD0_RIGHTSTICK_LEFT,  K_PAD0_RIGHTSTICK_UP, 0, 0 };
-			const int posMap[SDL_CONTROLLER_AXIS_MAX] = { K_PAD0_LEFTSTICK_RIGHT, K_PAD0_LEFTSTICK_DOWN, K_PAD0_RIGHTSTICK_RIGHT, K_PAD0_RIGHTSTICK_DOWN, K_PAD0_LEFTTRIGGER, K_PAD0_RIGHTTRIGGER };
-
-			qboolean posAnalog = qfalse, negAnalog = qfalse;
-			int negKey = negMap[i];
-			int posKey = posMap[i];
-
-			if (in_joystickUseAnalog->integer)
-			{
-				int posAxis = 0, posSign = 0, negAxis = 0, negSign = 0;
-
-				// get axes and axes signs for keys if available
-				posAnalog = KeyToAxisAndSign(posKey, &posAxis, &posSign);
-				negAnalog = KeyToAxisAndSign(negKey, &negAxis, &negSign);
-
-				// positive to negative/neutral -> keyup if axis hasn't yet been set
-				if (posAnalog && !translatedAxesSet[posAxis] && oldAxis > 0 && axis <= 0)
-				{
-					translatedAxes[posAxis] = 0;
-					translatedAxesSet[posAxis] = qtrue;
-				}
-
-				// negative to positive/neutral -> keyup if axis hasn't yet been set
-				if (negAnalog && !translatedAxesSet[negAxis] && oldAxis < 0 && axis >= 0)
-				{
-					translatedAxes[negAxis] = 0;
-					translatedAxesSet[negAxis] = qtrue;
-				}
-
-				// negative/neutral to positive -> keydown
-				if (posAnalog && axis > 0)
-				{
-					translatedAxes[posAxis] = axis * posSign;
-					translatedAxesSet[posAxis] = qtrue;
-				}
-
-				// positive/neutral to negative -> keydown
-				if (negAnalog && axis < 0)
-				{
-					translatedAxes[negAxis] = -axis * negSign;
-					translatedAxesSet[negAxis] = qtrue;
-				}
+		// Triggers: keep existing linear deadzone ramp (no snap/smooth).
+		for ( i = SDL_CONTROLLER_AXIS_TRIGGERLEFT; i < SDL_CONTROLLER_AXIS_MAX; i++ ) {
+			int raw = SDL_GameControllerGetAxis( gamepad, (SDL_GameControllerAxis)i );
+			float f = ( (float)abs( raw ) / 32767.0f - thr ) / ( 1.0f - thr );
+			if ( f < 0.0f ) {
+				f = 0.0f;
 			}
+			axesOut[i] = (int)( 32767 * ( ( raw < 0 ) ? -f : f ) );
+		}
 
-			// keyups first so they get overridden by keydowns later
+		for ( i = 0; i < SDL_CONTROLLER_AXIS_MAX; i++ )
+		{
+			int axis = axesOut[i];
+			int oldAxis = stick_state.oldaaxes[i];
 
-			// positive to negative/neutral -> keyup
-			if (!posAnalog && posKey && oldAxis > 0 && axis <= 0)
-				Com_QueueEvent(in_eventTime, SE_KEY, posKey, qfalse, 0, NULL);
+			if ( axis != oldAxis )
+			{
+				const int negMap[SDL_CONTROLLER_AXIS_MAX] = { K_PAD0_LEFTSTICK_LEFT,  K_PAD0_LEFTSTICK_UP,   K_PAD0_RIGHTSTICK_LEFT,  K_PAD0_RIGHTSTICK_UP, 0, 0 };
+				const int posMap[SDL_CONTROLLER_AXIS_MAX] = { K_PAD0_LEFTSTICK_RIGHT, K_PAD0_LEFTSTICK_DOWN, K_PAD0_RIGHTSTICK_RIGHT, K_PAD0_RIGHTSTICK_DOWN, K_PAD0_LEFTTRIGGER, K_PAD0_RIGHTTRIGGER };
 
-			// negative to positive/neutral -> keyup
-			if (!negAnalog && negKey && oldAxis < 0 && axis >= 0)
-				Com_QueueEvent(in_eventTime, SE_KEY, negKey, qfalse, 0, NULL);
+				qboolean posAnalog = qfalse, negAnalog = qfalse;
+				int negKey = negMap[i];
+				int posKey = posMap[i];
 
-			// negative/neutral to positive -> keydown
-			if (!posAnalog && posKey && oldAxis <= 0 && axis > 0)
-				Com_QueueEvent(in_eventTime, SE_KEY, posKey, qtrue, 0, NULL);
+				if ( in_joystickUseAnalog->integer )
+				{
+					int posAxis = 0, posSign = 0, negAxis = 0, negSign = 0;
 
-			// positive/neutral to negative -> keydown
-			if (!negAnalog && negKey && oldAxis >= 0 && axis < 0)
-				Com_QueueEvent(in_eventTime, SE_KEY, negKey, qtrue, 0, NULL);
+					posAnalog = KeyToAxisAndSign( posKey, &posAxis, &posSign );
+					negAnalog = KeyToAxisAndSign( negKey, &negAxis, &negSign );
 
-			stick_state.oldaaxes[i] = axis;
+					if ( posAnalog && !translatedAxesSet[posAxis] && oldAxis > 0 && axis <= 0 )
+					{
+						translatedAxes[posAxis] = 0;
+						translatedAxesSet[posAxis] = qtrue;
+					}
+					if ( negAnalog && !translatedAxesSet[negAxis] && oldAxis < 0 && axis >= 0 )
+					{
+						translatedAxes[negAxis] = 0;
+						translatedAxesSet[negAxis] = qtrue;
+					}
+					if ( posAnalog && axis > 0 )
+					{
+						translatedAxes[posAxis] = axis * posSign;
+						translatedAxesSet[posAxis] = qtrue;
+					}
+					if ( negAnalog && axis < 0 )
+					{
+						translatedAxes[negAxis] = -axis * negSign;
+						translatedAxesSet[negAxis] = qtrue;
+					}
+				}
+
+				if ( !posAnalog && posKey && oldAxis > 0 && axis <= 0 )
+					Com_QueueEvent( in_eventTime, SE_KEY, posKey, qfalse, 0, NULL );
+				if ( !negAnalog && negKey && oldAxis < 0 && axis >= 0 )
+					Com_QueueEvent( in_eventTime, SE_KEY, negKey, qfalse, 0, NULL );
+				if ( !posAnalog && posKey && oldAxis <= 0 && axis > 0 )
+					Com_QueueEvent( in_eventTime, SE_KEY, posKey, qtrue, 0, NULL );
+				if ( !negAnalog && negKey && oldAxis >= 0 && axis < 0 )
+					Com_QueueEvent( in_eventTime, SE_KEY, negKey, qtrue, 0, NULL );
+
+				if ( axis != 0 ) {
+					padActivity = qtrue;
+				}
+				stick_state.oldaaxes[i] = axis;
+			}
 		}
 	}
 
@@ -774,6 +1033,10 @@ static void IN_GamepadMove( void )
 			if (translatedAxesSet[i])
 				Com_QueueEvent(in_eventTime, SE_JOYSTICK_AXIS, i, translatedAxes[i], 0, NULL);
 		}
+	}
+
+	if ( padActivity ) {
+		IN_SetLastInput( "pad" );
 	}
 }
 
@@ -1010,8 +1273,10 @@ static void IN_ProcessEvents( void )
 				if ( e.key.repeat && Key_GetCatcher( ) == 0 )
 					break;
 
-				if( ( key = IN_TranslateSDLToQ3Key( &e.key.keysym, qtrue ) ) )
+				if( ( key = IN_TranslateSDLToQ3Key( &e.key.keysym, qtrue ) ) ) {
 					Com_QueueEvent( in_eventTime, SE_KEY, key, qtrue, 0, NULL );
+					IN_SetLastInput( "kb" );
+				}
 
 				if( key == K_BACKSPACE )
 					Com_QueueEvent( in_eventTime, SE_CHAR, CTRL('h'), 0, 0, NULL );
@@ -1084,6 +1349,7 @@ static void IN_ProcessEvents( void )
 					if( !e.motion.xrel && !e.motion.yrel )
 						break;
 					Com_QueueEvent( in_eventTime, SE_MOUSE, e.motion.xrel, e.motion.yrel, 0, NULL );
+					IN_SetLastInput( "kb" );
 				}
 				break;
 
@@ -1102,6 +1368,9 @@ static void IN_ProcessEvents( void )
 					}
 					Com_QueueEvent( in_eventTime, SE_KEY, b,
 						( e.type == SDL_MOUSEBUTTONDOWN ? qtrue : qfalse ), 0, NULL );
+					if ( e.type == SDL_MOUSEBUTTONDOWN ) {
+						IN_SetLastInput( "kb" );
+					}
 				}
 				break;
 
@@ -1134,6 +1403,7 @@ static void IN_ProcessEvents( void )
 					case SDL_WINDOWEVENT_RESIZED:
 						{
 							int width, height;
+							int dw, dh;
 
 							width = e.window.data1;
 							height = e.window.data2;
@@ -1146,6 +1416,24 @@ static void IN_ProcessEvents( void )
 
 							// check if size actually changed
 							if( cls.glconfig.vidWidth == width && cls.glconfig.vidHeight == height )
+							{
+								break;
+							}
+
+							// Wayland (and some compositors) emit RESIZED with ±1/±2 px
+							// noise vs the requested mode. Treating that as a real resize
+							// forces r_mode -1 with odd sizes (e.g. 1921x1201) which then
+							// vid_restart and can SIGSEGV under overlays like MangoHud.
+							dw = width - cls.glconfig.vidWidth;
+							dh = height - cls.glconfig.vidHeight;
+							if( dw < 0 ) dw = -dw;
+							if( dh < 0 ) dh = -dh;
+							if( dw <= 2 && dh <= 2 )
+							{
+								break;
+							}
+
+							if( width < 320 || height < 240 )
 							{
 								break;
 							}
@@ -1221,6 +1509,96 @@ void IN_Frame( void )
 		vidRestartTime = 0;
 		Cbuf_AddText( "vid_restart\n" );
 	}
+}
+
+/*
+===============
+IN_ToggleFullscreenInPlace
+
+Apply a pending r_fullscreen change without destroying the GL context.
+Needed on Wayland with overlays (MangoHud): vid_restart SIGSEGVs while
+recreating the window/context after a fullscreen toggle.
+Returns qtrue if the toggle was handled (caller should skip vid_restart).
+===============
+*/
+qboolean IN_ToggleFullscreenInPlace( void )
+{
+	const char *videoDriver;
+	int want, have;
+	int prevW, prevH, w, h;
+	int dw, dh;
+	Uint32 flag = 0;
+	qboolean fsPending;
+
+	if( !SDL_window )
+		return qfalse;
+
+	// Real mode/renderer changes still need a full restart. Peek only — Cvar_Get
+	// would apply latches and make these checks always false.
+	if( Cvar_LatchedPending( "r_mode" ) ||
+		Cvar_LatchedPending( "r_customwidth" ) ||
+		Cvar_LatchedPending( "r_customheight" ) ||
+		Cvar_LatchedPending( "cl_renderer" ) )
+		return qfalse;
+
+	fsPending = Cvar_LatchedPending( "r_fullscreen" );
+	want = Cvar_VariableLatchedInteger( "r_fullscreen" );
+	have = !!( SDL_GetWindowFlags( SDL_window ) & SDL_WINDOW_FULLSCREEN );
+
+	// Window already matches desired FS (e.g. EndFrame/Alt+Enter did it). Clear
+	// any leftover latch and skip the destructive GL recreate (SIGSEGV under MangoHud).
+	if( !!want == !!have )
+	{
+		if( !fsPending )
+			return qfalse;
+		Cvar_Set( "r_fullscreen", want ? "1" : "0" );
+		cls.glconfig.isFullscreen = want ? qtrue : qfalse;
+		Com_Printf( "Fullscreen already %s (skip vid_restart)\n", want ? "on" : "off" );
+		return qtrue;
+	}
+
+	videoDriver = SDL_GetCurrentVideoDriver();
+	if( want )
+	{
+		if( videoDriver && !Q_stricmp( videoDriver, "wayland" ) )
+			flag = SDL_WINDOW_FULLSCREEN_DESKTOP;
+		else
+			flag = SDL_WINDOW_FULLSCREEN;
+	}
+
+	prevW = cls.glconfig.vidWidth;
+	prevH = cls.glconfig.vidHeight;
+
+	if( SDL_SetWindowFullscreen( SDL_window, flag ) < 0 )
+	{
+		// Never fall through to vid_restart for a fullscreen-only apply: recreating
+		// the GL context under MangoHud/Wayland SIGSEGVs.
+		Com_Printf( "IN_ToggleFullscreenInPlace: SDL_SetWindowFullscreen failed: %s\n",
+			SDL_GetError() );
+		Cvar_Set( "r_fullscreen", have ? "1" : "0" );
+		return qtrue;
+	}
+
+	w = prevW;
+	h = prevH;
+	SDL_GetWindowSize( SDL_window, &w, &h );
+	dw = w - prevW;
+	dh = h - prevH;
+	if( w > 0 && h > 0 && ( abs( dw ) > 2 || abs( dh ) > 2 ) )
+	{
+		// Keep the in-place toggle; updating glconfig beats a MangoHud crash.
+		cls.glconfig.vidWidth = w;
+		cls.glconfig.vidHeight = h;
+		Com_Printf( "Fullscreen size tweak %dx%d -> %dx%d (in-place)\n",
+			prevW, prevH, w, h );
+	}
+
+	Cvar_Set( "r_fullscreen", want ? "1" : "0" );
+	cls.glconfig.isFullscreen = want ? qtrue : qfalse;
+
+	Com_Printf( "Fullscreen %s (in-place, no vid_restart)\n", want ? "enabled" : "disabled" );
+	IN_Restart();
+	return qtrue;
 }
 
 /*

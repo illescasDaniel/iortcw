@@ -225,6 +225,21 @@ float CalcLightAttenuation(float point, float normDist)
 	return attenuation;
 }
 
+#if defined(USE_LIGHT_VECTOR)
+// codmod: spotlight cone. lightToFrag is normalized direction from light → fragment.
+// u_LightSpot.w < -1.5 → omnidirectional (disabled).
+uniform vec4 u_LightSpot;
+
+float CalcSpotAttenuation(vec3 lightToFrag)
+{
+	if (u_LightSpot.w < -1.5)
+		return 1.0;
+	float cd = dot(normalize(u_LightSpot.xyz), lightToFrag);
+	float inner = mix(u_LightSpot.w, 1.0, 0.35);
+	return smoothstep(u_LightSpot.w, inner, cd);
+}
+#endif
+
 #if defined(USE_BOX_CUBEMAP_PARALLAX)
 vec4 hitCube(vec3 ray, vec3 pos, vec3 invSize, float lod, samplerCube tex)
 {
@@ -322,6 +337,7 @@ void main()
 
   #if defined(USE_LIGHT_VECTOR)
 	attenuation  = CalcLightAttenuation(float(var_LightDir.w > 0.0), var_LightDir.w / sqrLightDist);
+	attenuation *= CalcSpotAttenuation(-L);
   #else
 	attenuation  = 1.0;
   #endif

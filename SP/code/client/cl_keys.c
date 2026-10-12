@@ -1829,6 +1829,51 @@ Returns a string (either a single ascii char, a K_* name, or a 0x11 hex string) 
 given keynum.
 ===================
 */
+
+// codmod: Controls UI uses bTranslate=true — show family-friendly pad labels.
+// Bind save/load uses bTranslate=false and keeps PAD0_* names.
+static const char *Key_PadFriendlyName( int keynum ) {
+	cvar_t *fam;
+	qboolean ps;
+
+	if ( keynum < K_PAD0_A || keynum > K_PAD0_TOUCHPAD ) {
+		return NULL;
+	}
+
+	fam = Cvar_Get( "in_gamepadFamily", "none", CVAR_ROM );
+	ps = ( fam->string[0] == 'p' || fam->string[0] == 'P' ) ? qtrue : qfalse;
+
+	switch ( keynum ) {
+	case K_PAD0_A: return ps ? "Cross" : "A";
+	case K_PAD0_B: return ps ? "Circle" : "B";
+	case K_PAD0_X: return ps ? "Square" : "X";
+	case K_PAD0_Y: return ps ? "Triangle" : "Y";
+	case K_PAD0_BACK: return ps ? "Share" : "View";
+	case K_PAD0_GUIDE: return ps ? "PS" : "Guide";
+	case K_PAD0_START: return ps ? "Options" : "Menu";
+	case K_PAD0_LEFTSTICK_CLICK: return ps ? "L3" : "LS";
+	case K_PAD0_RIGHTSTICK_CLICK: return ps ? "R3" : "RS";
+	case K_PAD0_LEFTSHOULDER: return ps ? "L1" : "LB";
+	case K_PAD0_RIGHTSHOULDER: return ps ? "R1" : "RB";
+	case K_PAD0_DPAD_UP: return "D-Up";
+	case K_PAD0_DPAD_DOWN: return "D-Down";
+	case K_PAD0_DPAD_LEFT: return "D-Left";
+	case K_PAD0_DPAD_RIGHT: return "D-Right";
+	case K_PAD0_LEFTSTICK_LEFT: return "LS Left";
+	case K_PAD0_LEFTSTICK_RIGHT: return "LS Right";
+	case K_PAD0_LEFTSTICK_UP: return "LS Up";
+	case K_PAD0_LEFTSTICK_DOWN: return "LS Down";
+	case K_PAD0_RIGHTSTICK_LEFT: return "RS Left";
+	case K_PAD0_RIGHTSTICK_RIGHT: return "RS Right";
+	case K_PAD0_RIGHTSTICK_UP: return "RS Up";
+	case K_PAD0_RIGHTSTICK_DOWN: return "RS Down";
+	case K_PAD0_LEFTTRIGGER: return ps ? "L2" : "LT";
+	case K_PAD0_RIGHTTRIGGER: return ps ? "R2" : "RT";
+	case K_PAD0_TOUCHPAD: return "Touchpad";
+	default: return NULL;
+	}
+}
+
 char *Key_KeynumToString( int keynum, qboolean bTranslate ) {
 	keyname_t   *kn;
 	static char tinystr[5];
@@ -1853,6 +1898,12 @@ char *Key_KeynumToString( int keynum, qboolean bTranslate ) {
 		}
 	}
 
+	if ( bTranslate ) {
+		const char *friendly = Key_PadFriendlyName( keynum );
+		if ( friendly ) {
+			return (char *)friendly;
+		}
+	}
 
 	kn = keynames;    //init to english
 	if ( bTranslate ) {

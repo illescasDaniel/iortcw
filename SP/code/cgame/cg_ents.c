@@ -2611,7 +2611,10 @@ void CG_AddPacketEntities( void ) {
 		if ( delta == 0 ) {
 			cg.frameInterpolation = 0;
 		} else {
-			cg.frameInterpolation = (float)( cg.time - cg.snap->serverTime ) / delta;
+			cg.frameInterpolation = ( (float)( cg.time - cg.snap->serverTime ) + ( cg_subMsecLerp.integer ? cg.timeFracUs * 0.001f : 0 ) ) / delta;
+			if ( cg.frameInterpolation > 1 ) {
+				cg.frameInterpolation = 1;
+			}
 		}
 	} else {
 		cg.frameInterpolation = 0;  // actually, it should never be used, because

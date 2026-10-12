@@ -45,6 +45,28 @@ cvar_t *s_alInputDevice;
 cvar_t *s_alAvailableDevices;
 cvar_t *s_alAvailableInputDevices;
 cvar_t *s_alTalkAnims;
+cvar_t *s_alHRTF;
+cvar_t *s_alHRTFProfile;
+cvar_t *s_alAvailableHRTFs;
+
+// ALC_SOFT_HRTF / ALC_SOFT_output_mode (OpenAL Soft); the bundled alext.h predates them.
+#ifndef ALC_HRTF_SOFT
+#define ALC_HRTF_SOFT                  0x1992
+#define ALC_HRTF_STATUS_SOFT           0x1993
+#define ALC_NUM_HRTF_SPECIFIERS_SOFT   0x1994
+#define ALC_HRTF_SPECIFIER_SOFT        0x1995
+#define ALC_HRTF_ID_SOFT               0x1996
+#endif
+#ifndef ALC_OUTPUT_MODE_SOFT
+#define ALC_OUTPUT_MODE_SOFT           0x19AC
+#define ALC_STEREO_HRTF_SOFT           0x1501
+#endif
+
+typedef const ALCchar *(ALC_APIENTRY *alcGetStringiSOFT_t)(ALCdevice *device, ALCenum paramName, ALCsizei index);
+typedef ALCboolean (ALC_APIENTRY *alcResetDeviceSOFT_t)(ALCdevice *device, const ALCint *attribs);
+static alcGetStringiSOFT_t qalcGetStringiSOFT;
+static alcResetDeviceSOFT_t qalcResetDeviceSOFT;
+static qboolean hrtf_ext = qfalse;
 
 static qboolean enumeration_ext = qfalse;
 static qboolean enumeration_all_ext = qfalse;
@@ -2404,6 +2426,74 @@ void S_AL_StopAllSounds( void )
 
 /*
 =================
+S_AL_HRTFAttrs
+
+Context attributes for s_alHRTF (0 off, anything else on) and
+s_alHRTFProfile. Returns the number of ints written (terminating 0 included).
+=================
+*/
+static int S_AL_HRTFAttrs( ALCint *attrs )
+{
+	int n = 0;
+
+	if( !hrtf_ext )
+	{
+		attrs[n++] = 0;
+		return n;
+	}
+
+	if( s_alHRTF->integer == 0 )
+	{
+		attrs[n++] = ALC_HRTF_SOFT;
+		attrs[n++] = ALC_FALSE;
+	}
+	else
+	{
+		attrs[n++] = ALC_HRTF_SOFT;
+		attrs[n++] = ALC_TRUE;
+		if( qalcIsExtensionPresent( alDevice, "ALC_SOFT_output_mode" ) )
+		{
+			attrs[n++] = ALC_OUTPUT_MODE_SOFT;
+			attrs[n++] = ALC_STEREO_HRTF_SOFT;
+		}
+	}
+
+	if( s_alHRTF->integer != 0 && s_alHRTFProfile->string[0] && qalcGetStringiSOFT )
+	{
+		ALCint count = 0, i;
+		qalcGetIntegerv( alDevice, ALC_NUM_HRTF_SPECIFIERS_SOFT, 1, &count );
+		for( i = 0; i < count; i++ )
+		{
+			const char *name = qalcGetStringiSOFT( alDevice, ALC_HRTF_SPECIFIER_SOFT, i );
+			if( name && !Q_stricmp( name, s_alHRTFProfile->string ) )
+			{
+				attrs[n++] = ALC_HRTF_ID_SOFT;
+				attrs[n++] = i;
+				break;
+			}
+		}
+	}
+
+	attrs[n++] = 0;
+	return n;
+}
+
+/*
+=================
+S_AL_HRTFStatus
+=================
+*/
+static const char *S_AL_HRTFStatus( void )
+{
+	ALCint on = 0;
+	if( !hrtf_ext )
+		return "unsupported";
+	qalcGetIntegerv( alDevice, ALC_HRTF_SOFT, 1, &on );
+	return on ? "enabled" : "disabled";
+}
+
+/*
+=================
 S_AL_Respatialize
 =================
 */
@@ -2482,6 +2572,22 @@ void S_AL_Update( void )
 	{
 		qalSpeedOfSound(s_alDopplerSpeed->value);
 		s_alDopplerSpeed->modified = qfalse;
+	}
+
+	// HRTF: re-open the device output with the new attributes, no snd_restart needed.
+	if( s_alHRTF->modified || s_alHRTFProfile->modified )
+	{
+		if( hrtf_ext && qalcResetDeviceSOFT )
+		{
+			ALCint attrs[16];
+			S_AL_HRTFAttrs( attrs );
+			if( !qalcResetDeviceSOFT( alDevice, attrs ) )
+				Com_Printf( "OpenAL: HRTF reset failed.\n" );
+			else
+				Com_Printf( "OpenAL: HRTF %s\n", S_AL_HRTFStatus() );
+		}
+		s_alHRTF->modified = qfalse;
+		s_alHRTFProfile->modified = qfalse;
 	}
 
 	// Clear the modified flags on the other cvars
@@ -2588,6 +2694,10 @@ static void S_AL_SoundInfo(void)
 	if(enumeration_all_ext || enumeration_ext)
 		Com_Printf("  Available Devices:\n%s", s_alAvailableDevices->string);
 
+	Com_Printf("  HRTF:           %s\n", S_AL_HRTFStatus());
+	if(hrtf_ext)
+		Com_Printf("  Available HRTF profiles:\n%s", s_alAvailableHRTFs->string);
+
 #ifdef USE_VOIP
 	if(capture_ext)
 	{
@@ -2677,6 +2787,10 @@ qboolean S_AL_Init( soundInterface_t *si )
 	s_alRolloff = Cvar_Get( "s_alRolloff", "1.3", CVAR_ARCHIVE);
 	s_alGraceDistance = Cvar_Get("s_alGraceDistance", "512", CVAR_ARCHIVE);
 	s_alTalkAnims = Cvar_Get("s_alTalkAnims", "160", CVAR_ARCHIVE);
+
+	// 0 = off, 1 = on (binaural stereo). OpenAL's own "auto" mode never triggers reliably, so it is not offered.
+	s_alHRTF = Cvar_Get( "s_alHRTF", "1", CVAR_ARCHIVE );
+	s_alHRTFProfile = Cvar_Get( "s_alHRTFProfile", "", CVAR_ARCHIVE );
 
 	s_alDriver = Cvar_Get( "s_alDriver", ALDRIVER_DEFAULT, CVAR_LATCH | CVAR_PROTECTED );
 
@@ -2776,8 +2890,44 @@ qboolean S_AL_Init( soundInterface_t *si )
 		return qfalse;
 	}
 
+	// HRTF support (ALC_SOFT_HRTF) and the profile list
+	{
+		char hrtfnames[4096] = "";
+		ALCint count = 0, i;
+
+		hrtf_ext = qalcIsExtensionPresent( alDevice, "ALC_SOFT_HRTF" );
+		qalcGetStringiSOFT = NULL;
+		qalcResetDeviceSOFT = NULL;
+		if( hrtf_ext )
+		{
+			qalcGetStringiSOFT = (alcGetStringiSOFT_t)qalcGetProcAddress( alDevice, "alcGetStringiSOFT" );
+			qalcResetDeviceSOFT = (alcResetDeviceSOFT_t)qalcGetProcAddress( alDevice, "alcResetDeviceSOFT" );
+			if( !qalcGetStringiSOFT )
+				hrtf_ext = qfalse;
+		}
+		if( hrtf_ext )
+		{
+			qalcGetIntegerv( alDevice, ALC_NUM_HRTF_SPECIFIERS_SOFT, 1, &count );
+			for( i = 0; i < count; i++ )
+			{
+				const char *name = qalcGetStringiSOFT( alDevice, ALC_HRTF_SPECIFIER_SOFT, i );
+				if( name )
+				{
+					Q_strcat( hrtfnames, sizeof( hrtfnames ), name );
+					Q_strcat( hrtfnames, sizeof( hrtfnames ), "\n" );
+				}
+			}
+		}
+		s_alAvailableHRTFs = Cvar_Get( "s_alAvailableHRTFs", hrtfnames, CVAR_ROM | CVAR_NORESTART );
+		Cvar_Set( "s_alAvailableHRTFs", hrtfnames );
+	}
+
 	// Create OpenAL context
-	alContext = qalcCreateContext( alDevice, NULL );
+	{
+		ALCint attrs[16];
+		S_AL_HRTFAttrs( attrs );
+		alContext = qalcCreateContext( alDevice, attrs );
+	}
 	if( !alContext )
 	{
 		QAL_Shutdown( );
@@ -2786,6 +2936,9 @@ qboolean S_AL_Init( soundInterface_t *si )
 		return qfalse;
 	}
 	qalcMakeContextCurrent( alContext );
+	s_alHRTF->modified = qfalse;
+	s_alHRTFProfile->modified = qfalse;
+	Com_Printf( "OpenAL HRTF: %s\n", S_AL_HRTFStatus() );
 
 	// Initialize sources, buffers, music
 	S_AL_BufferInit( );

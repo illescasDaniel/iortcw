@@ -55,6 +55,15 @@ void R_TransformDlights( int count, dlight_t *dl, orientationr_t *or ) {
 		dl->transformed[0] = DotProduct( temp, or->axis[0] );
 		dl->transformed[1] = DotProduct( temp, or->axis[1] );
 		dl->transformed[2] = DotProduct( temp, or->axis[2] );
+
+		// codmod: spot direction into local space (for ProjectDlightTexture)
+		if ( dl->spotCosOuter > -1.5f ) {
+			dl->transformedDir[0] = DotProduct( dl->dir, or->axis[0] );
+			dl->transformedDir[1] = DotProduct( dl->dir, or->axis[1] );
+			dl->transformedDir[2] = DotProduct( dl->dir, or->axis[2] );
+		} else {
+			VectorClear( dl->transformedDir );
+		}
 	}
 }
 

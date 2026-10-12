@@ -2352,10 +2352,13 @@ static void CG_DrawCrosshair( void ) {
 	int weapnum;                // DHM - Nerve
 	vec4_t hcolor = {1, 1, 1, 1};
 	qboolean friendInSights = qfalse;
+	qboolean codLeanFire;    // codmod: cod_leanAllowFire keeps the crosshair up while leaning (2.3.2)
 
 	if ( cg.renderingThirdPerson ) {
 		return;
 	}
+
+	codLeanFire = ( bg_cod.enable && bg_cod.leanEnable && bg_cod.leanAllowFire ) ? qtrue : qfalse;
 
 	hcolor[3] = cg_crosshairAlpha.value;    //----(SA)	added
 
@@ -2392,7 +2395,6 @@ static void CG_DrawCrosshair( void ) {
 
 		// weapons that get no reticle
 	case WP_NONE:       // no weapon, no crosshair
-	case WP_GARAND:
 		if ( cg.zoomedBinoc ) {
 			CG_DrawBinocReticle();
 		}
@@ -2412,7 +2414,7 @@ static void CG_DrawCrosshair( void ) {
 		}
 
 		if ( !friendInSights ) {
-			if ( !cg.snap->ps.leanf ) {     // no crosshair while leaning
+			if ( !cg.snap->ps.leanf || codLeanFire ) {     // no crosshair while leaning
 				CG_FillRect( 319, 239, 2, 2, hcolor );      // dot
 			}
 			return;
@@ -2451,19 +2453,23 @@ static void CG_DrawCrosshair( void ) {
 		return;
 	}
 
-	// mauser only gets crosshair if you don't have the scope (I don't like this, but it's a test)
-	if ( cg.weaponSelect == WP_MAUSER ) {
-		if ( COM_BitCheck( cg.predictedPlayerState.weapons, WP_SNIPERRIFLE ) ) {
-			return;
-		}
-	}
+	// codmod: show hip crosshair on Mauser/Garand even when the scope is owned
+	// (vanilla hid Mauser; Garand was in the no-reticle list). Scoped alts still use
+	// CG_DrawWeapReticle above.
 
 	if ( !cg_drawCrosshair.integer ) {	//----(SA)	moved down so it doesn't keep the scoped weaps from drawing reticles
 		return;
 	}
 
 	// no crosshair while leaning
-	if ( cg.snap->ps.leanf ) {
+	if ( cg.snap->ps.leanf && !codLeanFire ) {
+		return;
+	}
+
+	// codmod: hide crosshair while prone-crawling (fire blocked) (phase 6b)
+	if ( bg_cod.enable && bg_cod.proneEnable
+		 && ( cg.snap->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE_MOVING )
+		 && !bg_cod.proneCrawlFire ) {
 		return;
 	}
 
@@ -2479,7 +2485,39 @@ static void CG_DrawCrosshair( void ) {
 
 	// set color based on health
 	if ( cg_crosshairHealth.integer ) {
-		CG_ColorForHealth( hcolor );
+		if ( bg_cod.enable && bg_cod.hudEnable && bg_cod.hudHealthCrosshair ) {
+			CG_CodColorForHealth( hcolor );
+		} else {
+			CG_ColorForHealth( hcolor );
+		}
+	}
+	hcolor[3] = cg_crosshairAlpha.value;
+
+	// codmod: CoD 4-post bloom reticle (phase 5c follow-up). Handles ADS post-fade +
+	// interim center dot (cod_adsCrosshair 1). Style 0 falls through to vanilla shader.
+	if ( bg_cod.enable && bg_cod.crosshairStyle ) {
+		if ( friendInSights ) {
+			hcolor[0] = 0.2f;
+			hcolor[1] = 0.9f;
+			hcolor[2] = 0.2f;
+		}
+		CG_CodDrawCrosshair( hcolor );
+		return;
+	}
+
+	// codmod: while ADS, replace the hip crosshair with a center dot (phase 3.7 interim).
+	// cod_adsCrosshair 1 = dot; 2 = hide. cod_adsCrosshairForce keeps the normal reticle
+	// for iron-sight alignment (handled inside CG_CodDrawCrosshair when style is on).
+	if ( bg_cod.enable && bg_cod.adsEnable && bg_cod.adsCrosshair > 0
+		 && !bg_cod.adsCrosshairForce && CG_CodAdsFrac() > 0.5f ) {
+		if ( bg_cod.adsCrosshair >= 2 ) {
+			return;
+		}
+		CG_FillRect( 319, 239, 2, 2, hcolor );
+		return;
+	}
+
+	if ( cg_crosshairHealth.integer ) {
 		trap_R_SetColor( hcolor );
 	} else {
 		trap_R_SetColor( NULL );
@@ -2532,6 +2570,7 @@ static void CG_DrawCrosshair3D( void ) {
 	int weapnum;                // DHM - Nerve
 	vec4_t hcolor = {1, 1, 1, 1};
 	qboolean friendInSights = qfalse;
+	qboolean codLeanFire;    // codmod: cod_leanAllowFire keeps the crosshair up while leaning (2.3.2)
 
 	trace_t trace;
 	vec3_t endpos;
@@ -2542,6 +2581,8 @@ static void CG_DrawCrosshair3D( void ) {
 	if ( cg.renderingThirdPerson ) {
 		return;
 	}
+
+	codLeanFire = ( bg_cod.enable && bg_cod.leanEnable && bg_cod.leanAllowFire ) ? qtrue : qfalse;
 
 	hcolor[3] = cg_crosshairAlpha.value;    //----(SA)	added
 
@@ -2575,7 +2616,6 @@ static void CG_DrawCrosshair3D( void ) {
 
 		// weapons that get no reticle
 	case WP_NONE:       // no weapon, no crosshair
-	case WP_GARAND:
 		if ( cg.zoomedBinoc ) {
 			CG_DrawBinocReticle();
 		}
@@ -2595,7 +2635,7 @@ static void CG_DrawCrosshair3D( void ) {
 		}
 
 		if ( !friendInSights ) {
-			if ( !cg.snap->ps.leanf ) {     // no crosshair while leaning
+			if ( !cg.snap->ps.leanf || codLeanFire ) {     // no crosshair while leaning
 				CG_FillRect( 319, 239, 2, 2, hcolor );      // dot
 			}
 			return;
@@ -2634,20 +2674,23 @@ static void CG_DrawCrosshair3D( void ) {
 		return;
 	}
 
-	// mauser only gets crosshair if you don't have the scope (I don't like this, but it's a test)
-	if ( cg.weaponSelect == WP_MAUSER ) {
-		if ( COM_BitCheck( cg.predictedPlayerState.weapons, WP_SNIPERRIFLE ) ) {
-			return;
-		}
-	}
-
+	// codmod: show hip crosshair on Mauser/Garand even when the scope is owned
+	// (vanilla hid Mauser; Garand was in the no-reticle list). Scoped alts still use
+	// CG_DrawWeapReticle above.
 
 	if ( !cg_drawCrosshair.integer ) {	//----(SA)	moved down so it doesn't keep the scoped weaps from drawing reticles
 		return;
 	}
 
 	// no crosshair while leaning
-	if ( cg.snap->ps.leanf ) {
+	if ( cg.snap->ps.leanf && !codLeanFire ) {
+		return;
+	}
+
+	// codmod: hide crosshair while prone-crawling (phase 6b)
+	if ( bg_cod.enable && bg_cod.proneEnable
+		 && ( cg.snap->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE_MOVING )
+		 && !bg_cod.proneCrawlFire ) {
 		return;
 	}
 
@@ -3462,6 +3505,8 @@ CG_DrawFlashBlendBehindHUD
 */
 static void CG_DrawFlashBlendBehindHUD( void ) {
 	CG_DrawFlashZoomTransition();
+	// codmod: phase 5c — persistent low-HP blood behind chrome
+	CG_CodDrawLowHealthBlood();
 }
 
 
@@ -3777,8 +3822,10 @@ static void CG_Draw2D(stereoFrame_t stereoFrame) {
 		// don't draw any status if dead
 		if ( cg.snap->ps.stats[STAT_HEALTH] > 0 ) {
 
-			if(stereoFrame == STEREO_CENTER)
+			if(stereoFrame == STEREO_CENTER) {
 				CG_DrawCrosshair();
+				CG_CodDrawHitMarker();  // codmod: E9 (after crosshair so X sits on top)
+			}
 
 			if ( cg_drawStatus.integer ) {
 				if ( cg_fixedAspect.integer == 2 ) {
@@ -3816,6 +3863,11 @@ static void CG_Draw2D(stereoFrame_t stereoFrame) {
 	if ( !cg_paused.integer ) {
 		CG_DrawUpperRight(stereoFrame);
 	}
+
+	// codmod: phase 2.0 debug overlay ("cod_debugHud 1"), see cg_cod.c
+	CG_CodDrawDebugHud();
+	// codmod: sectioned tune menu ("/cod_menu"), see cg_cod_menu.c
+	CG_CodDrawDebugMenu();
 
 	if ( cg_oldWolfUI.integer ) {
 		CG_DrawLowerRight();

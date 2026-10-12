@@ -34,6 +34,7 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 #include "g_local.h"
+#include "bg_cod.h"     // codmod: phase 5b health regen pause on hurt
 
 /*
 ============
@@ -720,6 +721,15 @@ qboolean IsHeadShot( gentity_t *targ, gentity_t *attacker, vec3_t dir, vec3_t po
 		if ( ( targ->r.svFlags & SVF_CASTAI ) && trap_GetTag( targ->s.number, "tag_head", &or ) ) {
 			VectorCopy( or.origin, head->r.currentOrigin );
 			VectorMA( head->r.currentOrigin, 6, or.axis[2], head->r.currentOrigin );    // tag is at base of neck
+		} else if ( !targ->aiCharacter && bg_cod.enable && bg_cod.proneEnable
+					&& ( targ->client->ps.stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
+			// codmod: prone head box (phase 6b) — eye-ish height pushed forward along yaw
+			vec3_t forward;
+			head->r.currentOrigin[2] += bg_cod.proneViewHeight + 4.0f;
+			AngleVectors( targ->client->ps.viewangles, forward, NULL, NULL );
+			forward[2] = 0;
+			VectorNormalize( forward );
+			VectorMA( head->r.currentOrigin, 16.0f, forward, head->r.currentOrigin );
 		} else if ( targ->client->ps.pm_flags & PMF_DUCKED ) { // closer fake offset for 'head' box when crouching
 			head->r.currentOrigin[2] += targ->client->ps.crouchViewHeight + 8; // JPW NERVE 16 is kludge to get head height to match up
 		}
@@ -894,6 +904,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	int take;
 	int asave;
 	int knockback;
+	qboolean wasHeadshot = qfalse;  // codmod: E9 hit markers
 
 	if ( !targ->takedamage ) {
 		return;
@@ -1177,6 +1188,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 
 
 	if ( IsHeadShot( targ, attacker, dir, point, mod ) ) {
+		wasHeadshot = qtrue;    // codmod: E9
 		// JPW NERVE -- different headshot behavior in multiplayer
 		if ( g_gametype.integer != GT_SINGLE_PLAYER ) {
 			if ( take * 2 < 50 ) { // head shots, all weapons, do minimum 50 points damage
@@ -1294,6 +1306,19 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 
 	// do the damage
 	if ( take ) {
+		// codmod: E9 hit markers — SP never bumped PERS_HITS (MP-only above), so cgame
+		// never saw damage dealt. Count player→living-enemy hits; headshots also bump
+		// PERS_GAUNTLET_FRAG_COUNT (unused in SP) so the client can pick a different tick.
+		if ( bg_cod.enable && bg_cod.hitMarkerEnable
+			 && attacker && attacker->client && !attacker->aiCharacter
+			 && targ->client && targ->aiCharacter && targ != attacker
+			 && targ->health > 0 ) {
+			attacker->client->ps.persistant[PERS_HITS]++;
+			if ( wasHeadshot ) {
+				attacker->client->ps.persistant[PERS_GAUNTLET_FRAG_COUNT]++;
+			}
+		}
+
 		targ->health = targ->health - take;
 
 		// Ridah, can't gib with bullet weapons (except VENOM)
@@ -1302,6 +1327,13 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 				if ( targ->aiCharacter != AICHAR_ZOMBIE ) { // zombie needs to be able to gib so we can kill him (although he doesn't actually GIB, he just dies)
 					targ->health = GIB_HEALTH + 1;
 				}
+			}
+			// codmod: pause CoD health regen on real damage (player only). (phase 5b)
+			if ( !targ->client->ps.aiChar && !targ->aiCharacter
+				 && bg_cod.enable && bg_cod.vitalsEnable
+				 && bg_cod.healthRegenEnable && bg_cod.healthRegenPauseHurt ) {
+				targ->client->codLastDamageTime = level.time;
+				targ->client->codHealthRegenFrac = 0;
 			}
 		}
 

@@ -49,6 +49,8 @@ typedef struct scrollInfo_s {
 
 static scrollInfo_t scrollInfo;
 
+static void UI_RebuildVidModeMulti( itemDef_t *item );
+
 static void ( *captureFunc )( void *p ) = 0;
 static void *captureData = NULL;
 static itemDef_t *itemCapture = NULL;   // item that has the mouse captured ( if any )
@@ -1319,6 +1321,8 @@ void Menus_CloseByName( const char *p ) {
 	menuDef_t *menu = Menus_FindByName( p );
 	if ( menu != NULL ) {
 		Menu_RunCloseScript( menu );
+		Menu_ClearFocus( menu );
+		menu->cursorItem = -1;
 		menu->window.flags &= ~( WINDOW_VISIBLE | WINDOW_HASFOCUS );
 	}
 }
@@ -1327,6 +1331,8 @@ void Menus_CloseAll( void ) {
 	int i;
 	for ( i = 0; i < menuCount; i++ ) {
 		Menu_RunCloseScript( &Menus[i] );
+		Menu_ClearFocus( &Menus[i] );
+		Menus[i].cursorItem = -1;
 		Menus[i].window.flags &= ~( WINDOW_HASFOCUS | WINDOW_VISIBLE );
 	}
 }
@@ -1575,14 +1581,24 @@ void Script_SetFocus( itemDef_t *item, char **args ) {
 
 	if ( String_Parse( args, &name ) ) {
 		focusItem = Menu_FindItemByName( item->parent, name );
-		if ( focusItem && !( focusItem->window.flags & WINDOW_DECORATION ) && !( focusItem->window.flags & WINDOW_HASFOCUS ) ) {
-			Menu_ClearFocus( item->parent );
+		if ( focusItem && !( focusItem->window.flags & WINDOW_DECORATION ) ) {
+			menuDef_t *parent = (menuDef_t *)item->parent;
+			int i;
+
+			Menu_ClearFocus( parent );
 			focusItem->window.flags |= WINDOW_HASFOCUS;
 			if ( focusItem->onFocus ) {
 				Item_RunScript( focusItem, focusItem->onFocus );
 			}
 			if ( DC->Assets.itemFocusSound ) {
 				DC->startLocalSound( DC->Assets.itemFocusSound, CHAN_LOCAL_SOUND );
+			}
+			// Keep cursorItem in sync so pad/keyboard next/prev match the painted focus.
+			for ( i = 0; i < parent->itemCount; i++ ) {
+				if ( parent->items[i] == focusItem ) {
+					parent->cursorItem = i;
+					break;
+				}
 			}
 		}
 	}
@@ -1777,7 +1793,8 @@ qboolean Item_SetFocus( itemDef_t *item, float x, float y ) {
 
 	oldFocus = Menu_ClearFocus( item->parent );
 
-	if ( item->type == ITEM_TYPE_TEXT ) {
+	if ( item->type == ITEM_TYPE_TEXT && !item->action ) {
+		// Pure text label: only focus when the cursor is on the painted glyphs.
 		rectDef_t r;
 		r = item->textRect;
 		r.y -= r.h;
@@ -1796,6 +1813,7 @@ qboolean Item_SetFocus( itemDef_t *item, float x, float y ) {
 			}
 		}
 	} else {
+		// Buttons, actionable text rows, editfields, etc. — window rect (pad autofocus).
 		item->window.flags |= WINDOW_HASFOCUS;
 		if ( item->onFocus ) {
 			Item_RunScript( item, item->onFocus );
@@ -2131,7 +2149,7 @@ qboolean Item_ListBox_HandleKey( itemDef_t *item, int key, qboolean down, qboole
 		max = Item_ListBox_MaxScroll( item );
 		if ( item->window.flags & WINDOW_HORIZONTAL ) {
 			viewmax = ( item->window.rect.w / listPtr->elementWidth );
-			if ( key == K_LEFTARROW || key == K_KP_LEFTARROW ) {
+			if ( key == K_LEFTARROW || key == K_KP_LEFTARROW || key == K_PAD0_DPAD_LEFT ) {
 				if ( !listPtr->notselectable ) {
 					listPtr->cursorPos--;
 					if ( listPtr->cursorPos < 0 ) {
@@ -2153,7 +2171,7 @@ qboolean Item_ListBox_HandleKey( itemDef_t *item, int key, qboolean down, qboole
 				}
 				return qtrue;
 			}
-			if ( key == K_RIGHTARROW || key == K_KP_RIGHTARROW ) {
+			if ( key == K_RIGHTARROW || key == K_KP_RIGHTARROW || key == K_PAD0_DPAD_RIGHT ) {
 				if ( !listPtr->notselectable ) {
 					listPtr->cursorPos++;
 					if ( listPtr->cursorPos < listPtr->startPos ) {
@@ -2177,7 +2195,7 @@ qboolean Item_ListBox_HandleKey( itemDef_t *item, int key, qboolean down, qboole
 			}
 		} else {
 			viewmax = ( item->window.rect.h / listPtr->elementHeight );
-			if ( key == K_UPARROW || key == K_KP_UPARROW ) {
+			if ( key == K_UPARROW || key == K_KP_UPARROW || key == K_PAD0_DPAD_UP ) {
 				if ( !listPtr->notselectable ) {
 					listPtr->cursorPos--;
 					if ( listPtr->cursorPos < 0 ) {
@@ -2199,7 +2217,7 @@ qboolean Item_ListBox_HandleKey( itemDef_t *item, int key, qboolean down, qboole
 				}
 				return qtrue;
 			}
-			if ( key == K_DOWNARROW || key == K_KP_DOWNARROW ) {
+			if ( key == K_DOWNARROW || key == K_KP_DOWNARROW || key == K_PAD0_DPAD_DOWN ) {
 				if ( !listPtr->notselectable ) {
 					listPtr->cursorPos++;
 					if ( listPtr->cursorPos < listPtr->startPos ) {
@@ -2427,6 +2445,7 @@ const char *Item_Multi_Setting( itemDef_t *item ) {
 
 qboolean Item_Multi_HandleKey( itemDef_t *item, int key ) {
 	multiDef_t *multiPtr = (multiDef_t*)item->typeData;
+	UI_RebuildVidModeMulti( item );
 	if ( multiPtr ) {
 		if (item->cvar) {
 			int select = 0;
@@ -2462,6 +2481,73 @@ qboolean Item_Multi_HandleKey( itemDef_t *item, int key ) {
 	return qfalse;
 }
 
+// codmod: keep the cursor inside [0,len] and the visible window [paintOffset, paintOffset+maxPaintChars].
+static void Item_TextField_FixScroll( itemDef_t *item, int len ) {
+	editFieldDef_t *editPtr = (editFieldDef_t*)item->typeData;
+	int window = editPtr->maxPaintChars;
+
+	if ( item->cursorPos > len ) {
+		item->cursorPos = len;
+	}
+	if ( item->cursorPos < 0 ) {
+		item->cursorPos = 0;
+	}
+	if ( window <= 0 || window > MAX_EDITFIELD ) {
+		window = MAX_EDITFIELD;
+	}
+	if ( item->cursorPos < editPtr->paintOffset ) {
+		editPtr->paintOffset = item->cursorPos;
+	}
+	if ( item->cursorPos > editPtr->paintOffset + window ) {
+		editPtr->paintOffset = item->cursorPos - window;
+	}
+	if ( editPtr->paintOffset > len ) {
+		editPtr->paintOffset = len;
+	}
+	if ( editPtr->paintOffset < 0 ) {
+		editPtr->paintOffset = 0;
+	}
+}
+
+// codmod: enter edit mode with the cursor at the end of the value (or at the clicked glyph for mouse entry).
+static void Item_TextField_BeginEdit( itemDef_t *item, qboolean useMouse ) {
+	editFieldDef_t *editPtr = (editFieldDef_t*)item->typeData;
+	char buff[1024];
+	int len;
+
+	memset( buff, 0, sizeof( buff ) );
+	if ( item->cvar ) {
+		DC->getCVarString( item->cvar, buff, sizeof( buff ) );
+	}
+	len = strlen( buff );
+	if ( editPtr->maxChars && len > editPtr->maxChars ) {
+		len = editPtr->maxChars;
+	}
+
+	editPtr->paintOffset = 0;
+	item->cursorPos = len;
+	if ( useMouse && len > 0 ) {
+		float textX = item->textRect.x + item->textRect.w + ( ( item->text && *item->text ) ? 8 : 0 );
+		int i;
+
+		if ( DC->cursorx <= textX ) {
+			item->cursorPos = 0;
+		} else {
+			item->cursorPos = len;
+			for ( i = 1; i <= len; i++ ) {
+				float w = DC->textWidth( buff, item->font, item->textscale, i );
+				if ( textX + w > DC->cursorx ) {
+					item->cursorPos = i - 1;
+					break;
+				}
+			}
+		}
+	}
+	Item_TextField_FixScroll( item, len );
+	g_editingField = qtrue;
+	g_editItem = item;
+}
+
 qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 	char buff[1024];
 	int len;
@@ -2475,6 +2561,10 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 		len = strlen( buff );
 		if ( editPtr->maxChars && len > editPtr->maxChars ) {
 			len = editPtr->maxChars;
+			buff[len] = '\0';
+		}
+		if ( item->cursorPos > len ) {
+			item->cursorPos = len;
 		}
 		if ( key & K_CHAR_FLAG ) {
 			key &= ~K_CHAR_FLAG;
@@ -2545,15 +2635,39 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 				return qtrue;
 			}
 
-			if ( key == K_RIGHTARROW || key == K_KP_RIGHTARROW ) {
-				if ( editPtr->maxPaintChars && item->cursorPos >= editPtr->maxPaintChars && item->cursorPos < len ) {
-					item->cursorPos++;
-					editPtr->paintOffset++;
-					return qtrue;
+			// codmod: pad left/right nudge numeric editfields by 0.05 (settings values).
+			if ( key == K_PAD0_DPAD_LEFT || key == K_PAD0_LEFTSTICK_LEFT
+				 || key == K_PAD0_DPAD_RIGHT || key == K_PAD0_LEFTSTICK_RIGHT ) {
+				float value = (float)atof( buff );
+				float step = 0.05f;
+				int hundredths;
+
+				if ( key == K_PAD0_DPAD_LEFT || key == K_PAD0_LEFTSTICK_LEFT ) {
+					value -= step;
+				} else {
+					value += step;
 				}
+				if ( editPtr->maxVal > editPtr->minVal ) {
+					if ( value < editPtr->minVal ) {
+						value = editPtr->minVal;
+					} else if ( value > editPtr->maxVal ) {
+						value = editPtr->maxVal;
+					}
+				}
+				// Snap to hundredths so 0.05 steps stay clean.
+				hundredths = (int)( value * 100.0f + ( value >= 0.0f ? 0.5f : -0.5f ) );
+				value = (float)hundredths / 100.0f;
+				DC->setCVar( item->cvar, va( "%.2f", value ) );
+				item->cursorPos = 0;
+				editPtr->paintOffset = 0;
+				return qtrue;
+			}
+
+			if ( key == K_RIGHTARROW || key == K_KP_RIGHTARROW ) {
 				if ( item->cursorPos < len ) {
 					item->cursorPos++;
 				}
+				Item_TextField_FixScroll( item, len );
 				return qtrue;
 			}
 
@@ -2561,9 +2675,7 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 				if ( item->cursorPos > 0 ) {
 					item->cursorPos--;
 				}
-				if ( item->cursorPos < editPtr->paintOffset ) {
-					editPtr->paintOffset--;
-				}
+				Item_TextField_FixScroll( item, len );
 				return qtrue;
 			}
 
@@ -2575,9 +2687,7 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 
 			if ( key == K_END || key == K_KP_END ) { // ( tolower(key) == 'e' && trap_Key_IsDown( K_CTRL ) ) ) {
 				item->cursorPos = len;
-				if ( item->cursorPos > editPtr->maxPaintChars ) {
-					editPtr->paintOffset = len - editPtr->maxPaintChars;
-				}
+				Item_TextField_FixScroll( item, len );
 				return qtrue;
 			}
 
@@ -2590,15 +2700,19 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 		if ( key == K_TAB || key == K_DOWNARROW || key == K_KP_DOWNARROW ) {
 			newItem = Menu_SetNextCursorItem( item->parent );
 			if ( newItem && ( newItem->type == ITEM_TYPE_EDITFIELD || newItem->type == ITEM_TYPE_NUMERICFIELD || newItem->type == ITEM_TYPE_VALIDFILEFIELD ) ) {
-				g_editItem = newItem;
+				Item_TextField_BeginEdit( newItem, qfalse );
+				return qtrue;
 			}
+			return qfalse;  // landed on a non-edit item: leave edit mode
 		}
 
 		if ( key == K_UPARROW || key == K_KP_UPARROW ) {
 			newItem = Menu_SetPrevCursorItem( item->parent );
 			if ( newItem && ( newItem->type == ITEM_TYPE_EDITFIELD || newItem->type == ITEM_TYPE_NUMERICFIELD || newItem->type == ITEM_TYPE_VALIDFILEFIELD ) ) {
-				g_editItem = newItem;
+				Item_TextField_BeginEdit( newItem, qfalse );
+				return qtrue;
 			}
+			return qfalse;  // landed on a non-edit item: leave edit mode
 		}
 
 		// NERVE - SMF
@@ -2609,7 +2723,9 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 		}
 		// -NERVE - SMF
 
-		if ( key == K_ENTER || key == K_KP_ENTER || key == K_ESCAPE ) {
+		// A/X confirm, B/Esc cancel — leave edit mode.
+		if ( key == K_ENTER || key == K_KP_ENTER || key == K_ESCAPE
+			 || key == K_PAD0_A || key == K_PAD0_X || key == K_PAD0_B ) {
 			return qfalse;
 		}
 
@@ -2965,6 +3081,175 @@ itemDef_t *Menu_SetNextCursorItem( menuDef_t *menu ) {
 	return NULL;
 }
 
+// codmod: can this item receive pad/keyboard focus?
+static qboolean Menu_ItemCanFocus( itemDef_t *it ) {
+	if ( !it || ( it->window.flags & WINDOW_DECORATION ) ) {
+		return qfalse;
+	}
+	if ( !( it->window.flags & WINDOW_VISIBLE ) ) {
+		return qfalse;
+	}
+	if ( it->type == ITEM_TYPE_OWNERDRAW || it->type == ITEM_TYPE_MODEL
+		 || it->type == ITEM_TYPE_MENUMODEL ) {
+		return qfalse;
+	}
+	// Labels / titles: TEXT or BUTTON with no action must not steal pad focus.
+	if ( ( it->type == ITEM_TYPE_TEXT || it->type == ITEM_TYPE_BUTTON ) && !it->action ) {
+		return qfalse;
+	}
+	if ( it->cvarFlags & ( CVAR_ENABLE | CVAR_DISABLE ) && !Item_EnableShowViaCvar( it, CVAR_ENABLE ) ) {
+		return qfalse;
+	}
+	if ( it->cvarFlags & ( CVAR_SHOW | CVAR_HIDE ) && !Item_EnableShowViaCvar( it, CVAR_SHOW ) ) {
+		return qfalse;
+	}
+	return qtrue;
+}
+
+static qboolean Menu_ItemIsBackButton( itemDef_t *it ) {
+	if ( !it || !it->window.name ) {
+		return qfalse;
+	}
+	return !Q_stricmp( it->window.name, "back" )
+		|| !Q_stricmp( it->window.name, "back_alt" );
+}
+
+// codmod: autofocus top-left focusable item, skipping BACK (usually bottom chrome).
+static itemDef_t *Menu_AutofocusFirstItem( menuDef_t *menu ) {
+	int i;
+	itemDef_t *best = NULL;
+	float bestY = 1e9f, bestX = 1e9f;
+
+	if ( !menu ) {
+		return NULL;
+	}
+
+	Menu_ClearFocus( menu );
+	menu->cursorItem = -1;
+
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		itemDef_t *it = menu->items[i];
+		float x, y;
+
+		if ( !Menu_ItemCanFocus( it ) || Menu_ItemIsBackButton( it ) ) {
+			continue;
+		}
+		x = it->window.rect.x;
+		y = it->window.rect.y;
+		if ( y < bestY - 0.5f || ( fabs( y - bestY ) < 0.5f && x < bestX ) ) {
+			best = it;
+			bestY = y;
+			bestX = x;
+		}
+	}
+
+	// Fall back to BACK if it's the only focusable control.
+	if ( !best ) {
+		for ( i = 0; i < menu->itemCount; i++ ) {
+			if ( Menu_ItemCanFocus( menu->items[i] ) ) {
+				best = menu->items[i];
+				break;
+			}
+		}
+	}
+
+	if ( best && Item_SetFocus( best, best->window.rect.x + 1, best->window.rect.y + 1 ) ) {
+		return best;
+	}
+	return NULL;
+}
+
+// codmod: after show/hide scripts, refocus if the current item can no longer take focus.
+static void Menu_EnsureValidFocus( menuDef_t *menu ) {
+	int i;
+	itemDef_t *cur = NULL;
+
+	if ( !menu ) {
+		return;
+	}
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		if ( menu->items[i]->window.flags & WINDOW_HASFOCUS ) {
+			cur = menu->items[i];
+			break;
+		}
+	}
+	if ( cur && Menu_ItemCanFocus( cur ) ) {
+		return;
+	}
+	Menu_AutofocusFirstItem( menu );
+}
+
+// codmod: spatial focus move (dx,dy in {-1,0,1}) so tabs ↔ detail rows work on pad.
+static itemDef_t *Menu_SetCursorItemDirectional( menuDef_t *menu, int dirX, int dirY ) {
+	int i;
+	itemDef_t *cur = NULL;
+	itemDef_t *best = NULL;
+	float cx, cy;
+	float bestScore = 1e12f;
+
+	if ( !menu ) {
+		return NULL;
+	}
+
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		if ( menu->items[i]->window.flags & WINDOW_HASFOCUS ) {
+			cur = menu->items[i];
+			break;
+		}
+	}
+	if ( !cur ) {
+		return Menu_AutofocusFirstItem( menu );
+	}
+
+	cx = cur->window.rect.x + cur->window.rect.w * 0.5f;
+	cy = cur->window.rect.y + cur->window.rect.h * 0.5f;
+
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		itemDef_t *it = menu->items[i];
+		float ix, iy, dx, dy, primary, secondary, score;
+
+		if ( it == cur || !Menu_ItemCanFocus( it ) ) {
+			continue;
+		}
+		ix = it->window.rect.x + it->window.rect.w * 0.5f;
+		iy = it->window.rect.y + it->window.rect.h * 0.5f;
+		dx = ix - cx;
+		dy = iy - cy;
+
+		if ( dirX < 0 && dx >= -1.0f ) {
+			continue;
+		}
+		if ( dirX > 0 && dx <= 1.0f ) {
+			continue;
+		}
+		if ( dirY < 0 && dy >= -1.0f ) {
+			continue;
+		}
+		if ( dirY > 0 && dy <= 1.0f ) {
+			continue;
+		}
+
+		if ( dirX != 0 ) {
+			primary = fabs( dx );
+			secondary = fabs( dy );
+		} else {
+			primary = fabs( dy );
+			secondary = fabs( dx );
+		}
+		// Prefer candidates aligned on the travel axis.
+		score = primary + secondary * 2.5f;
+		if ( score < bestScore ) {
+			bestScore = score;
+			best = it;
+		}
+	}
+
+	if ( best && Item_SetFocus( best, best->window.rect.x + 1, best->window.rect.y + 1 ) ) {
+		return best;
+	}
+	return NULL;
+}
+
 
 static void Window_CloseCinematic( windowDef_t *window ) {
 	if ( window->style == WINDOW_STYLE_CINEMATIC && window->cinematic >= 0 ) {
@@ -2994,11 +3279,29 @@ static void Display_CloseCinematics( void ) {
 }
 
 void  Menus_Activate( menuDef_t *menu ) {
+	int i;
+	qboolean focused = qfalse;
+
 	menu->window.flags |= ( WINDOW_HASFOCUS | WINDOW_VISIBLE );
+
+	// codmod: drop stale item focus/cursor so reopen + setfocus stay in sync.
+	Menu_ClearFocus( menu );
+	menu->cursorItem = -1;
+
 	if ( menu->onOpen ) {
 		itemDef_t item;
 		item.parent = menu;
 		Item_RunScript( &item, menu->onOpen );
+	}
+
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		if ( menu->items[i]->window.flags & WINDOW_HASFOCUS ) {
+			focused = qtrue;
+			break;
+		}
+	}
+	if ( !focused ) {
+		Menu_AutofocusFirstItem( menu );
 	}
 
 	if ( menu->soundName && *menu->soundName ) {
@@ -3065,6 +3368,7 @@ static rectDef_t *Item_CorrectedTextRect( itemDef_t *item ) {
 }
 
 // menu item key horizontal action: -1 = previous value, 1 = next value, 0 = no change
+// codmod: pad D-pad/stick directions navigate items (not values); A/X cycle values.
 int UI_SelectForKey(int key)
 {
 	switch (key) {
@@ -3078,11 +3382,15 @@ int UI_SelectForKey(int key)
 		case K_JOY2:
 		case K_JOY3:
 		case K_JOY4:
+		case K_PAD0_A:
+		case K_PAD0_RIGHTSHOULDER:
 			return 1; // next
 
 		case K_MOUSE2:
 		case K_LEFTARROW:
 		case K_KP_LEFTARROW:
+		case K_PAD0_X:
+		case K_PAD0_LEFTSHOULDER:
 			return -1; // previous
 	}
 
@@ -3143,6 +3451,7 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 	if ( item != NULL ) {
 		if ( Item_HandleKey( item, key, down ) ) {
 			Item_Action( item );
+			Menu_EnsureValidFocus( menu );
 			return;
 		}
 	}
@@ -3176,12 +3485,22 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 		break;
 	case K_KP_UPARROW:
 	case K_UPARROW:
-	case K_LEFTARROW:
 	case K_MWHEELUP:
-		Menu_SetPrevCursorItem( menu );
+	case K_PAD0_DPAD_UP:
+	case K_PAD0_LEFTSTICK_UP:
+		Menu_SetCursorItemDirectional( menu, 0, -1 );
+		break;
+
+	case K_LEFTARROW:
+	case K_KP_LEFTARROW:
+	case K_PAD0_DPAD_LEFT:
+	case K_PAD0_LEFTSTICK_LEFT:
+		Menu_SetCursorItemDirectional( menu, -1, 0 );
 		break;
 
 	case K_ESCAPE:
+	case K_PAD0_B:
+	case K_PAD0_START:
 		if ( !g_waitingForKey && menu->onESC ) {
 			itemDef_t it;
 			it.parent = menu;
@@ -3192,9 +3511,17 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 	case K_TAB:
 	case K_KP_DOWNARROW:
 	case K_DOWNARROW:
-	case K_RIGHTARROW:
 	case K_MWHEELDOWN:
-		Menu_SetNextCursorItem( menu );
+	case K_PAD0_DPAD_DOWN:
+	case K_PAD0_LEFTSTICK_DOWN:
+		Menu_SetCursorItemDirectional( menu, 0, 1 );
+		break;
+
+	case K_RIGHTARROW:
+	case K_KP_RIGHTARROW:
+	case K_PAD0_DPAD_RIGHT:
+	case K_PAD0_LEFTSTICK_RIGHT:
+		Menu_SetCursorItemDirectional( menu, 1, 0 );
 		break;
 
 	case K_MOUSE1:
@@ -3206,9 +3533,7 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 				}
 			} else if ( item->type == ITEM_TYPE_EDITFIELD || item->type == ITEM_TYPE_NUMERICFIELD || item->type == ITEM_TYPE_VALIDFILEFIELD ) {
 				if ( Rect_ContainsPoint( &item->window.rect, DC->cursorx, DC->cursory ) ) {
-					item->cursorPos = 0;
-					g_editingField = qtrue;
-					g_editItem = item;
+					Item_TextField_BeginEdit( item, qtrue );
 				}
 			} else {
 				if ( Rect_ContainsPoint( &item->window.rect, DC->cursorx, DC->cursory ) ) {
@@ -3222,6 +3547,8 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 	case K_JOY2:
 	case K_JOY3:
 	case K_JOY4:
+	case K_PAD0_A:
+	case K_PAD0_X:
 	case K_AUX1:
 	case K_AUX2:
 	case K_AUX3:
@@ -3243,11 +3570,11 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 	case K_MOUSE3:
 		if ( item ) {
 			if ( item->type == ITEM_TYPE_EDITFIELD || item->type == ITEM_TYPE_NUMERICFIELD || item->type == ITEM_TYPE_VALIDFILEFIELD ) {
-				item->cursorPos = 0;
-				g_editingField = qtrue;
-				g_editItem = item;
+				// A/X enter edit mode; then pad left/right nudge by 0.05.
+				Item_TextField_BeginEdit( item, qfalse );
 			} else {
 				Item_Action( item );
+				Menu_EnsureValidFocus( menu );
 			}
 		}
 		break;
@@ -3605,6 +3932,8 @@ void Item_Multi_Paint( itemDef_t *item ) {
 	const char *text = "";
 	menuDef_t *parent = (menuDef_t*)item->parent;
 
+	UI_RebuildVidModeMulti( item );
+
 	if ( item->window.flags & WINDOW_HASFOCUS ) {
 		lowLight[0] = 0.8 * parent->focusColor[0];
 		lowLight[1] = 0.8 * parent->focusColor[1];
@@ -3773,7 +4102,8 @@ static void Controls_GetKeyAssignment( char *command, int *twokeys ) {
 	twokeys[0] = twokeys[1] = -1;
 	count = 0;
 
-	for ( j = 0; j < 256; j++ )
+	// MAX_KEYS (not 256): K_PAD0_* live above 255 and must show in Controls.
+	for ( j = 0; j < MAX_KEYS; j++ )
 	{
 		DC->getBindingBuf( j, b, 256 );
 		if ( *b == 0 ) {
@@ -3985,7 +4315,8 @@ qboolean Item_Bind_HandleKey( itemDef_t *item, int key, qboolean down ) {
 	if (!g_waitingForKey)
  	{
 		if (down && ((key == K_MOUSE1 && Rect_ContainsPoint(&item->window.rect, DC->cursorx, DC->cursory))
-				|| key == K_ENTER || key == K_KP_ENTER || key == K_JOY1 || key == K_JOY2 || key == K_JOY3 || key == K_JOY4)) {
+				|| key == K_ENTER || key == K_KP_ENTER || key == K_JOY1 || key == K_JOY2 || key == K_JOY3 || key == K_JOY4
+				|| key == K_PAD0_A)) {
 			g_waitingForKey = qtrue;
 			g_bindItem = item;
 		}
@@ -4575,6 +4906,35 @@ void Item_Paint( itemDef_t *item ) {
 
 	// paint the rect first..
 	Window_Paint( &item->window, parent->fadeAmount, parent->fadeClamp, parent->fadeCycle );
+
+	// codmod: pad-only focus outline (mouse/kb already have the cursor).
+	if ( ( item->window.flags & WINDOW_HASFOCUS )
+		 && !( item->window.flags & WINDOW_DECORATION )
+		 && item->type != ITEM_TYPE_OWNERDRAW
+		 && item->type != ITEM_TYPE_MODEL
+		 && item->type != ITEM_TYPE_MENUMODEL
+		 && DC->getCVarString ) {
+		char lastIn[16];
+
+		DC->getCVarString( "in_lastInput", lastIn, sizeof( lastIn ) );
+		if ( !Q_stricmp( lastIn, "pad" ) ) {
+			vec4_t outline;
+			const float pad = 3.0f;
+
+			Vector4Copy( parent->focusColor, outline );
+			if ( outline[3] < 0.35f ) {
+				outline[0] = 1.0f;
+				outline[1] = 0.75f;
+				outline[2] = 0.0f;
+				outline[3] = 1.0f;
+			} else {
+				outline[3] = 1.0f;
+			}
+			DC->drawRect( item->window.rect.x - pad, item->window.rect.y - pad,
+						  item->window.rect.w + pad * 2.0f,
+						  item->window.rect.h + pad * 2.0f, 1, outline );
+		}
+	}
 
 	if ( debugMode ) {
 		vec4_t color;
@@ -5854,44 +6214,176 @@ typedef struct vidmode_s
 {
 	const char *description;
 	int mode;
+	int width;
+	int height;
 } vidmode_t;
 
 vidmode_t r_vidModes[] =
 {
-	{ "320x240 (4:3)",          0 },
-	{ "400x300 (4:3)",          1 },
-	{ "512x384 (4:3)",          2 },
-	{ "640x480 (4:3)",          3 },
-	{ "800x600 (4:3)",          4 },
-	{ "960x720 (4:3)",          5 },
-	{ "1024x768 (4:3)",         6 },
-	{ "1152x864 (4:3)",         7 },
-	{ "1280x1024 (5:4)",        8 },
-	{ "1600x1200 (4:3)",        9 },
-	{ "2048x1536 (4:3)",       10 },
-	{ "856x480 (16:9)",        11 },
-	{ "640x360 (16:9)",        12 },
-	{ "640x400 (16:10)",       13 },
-	{ "800x450 (16:9)",        14 },
-	{ "800x500 (16:10)",       15 },
-	{ "1024x640 (16:10)",      16 },
-	{ "1024x576 (16:9)",       17 },
-	{ "1280x720 (16:9)",       18 },
-	{ "1280x768 (16:10)",      19 },
-	{ "1280x800 (16:10)",      20 },
-	{ "1280x960 (4:3)",        21 },
-	{ "1440x900 (16:10)",      22 },
-	{ "1600x900 (16:9)",       23 },
-	{ "1600x1000 (16:10)",     24 },
-	{ "1680x1050 (16:10)",     25 },
-	{ "1920x1080 (16:9)",      26 },
-	{ "1920x1200 (16:10)",     27 },
-	{ "1920x1440 (4:3)",       28 },
-	{ "2560x1600 (16:10)",     29 },
-	{ "Automatic (Native)",    -2 },
-	{ "Custom",                -1 }
+	{ "320x240 (4:3)",          0,  320,  240 },
+	{ "400x300 (4:3)",          1,  400,  300 },
+	{ "512x384 (4:3)",          2,  512,  384 },
+	{ "640x480 (4:3)",          3,  640,  480 },
+	{ "800x600 (4:3)",          4,  800,  600 },
+	{ "960x720 (4:3)",          5,  960,  720 },
+	{ "1024x768 (4:3)",         6, 1024,  768 },
+	{ "1152x864 (4:3)",         7, 1152,  864 },
+	{ "1280x1024 (5:4)",        8, 1280, 1024 },
+	{ "1600x1200 (4:3)",        9, 1600, 1200 },
+	{ "2048x1536 (4:3)",       10, 2048, 1536 },
+	{ "856x480 (16:9)",        11,  856,  480 },
+	{ "640x360 (16:9)",        12,  640,  360 },
+	{ "640x400 (16:10)",       13,  640,  400 },
+	{ "800x450 (16:9)",        14,  800,  450 },
+	{ "800x500 (16:10)",       15,  800,  500 },
+	{ "1024x640 (16:10)",      16, 1024,  640 },
+	{ "1024x576 (16:9)",       17, 1024,  576 },
+	{ "1280x720 (16:9)",       18, 1280,  720 },
+	{ "1280x768 (16:10)",      19, 1280,  768 },
+	{ "1280x800 (16:10)",      20, 1280,  800 },
+	{ "1280x960 (4:3)",        21, 1280,  960 },
+	{ "1440x900 (16:10)",      22, 1440,  900 },
+	{ "1600x900 (16:9)",       23, 1600,  900 },
+	{ "1600x1000 (16:10)",     24, 1600, 1000 },
+	{ "1680x1050 (16:10)",     25, 1680, 1050 },
+	{ "1920x1080 (16:9)",      26, 1920, 1080 },
+	{ "1920x1200 (16:10)",     27, 1920, 1200 },
+	{ "1920x1440 (4:3)",       28, 1920, 1440 },
+	{ "2560x1600 (16:10)",     29, 2560, 1600 },
+	{ "2560x1440 (16:9)",      30, 2560, 1440 },
+	{ "3840x2160 (16:9)",      31, 3840, 2160 },
+	{ "1366x768 (16:9)",       32, 1366,  768 },
+	{ "2560x1080 (21:9)",      33, 2560, 1080 },
+	{ "3440x1440 (21:9)",      34, 3440, 1440 },
+	{ "3840x1600 (21:9)",      35, 3840, 1600 },
+	{ "5120x1440 (32:9)",      36, 5120, 1440 },
+	{ "2880x1800 (16:10)",     37, 2880, 1800 },
+	{ "3200x1800 (16:9)",      38, 3200, 1800 },
+	{ "3840x1080 (32:9)",      39, 3840, 1080 },
+	{ "5120x2160 (21:9)",      40, 5120, 2160 },
+	{ "2048x1152 (16:9)",      41, 2048, 1152 },
+	{ "Automatic (Native)",    -2,    0,    0 },
+	{ "Custom",                -1,    0,    0 }
 };
 static int	s_numVidModes = ARRAY_LEN( r_vidModes );
+
+/*
+===============
+UI_FindVidMode
+
+Return table index for width/height, or -1.
+===============
+*/
+static int UI_FindVidMode( int width, int height ) {
+	int i;
+
+	for ( i = 0; i < s_numVidModes; i++ ) {
+		if ( r_vidModes[i].mode < 0 ) {
+			continue;
+		}
+		if ( r_vidModes[i].width == width && r_vidModes[i].height == height ) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+/*
+===============
+UI_AddVidModeEntry
+
+Append one r_mode multi entry if room remains.
+===============
+*/
+static void UI_AddVidModeEntry( multiDef_t *multiPtr, int tableIndex ) {
+	if ( multiPtr->count >= MAX_MULTI_CVARS ) {
+		return;
+	}
+	multiPtr->cvarList[multiPtr->count] = String_Alloc( r_vidModes[tableIndex].description );
+	multiPtr->cvarValue[multiPtr->count] = r_vidModes[tableIndex].mode;
+	multiPtr->count++;
+}
+
+/*
+===============
+UI_RebuildVidModeMulti
+
+Prefer SDL-detected r_availableModes when set so the click-cycle list matches the
+display; otherwise expose the full table. Always ends with Automatic + Custom.
+Skip work once this item's list is already expanded for the current availableModes.
+===============
+*/
+static void UI_RebuildVidModeMulti( itemDef_t *item ) {
+	int i;
+	multiDef_t *multiPtr;
+	char avail[MAX_STRING_CHARS];
+	qboolean used[ARRAY_LEN( r_vidModes )];
+	int addedFixed = 0;
+	static char ui_vidModeAvailCache[MAX_STRING_CHARS];
+
+	if ( !item || item->type != ITEM_TYPE_MULTI || !item->cvar || !item->typeData ) {
+		return;
+	}
+	if ( Q_stricmp( item->cvar, "r_mode" ) ) {
+		return;
+	}
+
+	multiPtr = (multiDef_t *)item->typeData;
+	avail[0] = '\0';
+	if ( DC && DC->getCVarString ) {
+		DC->getCVarString( "r_availableModes", avail, sizeof( avail ) );
+	}
+	// Seed .menu lists are short (~9). Skip rebuild once expanded for this avail string.
+	if ( multiPtr->count > 12 && !Q_stricmp( avail, ui_vidModeAvailCache ) ) {
+		return;
+	}
+	Q_strncpyz( ui_vidModeAvailCache, avail, sizeof( ui_vidModeAvailCache ) );
+
+	memset( used, 0, sizeof( used ) );
+	multiPtr->count = 0;
+
+	if ( avail[0] ) {
+		const char *p = avail;
+
+		while ( *p ) {
+			int w = 0, h = 0, n = 0, idx;
+
+			while ( *p == ' ' ) {
+				p++;
+			}
+			if ( !*p ) {
+				break;
+			}
+			if ( sscanf( p, "%dx%d%n", &w, &h, &n ) != 2 || n <= 0 ) {
+				break;
+			}
+			p += n;
+
+			idx = UI_FindVidMode( w, h );
+			if ( idx >= 0 && !used[idx] ) {
+				UI_AddVidModeEntry( multiPtr, idx );
+				used[idx] = qtrue;
+				addedFixed++;
+			}
+		}
+	}
+
+	if ( !addedFixed ) {
+		for ( i = 0; i < s_numVidModes; i++ ) {
+			if ( r_vidModes[i].mode < 0 ) {
+				continue;
+			}
+			UI_AddVidModeEntry( multiPtr, i );
+		}
+	}
+
+	for ( i = 0; i < s_numVidModes; i++ ) {
+		if ( r_vidModes[i].mode >= 0 ) {
+			continue;
+		}
+		UI_AddVidModeEntry( multiPtr, i );
+	}
+}
 
 /*
 ===============
@@ -5901,25 +6393,7 @@ Hacks to fix issues with menu scripts
 ===============
 */
 static void Item_ApplyHacks( itemDef_t *item ) {
-
-	// Add video modes to system menu
-	if ( item->type == ITEM_TYPE_MULTI && item->cvar && !Q_stricmp( item->cvar, "r_mode" ) ) {
-		int i;
-		multiDef_t *multiPtr = (multiDef_t*)item->typeData;;
-
-		DC->DPrint( "Found modelist with %d modes, extending list to %d modes\n", multiPtr->count, s_numVidModes );
-
-		multiPtr->count = 0;
-		for ( i = 0; i < s_numVidModes; i++ ) {
-			multiPtr->cvarList[multiPtr->count] = String_Alloc( r_vidModes[i].description );
-			multiPtr->cvarValue[multiPtr->count] = r_vidModes[i].mode;
-			multiPtr->count++;
-
-			if ( multiPtr->count >= MAX_MULTI_CVARS ) {
-				break;
-			}
-		}
-	}
+	UI_RebuildVidModeMulti( item );
 }
 
 /*
@@ -6495,10 +6969,10 @@ qboolean Display_MouseMove( void *p, int x, int y ) {
 	if ( menu == NULL ) {
 		menu = Menu_GetFocused();
 		if ( menu ) {
-			if ( menu->window.flags & WINDOW_POPUP ) {
-				Menu_HandleMouseMove( menu, x, y );
-				return qtrue;
-			}
+			// codmod: only the focused menu gets hover — stops overlays
+			// (e.g. Exit) from highlighting pause items underneath.
+			Menu_HandleMouseMove( menu, x, y );
+			return qtrue;
 		}
 		for ( i = 0; i < menuCount; i++ ) {
 			Menu_HandleMouseMove( &Menus[i], x, y );
@@ -6528,7 +7002,13 @@ int Display_CursorType( int x, int y ) {
 
 
 void Display_HandleKey( int key, qboolean down, int x, int y ) {
-	menuDef_t *menu = Display_CaptureItem( x, y );
+	menuDef_t *menu = NULL;
+
+	// Mouse clicks may hit a window under the cursor; pad/keyboard always
+	// go to the focused menu so overlays (Exit) keep receiving input.
+	if ( key == K_MOUSE1 || key == K_MOUSE2 || key == K_MOUSE3 ) {
+		menu = Display_CaptureItem( x, y );
+	}
 	if ( menu == NULL ) {
 		menu = Menu_GetFocused();
 	}

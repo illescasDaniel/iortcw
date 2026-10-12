@@ -368,6 +368,20 @@ void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, fl
 }
 // done.
 
+/*
+=====================
+RE_AddSpotLightToScene
+
+codmod: opengl1 has no cone lighting — fall back to a point dlight.
+=====================
+*/
+void RE_AddSpotLightToScene( const vec3_t org, float intensity, float r, float g, float b,
+							 const vec3_t dir, float coneAngleDeg, int overdraw ) {
+	(void)dir;
+	(void)coneAngleDeg;
+	RE_AddLightToScene( org, intensity, r, g, b, overdraw );
+}
+
 
 /*
 ==============
