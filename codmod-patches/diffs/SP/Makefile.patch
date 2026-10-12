@@ -1,0 +1,46 @@
+diff --git a/SP/Makefile b/SP/Makefile
+index 74a126d2..ec3e5bc5 100644
+--- a/SP/Makefile
++++ b/SP/Makefile
+@@ -1913,6 +1913,13 @@ Q3R2STRINGOBJ = \
+   $(B)/rend2/glsl/pshadow_vp.o \
+   $(B)/rend2/glsl/shadowfill_fp.o \
+   $(B)/rend2/glsl/shadowfill_vp.o \
++  $(B)/rend2/glsl/smaa_blend_fp.o \
++  $(B)/rend2/glsl/smaa_blend_vp.o \
++  $(B)/rend2/glsl/smaa_edge_fp.o \
++  $(B)/rend2/glsl/smaa_edge_vp.o \
++  $(B)/rend2/glsl/smaa_lib.o \
++  $(B)/rend2/glsl/smaa_weights_fp.o \
++  $(B)/rend2/glsl/smaa_weights_vp.o \
+   $(B)/rend2/glsl/shadowmask_fp.o \
+   $(B)/rend2/glsl/shadowmask_vp.o \
+   $(B)/rend2/glsl/ssao_fp.o \
+@@ -2508,8 +2515,11 @@ Q3CGOBJ_ = \
+   $(B)/$(BASEGAME)/cgame/bg_animation.o \
+   $(B)/$(BASEGAME)/cgame/bg_misc.o \
+   $(B)/$(BASEGAME)/cgame/bg_pmove.o \
++  $(B)/$(BASEGAME)/cgame/bg_cod.o \
+   $(B)/$(BASEGAME)/cgame/bg_slidemove.o \
+   $(B)/$(BASEGAME)/cgame/bg_lib.o \
++  $(B)/$(BASEGAME)/cgame/cg_cod.o \
++  $(B)/$(BASEGAME)/cgame/cg_cod_menu.o \
+   $(B)/$(BASEGAME)/cgame/cg_consolecmds.o \
+   $(B)/$(BASEGAME)/cgame/cg_draw.o \
+   $(B)/$(BASEGAME)/cgame/cg_drawtools.o \
+@@ -2582,6 +2592,7 @@ Q3GOBJ_ = \
+   $(B)/$(BASEGAME)/game/bg_animation.o \
+   $(B)/$(BASEGAME)/game/bg_misc.o \
+   $(B)/$(BASEGAME)/game/bg_pmove.o \
++  $(B)/$(BASEGAME)/game/bg_cod.o \
+   $(B)/$(BASEGAME)/game/bg_slidemove.o \
+   $(B)/$(BASEGAME)/game/bg_lib.o \
+   $(B)/$(BASEGAME)/game/g_active.o \
+@@ -2641,6 +2652,7 @@ Q3UIOBJ_ = \
+   $(B)/$(BASEGAME)/ui/ui_shared.o \
+   \
+   $(B)/$(BASEGAME)/ui/bg_misc.o \
++  $(B)/$(BASEGAME)/ui/bg_cod.o \
+   $(B)/$(BASEGAME)/ui/bg_lib.o \
+   \
+   $(B)/$(BASEGAME)/qcommon/q_math.o \

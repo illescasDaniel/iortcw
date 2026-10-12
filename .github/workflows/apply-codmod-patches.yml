@@ -1,0 +1,67 @@
+name: apply-codmod-patches
+on:
+  push:
+    branches: [cursor/codmod-patches-0f47]
+    paths:
+      - "codmod-patches/READY"
+  workflow_dispatch:
+
+concurrency:
+  group: apply-codmod-patches
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/codmod-patches-0f47
+          fetch-depth: 0
+      - name: Apply unified diffs
+        run: |
+          set -euo pipefail
+          if [ -d codmod-patches/diffs ]; then
+            find codmod-patches/diffs -type f -name '*.patch' | sort | while read -r p; do
+              echo "APPLY $p"
+              git apply --whitespace=nowarn "$p"
+            done
+          fi
+      - name: Assemble chunked files
+        run: |
+          set -euo pipefail
+          if [ -d codmod-patches/chunks ]; then
+            find codmod-patches/chunks -mindepth 1 -maxdepth 1 -type d | sort | while read -r d; do
+              key="$(basename "$d")"
+              outpath="$(echo "$key" | sed 's#__#/#g')"
+              echo "ASSEMBLE $outpath from $d"
+              mkdir -p "$(dirname "$outpath")"
+              cat "$d"/part_* | base64 -d > "$outpath"
+            done
+          fi
+      - name: Copy full new files
+        run: |
+          set -euo pipefail
+          if [ -d codmod-patches/files ]; then
+            find codmod-patches/files -type f | sort | while read -r f; do
+              outpath="${f#codmod-patches/files/}"
+              echo "COPY $outpath"
+              mkdir -p "$(dirname "$outpath")"
+              cp "$f" "$outpath"
+            done
+          fi
+      - name: Remove staging and commit
+        run: |
+          set -euo pipefail
+          rm -rf codmod-patches
+          git config user.name "codmod-patcher"
+          git config user.email "codmod-patcher@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git commit -m "codmod: apply staged patches and new files"
+          git push origin HEAD:cursor/codmod-patches-0f47

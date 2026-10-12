@@ -1,0 +1,37 @@
+diff --git a/SP/code/cgame/cg_effects.c b/SP/code/cgame/cg_effects.c
+index addbeecf..01e0c223 100644
+--- a/SP/code/cgame/cg_effects.c
++++ b/SP/code/cgame/cg_effects.c
+@@ -1274,6 +1274,7 @@ CG_Spotlight
+ 	SL_NOIMPACT			- don't draw the impact mark on hit surfaces
+ 	SL_LOCKUV			- lock the texture coordinates at the 'true' length of the requested beam.
+ 	SL_NOCORE			- don't draw the center 'core' beam
++	SL_NOMODEL			- don't draw searchlight base/lamp models (player flashlight)
+ 
+ 
+ 
+@@ -1385,8 +1386,8 @@ void CG_Spotlight( centity_t *cent, float *color, vec3_t realstart, vec3_t light
+ 	// TODO: move much of this to renderer
+ 
+ 
+-// model at base
+-	//if(cgs.media.spotLightLightModel) {
++// model at base (skipped for player flashlight — SL_NOMODEL)
++	if ( !( flags & SL_NOMODEL ) ) {
+ 		memset( &ent, 0, sizeof( ent ) );
+ 		ent.frame = 0;
+ 		ent.oldframe = 0;
+@@ -1412,10 +1413,10 @@ void CG_Spotlight( centity_t *cent, float *color, vec3_t realstart, vec3_t light
+ 
+ 		// push start out a bit so the beam fits to the front of the base model
+ 		VectorMA( start, 14, lightDir, start );
+-	//}
+ 
+-	if ( cent->currentState.frame == 1 ) {    // dead
+-		return;
++		if ( cent->currentState.frame == 1 ) {    // dead
++			return;
++		}
+ 	}
+ 
+ //// BEAM
