@@ -1,6 +1,54 @@
  ![iortcw logo](https://raw.githubusercontent.com/iortcw/iortcw/master/MP/misc/wolf128.png)                       
                                
 
+## Castle Operations Definitive (this fork)
+
+This is the engine and game code behind [Castle Operations Definitive](https://github.com/illescasDaniel/castle-operations-definitive),
+a single-player RTCW remaster. This fork is based on upstream ioRTCW commit `438e7d4`.
+The fork keeps ioRTCW's single-player engine, renderer choice and game logic, and adds a modern-FPS layer on top. All
+changes are gated behind `cod_enable` (default 1; `0` restores vanilla feel) and live in a separate `fs_game codmod`
+folder, so vanilla RTCW keeps working side by side. The campaign, maps, enemies and scripting stay RTCW.
+
+### Changes in this fork
+
+**Game and cgame (`bg_cod`, a shared tuning table)**
+- ~190 `cod_*` cvars defined in one table, shared by game, cgame and UI, plus an in-game `cod_menu` tuning overlay
+- Walk / jog / sprint speeds, AI soldiers using the same speed model, crouch/lean timing, ground inertia, jump/gravity,
+  landing slowdown
+- Aim down sights: pmove ADS state, per-weapon iron-sight alignment (auto-align from `tag_flash`), FOV and sensitivity
+  scaling, spread multiplier, hold-to-scope, `+ads` / `toggleads`
+- Gait presentation (sprint gun-lower, bob), tap-fire pistol, click-fire for bolt and semi-auto, hipfire cone
+- Quick knife, tactical slide, prone (adapted from Enemy Territory: Legacy), toggle crouch, kick with `cod_kickDamage`
+- Health regeneration, linear stamina, doubled player ammo, hit markers with headshot ticks
+- Flashlight built on rend2 eye-origin spot lights (`AddSpotLightToScene`)
+
+**UI and HUD**
+- Modern HUD (clip/reserve ammo, 4-post bloom crosshair, ADS dot, blood vignette, interact hints)
+- Menu fixes: edit-field editing, controller focus sync and directional navigation, safer menu close
+
+**Input**
+- Xbox / PlayStation controller support through SDL GameController, with the `+quickkick` pad command
+
+**Renderer (rend2)**
+- **SMAA 1x** post-process anti-aliasing (4 quality levels) and a unified `r_aa` setting covering SMAA and MSAA 2/4/8x
+- Wayland-friendly fullscreen and mode switching without recreating the GL context
+- Fix for an HD texture `ResampleTexture` stack overflow
+
+**Engine core**
+- **Frame pacer**: absolute-deadline limiter (sleep + spin), `r_vsync` modes 0-4 (Off / On / Adaptive / Triple / Low
+  latency) applied live, sub-millisecond game-time interpolation in cgame
+- `cl_benchDemo`: real-time demo replay with microsecond frame stats and percentile (1% low) reporting
+- Limits raised for the above (`MAX_CONSOLE_LINES` 64, `MAX_MULTI_CVARS`); fix for a save/camera-portal crash
+
+**Audio (OpenAL)**
+- **HRTF** binaural rendering via `ALC_SOFT_HRTF` (`s_alHRTF`, `s_alHRTFProfile`, live reset, `s_info` report)
+
+**Outside the engine (in the main project repo)**
+- Rebuilt options menus (generated from your own RTCW paks plus shipped deltas), build/install/run/bench scripts, and
+  optional local AI pipelines for HD textures (Real-ESRGAN) and HD audio (AudioSR). See the
+  [project README](https://github.com/illescasDaniel/castle-operations-definitive) for the player-facing list.
+
+
 ## iortcw
 
 The intent of this project is to provide a baseline RTCW which may be used
