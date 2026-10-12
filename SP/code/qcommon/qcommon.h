@@ -1149,6 +1149,18 @@ int     Sys_Milliseconds( void );
 // Monotonic microsecond clock for frame-time benchmarking (cl_benchDemo)
 long long Sys_Microseconds( void );
 
+// Hybrid sleep+spin to an absolute Sys_Microseconds deadline. spinUs: <0 auto, 0 sleep only.
+// Returns microseconds woken past the deadline.
+long long Sys_WaitUntil( long long deadlineUs, int spinUs );
+
+// Frame pacer hooks called by the renderer around the buffer swap (finish = glFinish)
+void Com_PresentWait( void ( *finish )( void ) );
+void Com_PresentDone( void ( *finish )( void ) );
+// Sub-millisecond remainder (0..999 us) of the paced game clock, for cgame interpolation
+extern int com_frameFracUs;
+// Sys_Microseconds time right after the last buffer swap (bench: present cadence)
+extern long long com_lastPresentUs;
+
 qboolean Sys_RandomBytes( byte *string, int len );
 
 // the system console is shown when a dedicated server is running

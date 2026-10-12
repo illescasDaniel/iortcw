@@ -106,6 +106,14 @@ cvar_t	*com_legacyprotocol;
 cvar_t	*com_basegame;
 cvar_t  *com_homepath;
 cvar_t	*com_busyWait;
+cvar_t	*com_maxfpsPrecise;
+cvar_t	*com_maxfpsSpinUs;
+cvar_t	*com_maxfpsMode;
+cvar_t	*com_maxfpsGpuSync;
+static cvar_t	*com_vsync;
+static cvar_t	*com_displayRefresh;
+int com_frameFracUs;
+long long com_lastPresentUs;
 #ifndef DEDICATED
 cvar_t  *con_autochat;
 #endif
@@ -2390,6 +2398,17 @@ void Com_Init( char *commandLine ) {
 	com_maxfpsMinimized = Cvar_Get( "com_maxfpsMinimized", "0", CVAR_ARCHIVE );
 	com_abnormalExit = Cvar_Get( "com_abnormalExit", "0", CVAR_ROM );
 	com_busyWait = Cvar_Get("com_busyWait", "0", CVAR_ARCHIVE);
+	// absolute-deadline frame limiter (float fps, hybrid sleep+spin); 0 = legacy integer-ms limiter
+	com_maxfpsPrecise = Cvar_Get( "com_maxfpsPrecise", "0", CVAR_ARCHIVE );
+	// spin margin in us before each deadline: -1 auto, 0 sleep only
+	com_maxfpsSpinUs = Cvar_Get( "com_maxfpsSpinUs", "-1", CVAR_ARCHIVE );
+	// where the cap waits: 0 start of frame, 1 right before present, 2 predictive (start late, present on time)
+	com_maxfpsMode = Cvar_Get( "com_maxfpsMode", "2", CVAR_ARCHIVE );
+	// glFinish before the present wait / after the swap so frame timing sees the GPU, not just the CPU
+	com_maxfpsGpuSync = Cvar_Get( "com_maxfpsGpuSync", "1", CVAR_ARCHIVE );
+	// owned by the renderer (sdl_glimp.c); registered here too so the pacer can read it
+	com_vsync = Cvar_Get( "r_vsync", "0", CVAR_ARCHIVE );
+	com_displayRefresh = Cvar_Get( "r_displayRefreshActual", "0", CVAR_TEMP );
 	Cvar_Get("com_errorMessage", "", CVAR_ROM | CVAR_NORESTART);
 
 #ifdef CINEMATICS_INTRO
@@ -2691,6 +2710,268 @@ int Com_TimeVal(int minMsec)
 
 /*
 =================
+Frame pacer
+
+Absolute-deadline frame limiter on the monotonic microsecond clock. Each frame
+has a present deadline D that advances by exactly one (fractional) period; a
+frame that misses by more than half a period re-anchors the schedule instead
+of bursting to catch up.
+
+  mode 0  wait for D at the top of the frame (lowest latency, present jitters)
+  mode 1  run the frame at once, wait for D right before the swap
+  mode 2  predictive: start the frame at D - (recent P95 frame cost), wait for D
+          before the swap (flat present cadence and low latency)
+
+r_vsync 4 (low latency vsync) uses mode 2 phase-locked to the observed vblank
+instead of a fixed schedule: the swap blocks, we time when to start the frame
+so it finishes just before it.
+=================
+*/
+#define PACE_RING 64
+
+typedef struct {
+	qboolean  active;           // pacer controls this frame
+	qboolean  late;             // previous frame was re-anchored (game time follows the real clock)
+	qboolean  vblankLock;       // r_vsync 4 phase-locked scheduling
+	int       mode;
+	double    periodUs;
+	double    deadlineUs;       // present deadline of the current frame
+	long long frameStartUs;     // timestamp after the top-of-frame wait
+	long long lastTopUs;
+	int       presentedFrame;   // com_frameNumber the readiness was recorded for
+	int       ring[PACE_RING];
+	int       ringPos;
+	long long lastVblankUs;
+	double    vblankPeriodUs;   // measured swap-to-swap interval (vsync lock)
+	int       vblankGood;       // consecutive swap intervals that looked like a real vblank
+} pacer_t;
+
+static pacer_t pacer;
+
+static int Com_PaceCmpInt( const void *a, const void *b ) {
+	return *(const int *)a - *(const int *)b;
+}
+
+// ~P98 (second worst of the last 64 frames) of the recent "frame start -> ready to present" cost, in us
+static int Com_PaceLead( void ) {
+	int tmp[PACE_RING];
+
+	Com_Memcpy( tmp, pacer.ring, sizeof( tmp ) );
+	qsort( tmp, PACE_RING, sizeof( int ), Com_PaceCmpInt );
+	return tmp[PACE_RING - 2];
+}
+
+static void Com_FrameWaitTop( void ) {
+	float fps;
+	long long now;
+	int vsync = com_vsync->integer;
+	qboolean llEligible;
+	int lead;
+	double target;
+
+	pacer.active = qfalse;
+	pacer.vblankLock = qfalse;
+
+	if ( com_minimized->integer && com_maxfpsMinimized->value > 0 ) {
+		fps = com_maxfpsMinimized->value;
+	} else if ( com_unfocused->integer && com_maxfpsUnfocused->value > 0 ) {
+		fps = com_maxfpsUnfocused->value;
+	} else {
+		fps = com_maxfps->value;
+	}
+
+	now = Sys_Microseconds();
+	pacer.mode = com_maxfpsMode->integer;
+	if ( pacer.mode < 0 || pacer.mode > 2 ) {
+		pacer.mode = 2;
+	}
+
+	// low latency vsync: lock to the display unless the user capped below it
+	llEligible = vsync == 4 && com_displayRefresh->value > 1 &&
+				 ( fps <= 0 || fps >= com_displayRefresh->value - 0.5f );
+	if ( llEligible && pacer.vblankGood < 4 ) {
+		// the swap is not (yet) behaving like a vblank-locked flip: pace at the refresh rate instead
+		fps = com_displayRefresh->value;
+	} else if ( llEligible ) {
+		pacer.vblankLock = qtrue;
+		pacer.periodUs = pacer.vblankPeriodUs > 0 ? pacer.vblankPeriodUs : 1000000.0 / com_displayRefresh->value;
+		// a swap that does not block at the vblank (compositor/driver quirks) must not schedule faster than the display
+		if ( pacer.periodUs < 1000000.0 / com_displayRefresh->value ) {
+			pacer.periodUs = 1000000.0 / com_displayRefresh->value;
+		}
+		pacer.active = qtrue;
+		pacer.late = qfalse;
+		lead = pacer.presentedFrame ? Com_PaceLead() : (int)( pacer.periodUs * 0.5 );
+		if ( lead > pacer.periodUs * 0.85 ) {
+			lead = (int)( pacer.periodUs * 0.85 );
+		}
+		if ( pacer.lastVblankUs && now - pacer.lastVblankUs < 6 * pacer.periodUs ) {
+			// phase-locked: schedule from the last observed vblank, never the wall clock
+			target = (double)pacer.lastVblankUs + pacer.periodUs - lead - 300;
+			if ( now < target ) {
+				Sys_WaitUntil( (long long)target, com_maxfpsSpinUs->integer );
+			} else {
+				pacer.late = qtrue;
+			}
+		}
+		pacer.deadlineUs = (double)pacer.lastVblankUs + pacer.periodUs;
+		pacer.frameStartUs = Sys_Microseconds();
+		pacer.lastTopUs = pacer.frameStartUs;
+		return;
+	}
+
+	if ( fps <= 0 ) {
+		pacer.deadlineUs = 0;       // uncapped; re-anchor when a cap comes back
+		pacer.lastTopUs = now;
+		return;
+	}
+
+	pacer.active = qtrue;
+	pacer.periodUs = 1000000.0 / fps;
+	pacer.deadlineUs += pacer.periodUs;
+	pacer.late = qfalse;
+	if ( pacer.deadlineUs < now - pacer.periodUs * 0.5 || pacer.deadlineUs > now + 2 * pacer.periodUs ) {
+		pacer.deadlineUs = (double)now;     // first frame, hitch, or cap changed
+		pacer.late = qtrue;
+	}
+
+	if ( pacer.mode == 0 ) {
+		Sys_WaitUntil( (long long)pacer.deadlineUs, com_maxfpsSpinUs->integer );
+	} else if ( pacer.mode == 2 ) {
+		lead = Com_PaceLead() + 500;
+		if ( pacer.presentedFrame == 0 ) {
+			lead = (int)( pacer.periodUs * 0.5 );
+		}
+		if ( lead > pacer.periodUs * 0.9 ) {
+			lead = (int)( pacer.periodUs * 0.9 );
+		}
+		Sys_WaitUntil( (long long)pacer.deadlineUs - lead, com_maxfpsSpinUs->integer );
+	}
+	pacer.frameStartUs = Sys_Microseconds();
+}
+
+/*
+=================
+Com_PresentWait
+
+Called by the renderer right before it swaps buffers (finish = glFinish).
+=================
+*/
+void Com_PresentWait( void ( *finish )( void ) ) {
+	long long ready;
+
+	if ( !pacer.active || pacer.presentedFrame == com_frameNumber + 1 ) {
+		return;     // uncapped, or an extra EndFrame within the same Com_Frame (loading screens)
+	}
+	pacer.presentedFrame = com_frameNumber + 1;
+
+	if ( finish && com_maxfpsGpuSync->integer && ( pacer.mode > 0 || pacer.vblankLock ) ) {
+		finish();
+	}
+	ready = Sys_Microseconds();
+	pacer.ring[pacer.ringPos++ % PACE_RING] = (int)( ready - pacer.frameStartUs );
+
+	if ( pacer.vblankLock || pacer.mode == 0 ) {
+		return;
+	}
+	if ( ready > pacer.deadlineUs + pacer.periodUs * 0.5 ) {
+		pacer.deadlineUs = (double)ready;       // missed: re-anchor, game time follows the real clock
+		pacer.late = qtrue;
+		return;
+	}
+	Sys_WaitUntil( (long long)pacer.deadlineUs, com_maxfpsSpinUs->integer );
+}
+
+/*
+=================
+Com_PresentDone
+
+Called by the renderer right after the buffer swap. With vsync lock the swap
+returns at the vblank, which is what the next frame is scheduled from.
+=================
+*/
+void Com_PresentDone( void ( *finish )( void ) ) {
+	long long now;
+
+	com_lastPresentUs = Sys_Microseconds();
+	if ( com_vsync->integer != 4 || com_displayRefresh->value <= 1 ) {
+		pacer.vblankGood = 0;
+		return;
+	}
+	if ( finish ) {
+		finish();   // queue depth 1: swap returned means the flip happened
+	}
+	now = Sys_Microseconds();
+	if ( pacer.lastVblankUs ) {
+		double d = (double)( now - pacer.lastVblankUs );
+		double nominal = 1000000.0 / com_displayRefresh->value;
+
+		if ( d > nominal * 0.88 && d < nominal * 1.12 ) {
+			pacer.vblankPeriodUs = pacer.vblankPeriodUs > 0 ? pacer.vblankPeriodUs * 0.95 + d * 0.05 : d;
+			if ( pacer.vblankGood < 8 ) {
+				pacer.vblankGood++;
+			}
+		} else {
+			pacer.vblankGood = 0;
+		}
+	}
+	pacer.lastVblankUs = now;
+}
+
+/*
+=================
+Com_PacedMsec
+
+Game-time step for paced frames: the scheduled period, not the wake-up time.
+The sub-millisecond remainder goes to cgame (com_frameFracUs) so visuals can
+interpolate between integer-ms game ticks. A late frame, or more than 3 ms of
+drift from the real clock, follows the real clock instead.
+=================
+*/
+static int Com_PacedMsec( int eventMsec ) {
+	static double gameClockUs;
+	static long long originUs, prevStartUs;
+	static int lastMs;
+	static qboolean synced;
+	double real, step;
+	int msec;
+
+	if ( !pacer.active || com_dedicated->integer || com_timedemo->integer ) {
+		synced = qfalse;
+		com_frameFracUs = 0;
+		return eventMsec;
+	}
+	if ( !synced ) {
+		synced = qtrue;
+		originUs = pacer.frameStartUs;
+		prevStartUs = pacer.frameStartUs;
+		gameClockUs = 0;
+		lastMs = 0;
+		com_frameFracUs = 0;
+		return eventMsec;
+	}
+
+	real = (double)( pacer.frameStartUs - originUs );
+	step = pacer.late ? (double)( pacer.frameStartUs - prevStartUs ) : pacer.periodUs;
+	prevStartUs = pacer.frameStartUs;
+	gameClockUs += step;
+	if ( fabs( gameClockUs - real ) > 3000.0 ) {
+		gameClockUs = real;
+	}
+	msec = (int)( gameClockUs / 1000.0 ) - lastMs;
+	if ( msec < 0 ) {
+		msec = 0;
+	}
+	lastMs += msec;
+	com_frameFracUs = (int)( gameClockUs - lastMs * 1000.0 );
+	if ( com_frameFracUs < 0 ) {
+		com_frameFracUs = 0;
+	}
+	return msec;
+}
+
+/*
+=================
 Com_Frame
 =================
 */
@@ -2756,6 +3037,13 @@ void Com_Frame( void ) {
 			// Adjust minMsec if previous frame took too long to render so
 			// that framerate is stable at the requested value.
 			minMsec -= bias;
+
+			if ( com_maxfpsPrecise->integer ) {
+				Com_FrameWaitTop();
+				minMsec = 0;    // legacy loop below runs once (network poll only)
+			} else {
+				pacer.active = qfalse;
+			}
 		}
 	}
 	else
@@ -2787,6 +3075,7 @@ void Com_Frame( void ) {
 	com_frameTime = Com_EventLoop();
 	
 	msec = com_frameTime - lastTime;
+	msec = Com_PacedMsec( msec );
 
 	Cbuf_Execute();
 

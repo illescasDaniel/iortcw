@@ -1059,7 +1059,7 @@ CL_CGameRendering
 =====================
 */
 void CL_CGameRendering( stereoFrame_t stereo ) {
-	VM_Call( cgvm, CG_DRAW_ACTIVE_FRAME, cl.serverTime, stereo, clc.demoplaying );
+	VM_Call( cgvm, CG_DRAW_ACTIVE_FRAME, cl.serverTime, stereo, clc.demoplaying, com_frameFracUs );
 	VM_Debug( 0 );
 }
 
@@ -1304,7 +1304,8 @@ void CL_SetCGameTime( void ) {
 	// cl_benchDemo: measure real-time frame durations; serverTime is left alone
 	// so playback runs at normal speed (unlike timedemo's fixed 50 ms steps).
 	if ( cl_benchDemo->integer && !cl_timedemo->integer ) {
-		long long now = Sys_Microseconds();
+		// present cadence (previous swap) when the renderer reports it, else frame start
+		long long now = com_lastPresentUs ? com_lastPresentUs : Sys_Microseconds();
 
 		if ( !clc.benchStartUs ) {
 			clc.benchStartUs = now;

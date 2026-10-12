@@ -64,6 +64,7 @@ cvar_t *r_allowSoftwareGL; // Don't abort out if a hardware visual can't be obta
 cvar_t *r_allowResize; // make window resizable
 cvar_t *r_centerWindow;
 cvar_t *r_sdlDriver;
+cvar_t *r_vsync;       // 0 off, 1 on, 2 adaptive, 3 triple buffer (fast), 4 low latency
 
 int qglMajorVersion, qglMinorVersion;
 int qglesMajorVersion, qglesMinorVersion;
@@ -449,6 +450,60 @@ static void GLimp_ClearProcAddresses( void ) {
 
 /*
 ===============
+GLimp_Finish
+
+glFinish wrapper handed to the frame pacer
+===============
+*/
+static void GLimp_Finish( void )
+{
+	qglFinish();
+}
+
+/*
+===============
+GLimp_ApplyVsync
+
+r_vsync: 0 off, 1 on, 2 adaptive, 3 triple buffer (fast: never blocks, newest
+frame wins at the display), 4 low latency (vsync + engine phase-locked start).
+Safe to call at any time; no context or window restart needed.
+===============
+*/
+static void GLimp_ApplyVsync( void )
+{
+	static const int interval[5] = { 0, 1, -1, 0, 1 };
+	SDL_DisplayMode dm;
+	int mode = r_vsync->integer;
+	int idx;
+
+	if ( mode < 0 || mode > 4 )
+	{
+		mode = 0;
+	}
+
+	if( SDL_GL_SetSwapInterval( interval[mode] ) == -1 )
+	{
+		ri.Printf( PRINT_ALL, "r_vsync %d: swap interval %d unsupported (%s)\n", mode, interval[mode], SDL_GetError( ) );
+		if ( interval[mode] == -1 && SDL_GL_SetSwapInterval( 1 ) == 0 )
+		{
+			ri.Printf( PRINT_ALL, "r_vsync 2: adaptive vsync unavailable, using vsync on\n" );
+		}
+	}
+
+	// the engine pacer needs the refresh rate for r_vsync 4
+	idx = SDL_window ? SDL_GetWindowDisplayIndex( SDL_window ) : 0;
+	if ( idx >= 0 && SDL_GetCurrentDisplayMode( idx, &dm ) == 0 && dm.refresh_rate > 0 )
+	{
+		ri.Cvar_Set( "r_displayRefreshActual", va( "%d", dm.refresh_rate ) );
+	}
+	ri.Printf( PRINT_ALL, "r_vsync %d: swap interval %d requested, driver reports %d (%s, %d Hz)\n", mode,
+			   interval[mode], SDL_GL_GetSwapInterval(), SDL_GetCurrentVideoDriver(),
+			   ( idx >= 0 && SDL_GetCurrentDisplayMode( idx, &dm ) == 0 ) ? dm.refresh_rate : 0 );
+	r_vsync->modified = qfalse;
+}
+
+/*
+===============
 GLimp_SetMode
 ===============
 */
@@ -830,10 +885,7 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 		qglClear( GL_COLOR_BUFFER_BIT );
 		SDL_GL_SwapWindow( SDL_window );
 
-		if( SDL_GL_SetSwapInterval( r_swapInterval->integer ) == -1 )
-		{
-			ri.Printf( PRINT_DEVELOPER, "SDL_GL_SetSwapInterval failed: %s\n", SDL_GetError( ) );
-		}
+		GLimp_ApplyVsync();
 
 		SDL_GL_GetAttribute( SDL_GL_RED_SIZE, &realColorBits[0] );
 		SDL_GL_GetAttribute( SDL_GL_GREEN_SIZE, &realColorBits[1] );
@@ -1139,6 +1191,8 @@ void GLimp_Init( qboolean fixedFunction )
 
 	r_allowSoftwareGL = ri.Cvar_Get( "r_allowSoftwareGL", "0", CVAR_LATCH );
 	r_sdlDriver = ri.Cvar_Get( "r_sdlDriver", "", CVAR_ROM );
+	r_vsync = ri.Cvar_Get( "r_vsync", "0", CVAR_ARCHIVE );
+	ri.Cvar_Get( "r_displayRefreshActual", "0", CVAR_TEMP );
 	r_allowResize = ri.Cvar_Get( "r_allowResize", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_centerWindow = ri.Cvar_Get( "r_centerWindow", "0", CVAR_ARCHIVE | CVAR_LATCH );
 
@@ -1246,7 +1300,19 @@ void GLimp_EndFrame( void )
 	// don't flip if drawing to front buffer
 	if ( Q_stricmp( r_drawBuffer->string, "GL_FRONT" ) != 0 )
 	{
+		if ( r_vsync->modified )
+		{
+			GLimp_ApplyVsync();
+		}
+		if ( ri.PresentWait )
+		{
+			ri.PresentWait( GLimp_Finish );
+		}
 		SDL_GL_SwapWindow( SDL_window );
+		if ( ri.PresentDone )
+		{
+			ri.PresentDone( GLimp_Finish );
+		}
 	}
 
 	if( r_fullscreen->modified )

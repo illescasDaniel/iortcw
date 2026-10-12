@@ -198,6 +198,10 @@ typedef struct {
 	void	(*Sys_GLimpSafeInit)( void );
 	void	(*Sys_GLimpInit)( void );
 	qboolean (*Sys_LowPhysicalMemory)( void );
+
+	// frame pacing around the buffer swap (finish = glFinish); may be NULL
+	void	(*PresentWait)( void ( *finish )( void ) );
+	void	(*PresentDone)( void ( *finish )( void ) );
 } refimport_t;
 
 

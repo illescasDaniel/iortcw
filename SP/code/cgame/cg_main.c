@@ -61,7 +61,7 @@ Q_EXPORT intptr_t vmMain( intptr_t command, intptr_t arg0, intptr_t arg1, intptr
 	case CG_GET_TAG:
 		return CG_GetTag( arg0, (char *)arg1, (orientation_t *)arg2 );
 	case CG_DRAW_ACTIVE_FRAME:
-		CG_DrawActiveFrame( arg0, arg1, arg2 );
+		CG_DrawActiveFrame( arg0, arg1, arg2, arg3 );
 		return 0;
 	case CG_EVENT_HANDLING:
 		CG_EventHandling( arg0 );
@@ -153,6 +153,7 @@ vmCvar_t cg_brassTime;
 vmCvar_t cg_viewsize;
 vmCvar_t cg_letterbox;
 vmCvar_t cg_drawGun;
+vmCvar_t cg_subMsecLerp;
 vmCvar_t cg_drawFPGun;
 vmCvar_t cg_drawGamemodels;
 vmCvar_t cg_cursorHints;
@@ -290,6 +291,7 @@ cvarTable_t cvarTable[] = {
 	{ &cg_ignore, "cg_ignore", "0", 0 },  // used for debugging
 	{ &cg_autoswitch, "cg_autoswitch", "2", CVAR_ARCHIVE },
 	{ &cg_drawGun, "cg_drawGun", "1", CVAR_ARCHIVE },
+	{ &cg_subMsecLerp, "cg_subMsecLerp", "0", CVAR_ARCHIVE },   // codmod: sub-ms visual interpolation with the paced game clock
 	{ &cg_drawGamemodels, "cg_drawGamemodels", "1", CVAR_CHEAT },
 	{ &cg_drawFPGun, "cg_drawFPGun", "1", CVAR_ARCHIVE },
 	{ &cg_gun_frame, "cg_gun_frame", "0", CVAR_TEMP },

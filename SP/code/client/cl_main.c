@@ -942,12 +942,12 @@ static void CL_ReportBenchDemo( void ) {
 	Com_sprintf( head, sizeof( head ), "res=%dx%d msaa=%s swap=%s maxfps=%s renderer=%s",
 				 cls.glconfig.vidWidth, cls.glconfig.vidHeight,
 				 Cvar_VariableString( "r_ext_framebuffer_multisample" ),
-				 Cvar_VariableString( "r_swapInterval" ),
+				 Cvar_VariableString( "r_vsync" ),
 				 Cvar_VariableString( "com_maxfps" ),
 				 Cvar_VariableString( "cl_renderer" ) );
 	Com_Printf( "codmod bench cfg: %s\n", head );
-	if ( Cvar_VariableIntegerValue( "r_swapInterval" ) != 0 || Cvar_VariableIntegerValue( "com_maxfps" ) != 0 ) {
-		Com_Printf( S_COLOR_YELLOW "codmod bench: WARNING vsync/fps cap active, FPS is limited (want r_swapInterval 0, com_maxfps 0)\n" );
+	if ( Cvar_VariableIntegerValue( "r_vsync" ) != 0 || Cvar_VariableIntegerValue( "com_maxfps" ) != 0 ) {
+		Com_Printf( S_COLOR_YELLOW "codmod bench: WARNING vsync/fps cap active, FPS is limited (want r_vsync 0, com_maxfps 0)\n" );
 	}
 
 	f = FS_FOpenFileWrite( "benchmarks/last_frametimes.txt" );
@@ -3489,6 +3489,8 @@ void CL_InitRef( void ) {
 	ri.Printf = CL_RefPrintf;
 	ri.Error = Com_Error;
 	ri.Milliseconds = CL_ScaledMilliseconds;
+	ri.PresentWait = Com_PresentWait;
+	ri.PresentDone = Com_PresentDone;
 
 	ri.Z_Malloc = Z_Malloc;
 	ri.Free = Z_Free;

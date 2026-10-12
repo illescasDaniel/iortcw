@@ -1229,6 +1229,12 @@ static int CG_CalcViewValues( void ) {
 	VectorCopy( ps->origin, cg.refdef.vieworg );
 	VectorCopy( ps->viewangles, cg.refdefViewAngles );
 
+	// codmod: the game ticks in whole ms but frames land between ticks; carry the
+	// view forward by the sub-ms remainder so paced frames move evenly
+	if ( cg_subMsecLerp.integer && cg.timeFracUs && ps->pm_type == PM_NORMAL && !ps->viewlocked ) {
+		VectorMA( cg.refdef.vieworg, cg.timeFracUs * 0.000001f, ps->velocity, cg.refdef.vieworg );
+	}
+
 	// add error decay
 	if ( cg_errorDecay.value > 0 ) {
 		int t;
@@ -1558,7 +1564,7 @@ CG_DrawActiveFrame
 Generates and draws a game scene and status information at the given time.
 =================
 */
-void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback ) {
+void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback, int frameFracUs ) {
 	int inwater;
 
 	cg.cld = 0;         // NERVE - SMF - reset clientDamage
@@ -1569,6 +1575,8 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 #endif
 
 	cg.time = serverTime;
+	// codmod: microseconds into this game millisecond (paced frames only); visual-only
+	cg.timeFracUs = ( frameFracUs > 0 && frameFracUs < 1000 ) ? frameFracUs : 0;
 	cg.demoPlayback = demoPlayback;
 
 	// update cvars

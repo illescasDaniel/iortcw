@@ -752,6 +752,7 @@ typedef struct {
 	int clientNum;
 
 	qboolean demoPlayback;
+	int timeFracUs;             // codmod: sub-ms remainder of the paced game clock (0..999)
 	qboolean levelShot;             // taking a level menu screenshot
 	int deferredPlayerLoading;
 	qboolean loading;               // don't defer players at initial startup
@@ -1730,6 +1731,7 @@ extern vmCvar_t cg_gun_x;
 extern vmCvar_t cg_gun_y;
 extern vmCvar_t cg_gun_z;
 extern vmCvar_t cg_drawGun;
+extern vmCvar_t cg_subMsecLerp;
 extern vmCvar_t cg_drawFPGun;
 extern vmCvar_t cg_drawGamemodels;
 extern vmCvar_t cg_cursorHints;
@@ -1888,7 +1890,7 @@ void CG_ZoomIn_f( void );
 void CG_ZoomOut_f( void );
 void CG_ZoomUp_f( void );
 
-void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback );
+void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback, int frameFracUs );
 
 void CG_Concussive( centity_t *cent );
 
