@@ -27,6 +27,7 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 #include "g_local.h"
+#include "bg_cod.h"     // codmod: kick damage
 
 /*
 ==================
@@ -1692,6 +1693,10 @@ int Cmd_WolfKick_f( gentity_t *ent ) {
 	qboolean solidKick = qfalse;    // don't play "hit" sound on a trigger unless it's an func_invisible_user
 
 	int damage = 15;
+
+	if ( !ent->aiCharacter && bg_cod.enable && bg_cod.kickDamage > 0 ) {
+		damage = (int)bg_cod.kickDamage;
+	}
 
 	if ( ent->client->ps.leanf ) {
 		return 0;   // no kick when leaning

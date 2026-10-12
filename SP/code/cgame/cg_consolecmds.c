@@ -432,6 +432,8 @@ static consoleCommand_t commands[] = {
 	{ "-reloaduse", CG_ReloadUseUp_f },
 	{ "toggleflashlight", CG_ToggleFlashlight_f }, // codmod: phase 5d flashlight (bind l)
 	{ "cod_resetbinds", CG_CodResetBinds_f }, // codmod: phase 5d full bind reset
+	{ "+quickkick", CG_QuickKickDown_f }, // codmod: pad R3 tap quickknife / hold kick
+	{ "-quickkick", CG_QuickKickUp_f },
 	{ "quickknife", CG_QuickKnife_f }, // codmod: phase 5.5 CoD-style quick knife (bind v)
 	{ "cod_adsTuneLoad", CG_CodAdsTuneLoad_f },   // codmod: phase 3.5 alignment tooling
 	{ "cod_adsTuneDump", CG_CodAdsTuneDump_f },   // codmod: phase 3.5 alignment tooling

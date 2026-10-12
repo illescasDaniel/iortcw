@@ -141,6 +141,7 @@ const codCvarDef_t bg_codCvars[] = {
 
 	{ "cod_quickKnifeEnable",   "1",    0,            CODOFS( quickKnifeEnable ),   1 },
 	{ "cod_quickKnifeTimeout",  "900",  0,            CODOFS( quickKnifeTimeout ),  0 },
+	{ "cod_kickDamage",         "50",   0,            CODOFS( kickDamage ),         0 },
 	// codmod: snappy knife pull (was 250+250). 75 keeps anim readable but CoD-connected.
 	{ "cod_knifeSwitchTime",    "75",   0,            CODOFS( knifeSwitchTime ),    0 },
 

@@ -819,6 +819,9 @@ typedef struct {
 	int codProneMovingTime;              // codmod: phase 6b — cg.time of last PRONE_MOVING edge
 	qboolean codProneWasMoving;          // codmod: previous frame's COD_SF_PRONE_MOVING
 
+	qboolean codQkickDown;               // codmod: +quickkick held (pad R3)
+	int      codQkickStart;              // codmod: cg.time at press
+	int      codQkickState;              // 0 idle/pending, 1 kick sent, 2 kick released
 	int codQkPrev;                       // codmod: phase 5.5 — weapon to restore after quickknife
 	int codQkState;                      // codmod: 0 idle, 1 switching, 2 swinging, 3 returning
 	int codQkStartTime;                  // codmod: cg.time when quickknife started
@@ -2286,6 +2289,9 @@ void CG_CodUpdateCrouchProne( void );  // codmod: hold-crouch → prone
 void CG_CodUpdateReloadUse( void );    // codmod: tap reload / hold use
 void CG_CodAddFlashlight( void );      // codmod: phase 5d view dlight
 void CG_CodDrawFlashlightHudIcon( float weapX, float weapY, float weapW, float weapH ); // codmod: HUD on-indicator
+void CG_QuickKickDown_f( void );      // codmod: pad R3 tap quickknife / hold kick
+void CG_QuickKickUp_f( void );
+void CG_CodUpdateQuickKick( void );
 void CG_QuickKnife_f( void );          // codmod: phase 5.5 CoD-style quick knife
 float CG_CodAdsFrac( void );           // codmod: phase 3.5, raw 0..1, forced to 1 by cod_adsLock
 float CG_CodSprintFrac( void );        // codmod: phase 4, 0..1 visual sprint lower (eased)

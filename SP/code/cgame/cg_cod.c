@@ -1464,6 +1464,42 @@ void CG_QuickKnife_f( void ) {
 	CG_FinishWeaponChange( cur, WP_KNIFE );
 }
 
+// CoD: tap R3 = quick knife; hold = kick (slower, hits harder). Kick is pulsed, not held.
+#define COD_QUICKKICK_HOLD_MS 250
+#define COD_QUICKKICK_PULSE_MS 120
+
+void CG_QuickKickDown_f( void ) {
+	cg.codQkickDown = qtrue;
+	cg.codQkickStart = cg.time;
+	cg.codQkickState = 0;
+}
+
+void CG_QuickKickUp_f( void ) {
+	if ( !cg.codQkickDown ) {
+		return;
+	}
+	cg.codQkickDown = qfalse;
+	if ( cg.codQkickState == 1 ) {
+		trap_SendConsoleCommand( "-kick\n" );
+	} else if ( cg.codQkickState == 0 ) {
+		CG_QuickKnife_f();  // tap
+	}
+	cg.codQkickState = 0;
+}
+
+void CG_CodUpdateQuickKick( void ) {
+	if ( !cg.codQkickDown ) {
+		return;
+	}
+	if ( cg.codQkickState == 0 && cg.time - cg.codQkickStart >= COD_QUICKKICK_HOLD_MS ) {
+		trap_SendConsoleCommand( "+kick\n" );
+		cg.codQkickState = 1;
+	} else if ( cg.codQkickState == 1 && cg.time - cg.codQkickStart >= COD_QUICKKICK_HOLD_MS + COD_QUICKKICK_PULSE_MS ) {
+		trap_SendConsoleCommand( "-kick\n" );
+		cg.codQkickState = 2;
+	}
+}
+
 /*
 ================
 CG_CodUpdateQuickKnife

@@ -1637,6 +1637,7 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 
 	// codmod: CoD-style quick knife state machine (phase 5.5)
 	CG_CodUpdateQuickKnife();
+	CG_CodUpdateQuickKick();
 
 	// codmod: toggle crouch auto-stand on jump (phase 5d)
 	CG_CodUpdateToggleCrouch();

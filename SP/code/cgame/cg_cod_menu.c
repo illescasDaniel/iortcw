@@ -294,6 +294,7 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_BOOL,  "cod_semiAutoClick",      "cod_semiAutoClick",      1,    1,    NULL },
 	{ COD_MI_BOOL,  "cod_quickKnifeEnable",   "cod_quickKnifeEnable",   1,    1,    NULL },
 	{ COD_MI_FLOAT, "cod_quickKnifeTimeout",  "cod_quickKnifeTimeout",  50,   200,  NULL },
+	{ COD_MI_FLOAT, "cod_kickDamage",         "cod_kickDamage",         5,    25,   NULL },
 	{ COD_MI_FLOAT, "cod_knifeSwitchTime",    "cod_knifeSwitchTime",    5,    25,   NULL },
 
 	{ COD_MI_SECTION, "CROUCH / DUCK", NULL, 0, 0, NULL },

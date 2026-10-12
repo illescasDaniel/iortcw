@@ -110,6 +110,7 @@ typedef struct {
 
 	int quickKnifeEnable;      // cgame quickknife command (phase 5.5)
 	float quickKnifeTimeout;   // ms failsafe to return to previous weapon
+	float kickDamage;          // +kick damage (vanilla 15); slower than the knife so it hits harder
 	float knifeSwitchTime;     // ms drop/raise when switching to/from knife (0 = vanilla 250)
 
 	// codmod: Phase 5b vitals — health regen, stamina finish, HUD bars
