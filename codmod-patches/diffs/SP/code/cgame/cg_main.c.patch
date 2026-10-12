@@ -1,0 +1,90 @@
+diff --git a/SP/code/cgame/cg_main.c b/SP/code/cgame/cg_main.c
+index 13362aff..d0d188b1 100644
+--- a/SP/code/cgame/cg_main.c
++++ b/SP/code/cgame/cg_main.c
+@@ -44,6 +44,9 @@ int forceModelModificationCount = -1;
+ void CG_Init( int serverMessageNum, int serverCommandSequence );
+ void CG_Shutdown( void );
+ 
++// codmod: cgame's copy of the cod_* cvars; filled in by BG_CodRegisterCvars/BG_CodUpdateCvars
++static vmCvar_t codCvars[BG_COD_MAX_CVARS];
++
+ 
+ /*
+ ================
+@@ -58,7 +61,7 @@ Q_EXPORT intptr_t vmMain( intptr_t command, intptr_t arg0, intptr_t arg1, intptr
+ 	case CG_GET_TAG:
+ 		return CG_GetTag( arg0, (char *)arg1, (orientation_t *)arg2 );
+ 	case CG_DRAW_ACTIVE_FRAME:
+-		CG_DrawActiveFrame( arg0, arg1, arg2 );
++		CG_DrawActiveFrame( arg0, arg1, arg2, arg3 );
+ 		return 0;
+ 	case CG_EVENT_HANDLING:
+ 		CG_EventHandling( arg0 );
+@@ -150,6 +153,7 @@ vmCvar_t cg_brassTime;
+ vmCvar_t cg_viewsize;
+ vmCvar_t cg_letterbox;
+ vmCvar_t cg_drawGun;
++vmCvar_t cg_subMsecLerp;
+ vmCvar_t cg_drawFPGun;
+ vmCvar_t cg_drawGamemodels;
+ vmCvar_t cg_cursorHints;
+@@ -287,6 +291,7 @@ cvarTable_t cvarTable[] = {
+ 	{ &cg_ignore, "cg_ignore", "0", 0 },  // used for debugging
+ 	{ &cg_autoswitch, "cg_autoswitch", "2", CVAR_ARCHIVE },
+ 	{ &cg_drawGun, "cg_drawGun", "1", CVAR_ARCHIVE },
++	{ &cg_subMsecLerp, "cg_subMsecLerp", "0", CVAR_ARCHIVE },   // codmod: sub-ms visual interpolation with the paced game clock
+ 	{ &cg_drawGamemodels, "cg_drawGamemodels", "1", CVAR_CHEAT },
+ 	{ &cg_drawFPGun, "cg_drawFPGun", "1", CVAR_ARCHIVE },
+ 	{ &cg_gun_frame, "cg_gun_frame", "0", CVAR_TEMP },
+@@ -505,7 +510,8 @@ void CG_RegisterCvars( void ) {
+ 	trap_Cvar_Register( NULL, "model", DEFAULT_MODEL, CVAR_USERINFO | CVAR_ARCHIVE );
+ 	trap_Cvar_Register( NULL, "head", DEFAULT_HEAD, CVAR_USERINFO | CVAR_ARCHIVE );
+ 
+-
++	// codmod: register the cod_* tuning cvars (bg_cod.c is the single source of truth)
++	BG_CodRegisterCvars( codCvars, BG_COD_MAX_CVARS );
+ }
+ 
+ /*
+@@ -542,6 +548,9 @@ void CG_UpdateCvars( void ) {
+ 		trap_Cvar_Update( cv->vmCvar );
+ 	}
+ 
++	// codmod: re-apply every frame so cvar changes take effect at once
++	BG_CodUpdateCvars( codCvars, BG_COD_MAX_CVARS );
++
+ /* RF, disabled this, not needed anymore
+ 	// if force model changed
+ 	if ( forceModelModificationCount != cg_forceModel.modificationCount ) {
+@@ -892,6 +901,10 @@ static void CG_RegisterSounds( void ) {
+ 
+ 	cgs.media.noAmmoSound = trap_S_RegisterSound( "sound/weapons/noammo.wav" );
+ 
++	// codmod: E9 hit marker ticks (shipped in mod/codmod/codmod_fx.pk3)
++	cgs.media.codHitMarkerSound = trap_S_RegisterSound( "sound/codmod/hitmarker.wav" );
++	cgs.media.codHitMarkerHeadSound = trap_S_RegisterSound( "sound/codmod/hitmarker_head.wav" );
++
+ 	cgs.media.talkSound = trap_S_RegisterSound( "sound/player/talk.wav" );
+ 	cgs.media.landSound = trap_S_RegisterSound( "sound/player/land1.wav" );
+ 
+@@ -1513,6 +1526,11 @@ static void CG_RegisterGraphics( void ) {
+ //	cgs.media.cursor = trap_R_RegisterShaderNoMip( "menu/art/3_cursor2" );
+ 	cgs.media.sizeCursor = trap_R_RegisterShaderNoMip( "ui/assets/sizecursor.tga" );
+ 	cgs.media.selectCursor = trap_R_RegisterShaderNoMip( "ui/assets/selectcursor.tga" );
++
++	// codmod: pad interact glyphs — hold X / Square (CoD-style use)
++	cgs.media.padXboxX = trap_R_RegisterShaderNoMip( "ui/glyphs/pad_xbox_x" );
++	cgs.media.padPsSquare = trap_R_RegisterShaderNoMip( "ui/glyphs/pad_ps_square" );
++
+ 	CG_LoadingString( " - game media done" );
+ 
+ }
+@@ -2430,6 +2448,7 @@ Called before every level change or subsystem restart
+ void CG_Shutdown( void ) {
+ 	// some mods may need to do cleanup work here,
+ 	// like closing files or archiving session data
++	CG_CodMenu_OnShutdown(); // codmod: restore arrow binds stolen by /cod_menu
+ }
+ 
+ void CG_S_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t velocity, sfxHandle_t sfx, int volume ) {
