@@ -2481,6 +2481,73 @@ qboolean Item_Multi_HandleKey( itemDef_t *item, int key ) {
 	return qfalse;
 }
 
+// codmod: keep the cursor inside [0,len] and the visible window [paintOffset, paintOffset+maxPaintChars].
+static void Item_TextField_FixScroll( itemDef_t *item, int len ) {
+	editFieldDef_t *editPtr = (editFieldDef_t*)item->typeData;
+	int window = editPtr->maxPaintChars;
+
+	if ( item->cursorPos > len ) {
+		item->cursorPos = len;
+	}
+	if ( item->cursorPos < 0 ) {
+		item->cursorPos = 0;
+	}
+	if ( window <= 0 || window > MAX_EDITFIELD ) {
+		window = MAX_EDITFIELD;
+	}
+	if ( item->cursorPos < editPtr->paintOffset ) {
+		editPtr->paintOffset = item->cursorPos;
+	}
+	if ( item->cursorPos > editPtr->paintOffset + window ) {
+		editPtr->paintOffset = item->cursorPos - window;
+	}
+	if ( editPtr->paintOffset > len ) {
+		editPtr->paintOffset = len;
+	}
+	if ( editPtr->paintOffset < 0 ) {
+		editPtr->paintOffset = 0;
+	}
+}
+
+// codmod: enter edit mode with the cursor at the end of the value (or at the clicked glyph for mouse entry).
+static void Item_TextField_BeginEdit( itemDef_t *item, qboolean useMouse ) {
+	editFieldDef_t *editPtr = (editFieldDef_t*)item->typeData;
+	char buff[1024];
+	int len;
+
+	memset( buff, 0, sizeof( buff ) );
+	if ( item->cvar ) {
+		DC->getCVarString( item->cvar, buff, sizeof( buff ) );
+	}
+	len = strlen( buff );
+	if ( editPtr->maxChars && len > editPtr->maxChars ) {
+		len = editPtr->maxChars;
+	}
+
+	editPtr->paintOffset = 0;
+	item->cursorPos = len;
+	if ( useMouse && len > 0 ) {
+		float textX = item->textRect.x + item->textRect.w + ( ( item->text && *item->text ) ? 8 : 0 );
+		int i;
+
+		if ( DC->cursorx <= textX ) {
+			item->cursorPos = 0;
+		} else {
+			item->cursorPos = len;
+			for ( i = 1; i <= len; i++ ) {
+				float w = DC->textWidth( buff, item->font, item->textscale, i );
+				if ( textX + w > DC->cursorx ) {
+					item->cursorPos = i - 1;
+					break;
+				}
+			}
+		}
+	}
+	Item_TextField_FixScroll( item, len );
+	g_editingField = qtrue;
+	g_editItem = item;
+}
+
 qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 	char buff[1024];
 	int len;
@@ -2494,6 +2561,10 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 		len = strlen( buff );
 		if ( editPtr->maxChars && len > editPtr->maxChars ) {
 			len = editPtr->maxChars;
+			buff[len] = '\0';
+		}
+		if ( item->cursorPos > len ) {
+			item->cursorPos = len;
 		}
 		if ( key & K_CHAR_FLAG ) {
 			key &= ~K_CHAR_FLAG;
@@ -2593,14 +2664,10 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 			}
 
 			if ( key == K_RIGHTARROW || key == K_KP_RIGHTARROW ) {
-				if ( editPtr->maxPaintChars && item->cursorPos >= editPtr->maxPaintChars && item->cursorPos < len ) {
-					item->cursorPos++;
-					editPtr->paintOffset++;
-					return qtrue;
-				}
 				if ( item->cursorPos < len ) {
 					item->cursorPos++;
 				}
+				Item_TextField_FixScroll( item, len );
 				return qtrue;
 			}
 
@@ -2608,9 +2675,7 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 				if ( item->cursorPos > 0 ) {
 					item->cursorPos--;
 				}
-				if ( item->cursorPos < editPtr->paintOffset ) {
-					editPtr->paintOffset--;
-				}
+				Item_TextField_FixScroll( item, len );
 				return qtrue;
 			}
 
@@ -2622,9 +2687,7 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 
 			if ( key == K_END || key == K_KP_END ) { // ( tolower(key) == 'e' && trap_Key_IsDown( K_CTRL ) ) ) {
 				item->cursorPos = len;
-				if ( item->cursorPos > editPtr->maxPaintChars ) {
-					editPtr->paintOffset = len - editPtr->maxPaintChars;
-				}
+				Item_TextField_FixScroll( item, len );
 				return qtrue;
 			}
 
@@ -2637,15 +2700,19 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 		if ( key == K_TAB || key == K_DOWNARROW || key == K_KP_DOWNARROW ) {
 			newItem = Menu_SetNextCursorItem( item->parent );
 			if ( newItem && ( newItem->type == ITEM_TYPE_EDITFIELD || newItem->type == ITEM_TYPE_NUMERICFIELD || newItem->type == ITEM_TYPE_VALIDFILEFIELD ) ) {
-				g_editItem = newItem;
+				Item_TextField_BeginEdit( newItem, qfalse );
+				return qtrue;
 			}
+			return qfalse;  // landed on a non-edit item: leave edit mode
 		}
 
 		if ( key == K_UPARROW || key == K_KP_UPARROW ) {
 			newItem = Menu_SetPrevCursorItem( item->parent );
 			if ( newItem && ( newItem->type == ITEM_TYPE_EDITFIELD || newItem->type == ITEM_TYPE_NUMERICFIELD || newItem->type == ITEM_TYPE_VALIDFILEFIELD ) ) {
-				g_editItem = newItem;
+				Item_TextField_BeginEdit( newItem, qfalse );
+				return qtrue;
 			}
+			return qfalse;  // landed on a non-edit item: leave edit mode
 		}
 
 		// NERVE - SMF
@@ -3466,9 +3533,7 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 				}
 			} else if ( item->type == ITEM_TYPE_EDITFIELD || item->type == ITEM_TYPE_NUMERICFIELD || item->type == ITEM_TYPE_VALIDFILEFIELD ) {
 				if ( Rect_ContainsPoint( &item->window.rect, DC->cursorx, DC->cursory ) ) {
-					item->cursorPos = 0;
-					g_editingField = qtrue;
-					g_editItem = item;
+					Item_TextField_BeginEdit( item, qtrue );
 				}
 			} else {
 				if ( Rect_ContainsPoint( &item->window.rect, DC->cursorx, DC->cursory ) ) {
@@ -3506,9 +3571,7 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
 		if ( item ) {
 			if ( item->type == ITEM_TYPE_EDITFIELD || item->type == ITEM_TYPE_NUMERICFIELD || item->type == ITEM_TYPE_VALIDFILEFIELD ) {
 				// A/X enter edit mode; then pad left/right nudge by 0.05.
-				item->cursorPos = 0;
-				g_editingField = qtrue;
-				g_editItem = item;
+				Item_TextField_BeginEdit( item, qfalse );
 			} else {
 				Item_Action( item );
 				Menu_EnsureValidFocus( menu );
