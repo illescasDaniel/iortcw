@@ -77,7 +77,7 @@ index 94d1d872..863ea01c 100644
 +	idx = SDL_window ? SDL_GetWindowDisplayIndex( SDL_window ) : 0;
 +	if ( idx >= 0 && SDL_GetCurrentDisplayMode( idx, &dm ) == 0 && dm.refresh_rate > 0 )
 +	{
-+		tri.Cvar_Set( "r_displayRefreshActual", va( "%d", dm.refresh_rate ) );
++		ri.Cvar_Set( "r_displayRefreshActual", va( "%d", dm.refresh_rate ) );
 +	}
 +	ri.Printf( PRINT_ALL, "r_vsync %d: swap interval %d requested, driver reports %d (%s, %d Hz)\n", mode,
 +			   interval[mode], SDL_GL_GetSwapInterval(), SDL_GetCurrentVideoDriver(),
