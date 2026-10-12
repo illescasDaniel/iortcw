@@ -1,0 +1,227 @@
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index b3e39970..a94f897f 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -40,8 +40,29 @@ If you have questions concerning this license or the applicable additional terms
+ #include "../qcommon/q_shared.h"
+ #include "../renderer/tr_types.h"
+ #include "../game/bg_public.h"
++#include "../game/bg_cod.h"    // codmod: phase 2 tuning (bg_cod.c is built into cgame too)
+ #include "cg_public.h"
+ 
++// codmod: per-weapon iron-sight ADS alignment (phase 3.5). Cgame-only and NOT const --
++// the alignment tooling (cod_adsTune, cg_cod.c) overwrites all 9 fields live (absolute
++// while adsTune). Primary pose comes from tag_flash auto-align (CoD-style: rear sight
++// on screen center); geometry + fine bias correct the hold.
++typedef struct {
++	float sightHeight;         // u above the bore (tag_flash up) to the rear sight
++	float barrelBack;          // u back from tag_flash along the bore to the rear sight
++	float sightDist;           // u ahead of the camera for the rear sight when ADS; 0 => cvar
++	float fwd, right, up;      // fine bias along cg.refdef.viewaxis[0..2]
++	float pitch, yaw, roll;    // fine bias degrees
++} codAdsView_t;
++
++extern codAdsView_t cg_codAdsView[WP_NUM_WEAPONS];
++
++// codmod: apply CoD-style iron-sight ADS to the first-person hand origin/angles.
++// e is the smoothstepped ADS fraction 0..1. frame/oldframe/backlerp must match the
++// pose that will be drawn (tag_weapon moves with the hands animation).
++void CG_CodApplyIronSightAds( vec3_t handOrigin, vec3_t angles, int weaponNum, float e,
++							  int frame, int oldframe, float backlerp );
++
+ 
+ #define POWERUP_BLINKS      5
+ 
+@@ -731,6 +752,7 @@ typedef struct {
+ 	int clientNum;
+ 
+ 	qboolean demoPlayback;
++	int timeFracUs;             // codmod: sub-ms remainder of the paced game clock (0..999)
+ 	qboolean levelShot;             // taking a level menu screenshot
+ 	int deferredPlayerLoading;
+ 	qboolean loading;               // don't defer players at initial startup
+@@ -780,6 +802,45 @@ typedef struct {
+ 
+ 	float duckChange;                   // for duck viewheight smoothing
+ 	int duckTime;
++	int codDuckDuration;                 // codmod: ms for the current duck transition (phase 2.2);
++										  // kept separate from cod_duckTime so phase 5b (prone) can
++										  // set a different duration without touching this code again
++
++	qboolean codScopeByAds;              // codmod: phase 3.8 -- true while the current scope
++										  // weapon (Sniperrifle/Snooperscope/FG42scope) was entered
++										  // by holding ADS, not by the `weapalt` key. Only ADS
++										  // (CG_CodUpdateScopeHold, cg_cod.c) un-scopes in that case.
++
++	float codSprintFrac;                 // codmod: phase 4 — 0..1 visual sprint gun-lower fraction
++	int codSprintFracTime;               // codmod: cg.time of last CG_CodSprintFrac update
++
++	int codSlideStartTime;               // codmod: phase 6 — cg.time when PMF_COD_SLIDING rose
++
++	int codProneMovingTime;              // codmod: phase 6b — cg.time of last PRONE_MOVING edge
++	qboolean codProneWasMoving;          // codmod: previous frame's COD_SF_PRONE_MOVING
++
++	qboolean codQkickDown;               // codmod: +quickkick held (pad R3)
++	int      codQkickStart;              // codmod: cg.time at press
++	int      codQkickState;              // 0 idle/pending, 1 kick sent, 2 kick released
++	int codQkPrev;                       // codmod: phase 5.5 — weapon to restore after quickknife
++	int codQkState;                      // codmod: 0 idle, 1 switching, 2 swinging, 3 returning
++	int codQkStartTime;                  // codmod: cg.time when quickknife started
++	qboolean codQkAttackHeld;            // codmod: +attack pulsed and not yet released
++	qboolean codQkSawFire;               // codmod: saw WEAPON_FIRING / weaponTime during swing
++	qboolean codQkStayOnKnife;           // codmod: started already on knife — no switchback
++
++	qboolean codCrouchHeld;              // codmod: phase 5d — sticky togglecrouch state
++	qboolean codCrouchProneDown;         // codmod: +crouchprone held (pad Circle/B)
++	int      codCrouchProneStart;        // codmod: cg.time when +crouchprone went down
++	qboolean codCrouchProneWasCrouched;  // codmod: already crouched at press (tap = stand)
++	qboolean codCrouchProneWentProne;    // codmod: this hold already entered prone
++	qboolean codCrouchProneExitProne;    // codmod: this press exited prone
++	int      codPronePulse;              // codmod: 2=+prone, 1=-prone edge pulse
++	qboolean codReloadUseDown;           // codmod: +reloaduse held (pad Square/X)
++	int      codReloadUseStart;          // codmod: cg.time at press
++	qboolean codReloadUseActivated;      // codmod: hold crossed into +activate
++	int      codReloadPulse;             // codmod: 2=+reload, 1=-reload edge pulse
++	qboolean codFlashlightOn;            // codmod: phase 5d — client-local flashlight
+ 
+ 	float landChange;                   // for landing hard
+ 	int landTime;
+@@ -993,6 +1054,10 @@ typedef struct {
+ 
+ 	float rumbleScale;          //RUMBLE FX using new shakeCamera code
+ 
++	// codmod: E9 hit markers
++	int codHitMarkerTime;       // cg.time when last hit landed
++	qboolean codHitMarkerHeadshot;
++
+ } cg_t;
+ 
+ #define NUM_FUNNEL_SPRITES  21
+@@ -1341,6 +1406,9 @@ typedef struct {
+ 
+ 	sfxHandle_t hitSound;
+ 	sfxHandle_t hitTeamSound;
++	// codmod: E9 CoD-style hit marker ticks (body vs headshot)
++	sfxHandle_t codHitMarkerSound;
++	sfxHandle_t codHitMarkerHeadSound;
+ 	sfxHandle_t impressiveSound;
+ 	sfxHandle_t excellentSound;
+ 	sfxHandle_t deniedSound;
+@@ -1449,6 +1517,10 @@ typedef struct {
+ 	qhandle_t selectCursor;
+ 	qhandle_t sizeCursor;
+ 
++	// codmod: original copyright-free pad prompt glyphs (ui/glyphs in codmod_pad.pk3)
++	qhandle_t padXboxX;      // interact (hold)
++	qhandle_t padPsSquare;   // interact (hold)
++
+ } cgMedia_t;
+ 
+ 
+@@ -1662,6 +1734,7 @@ extern vmCvar_t cg_gun_x;
+ extern vmCvar_t cg_gun_y;
+ extern vmCvar_t cg_gun_z;
+ extern vmCvar_t cg_drawGun;
++extern vmCvar_t cg_subMsecLerp;
+ extern vmCvar_t cg_drawFPGun;
+ extern vmCvar_t cg_drawGamemodels;
+ extern vmCvar_t cg_cursorHints;
+@@ -1820,7 +1893,7 @@ void CG_ZoomIn_f( void );
+ void CG_ZoomOut_f( void );
+ void CG_ZoomUp_f( void );
+ 
+-void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback );
++void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback, int frameFracUs );
+ 
+ void CG_Concussive( centity_t *cent );
+ 
+@@ -1982,6 +2055,8 @@ void CG_LastWeaponUsed_f( void );     //----(SA)	added
+ void CG_NextWeaponInBank_f( void );   //----(SA)	added
+ void CG_PrevWeaponInBank_f( void );   //----(SA)	added
+ void CG_AltWeapon_f( void );
++void CG_CodAltWeapon( qboolean force );    // codmod: phase 3.8, CG_AltWeapon_f factored out
++qboolean CG_CodHasSelectableAlt( int weapon );     // codmod: phase 3.8
+ void CG_NextWeapon_f( void );
+ void CG_PrevWeapon_f( void );
+ void CG_Weapon_f( void );
+@@ -2167,6 +2242,7 @@ void CG_Spotlight( centity_t *cent, float *color, vec3_t start, vec3_t dir, int
+ #define SL_LOCKUV           0x080   // lock the texture coordinates at the 'true' length of the requested beam.
+ #define SL_NOCORE           0x100   // don't draw the center 'core' beam
+ #define SL_TRACEWORLDONLY   0x200
++#define SL_NOMODEL          0x400   // codmod: skip searchlight base/lamp md3s (player flashlight)
+ //----(SA)	done
+ 
+ void CG_RumbleEfx( float pitch, float yaw );
+@@ -2191,6 +2267,54 @@ const char *CG_translateString( const char *str );
+ qboolean CG_DrawScoreboard( void );
+ void CG_DrawTourneyScoreboard( void );
+ 
++//
++// cg_cod.c
++//
++void CG_CodDrawDebugHud( void );
++void CG_CodDump_f( void );
++void CG_CodDrawDebugMenu( void );   // codmod: sectioned tune menu (cg_cod_menu.c)
++void CG_CodMenu_f( void );
++void CG_CodMenuDump_f( void );
++void CG_CodMenu_OnShutdown( void ); // codmod: restore stolen arrow binds
++void CG_ToggleAds_f( void );           // codmod: phase 3.1 sticky ADS toggle
++void CG_ToggleCrouch_f( void );        // codmod: phase 5d sticky crouch
++void CG_CrouchProneDown_f( void );     // codmod: pad tap crouch / hold prone
++void CG_CrouchProneUp_f( void );
++void CG_ReloadUseDown_f( void );       // codmod: pad tap reload / hold interact
++void CG_ReloadUseUp_f( void );
++void CG_ToggleFlashlight_f( void );    // codmod: phase 5d flashlight
++void CG_CodResetBinds_f( void );       // codmod: phase 5d full bind reset
++void CG_CodUpdateToggleCrouch( void ); // codmod: phase 5d auto-stand on jump
++void CG_CodUpdateCrouchProne( void );  // codmod: hold-crouch → prone
++void CG_CodUpdateReloadUse( void );    // codmod: tap reload / hold use
++void CG_CodAddFlashlight( void );      // codmod: phase 5d view dlight
++void CG_CodDrawFlashlightHudIcon( float weapX, float weapY, float weapW, float weapH ); // codmod: HUD on-indicator
++void CG_QuickKickDown_f( void );      // codmod: pad R3 tap quickknife / hold kick
++void CG_QuickKickUp_f( void );
++void CG_CodUpdateQuickKick( void );
++void CG_QuickKnife_f( void );          // codmod: phase 5.5 CoD-style quick knife
++float CG_CodAdsFrac( void );           // codmod: phase 3.5, raw 0..1, forced to 1 by cod_adsLock
++float CG_CodSprintFrac( void );        // codmod: phase 4, 0..1 visual sprint lower (eased)
++float CG_CodSlideFrac( void );         // codmod: phase 6, 0..1 eased slide camera/gun frac
++float CG_CodGaitBobAmp( void );        // codmod: phase 4, walk/jog/sprint bob amplitude scale
++void CG_CodTuneLog( const char *filename, const char *line ); // codmod: shared tune log append
++void CG_CodUpdateAdsTune( void );      // codmod: phase 3.5 alignment tooling
++void CG_CodAdsTuneLoad_f( void );      // codmod: phase 3.5 alignment tooling
++void CG_CodAdsTuneDump_f( void );      // codmod: phase 3.5 alignment tooling
++void CG_CodAdsTuneSave_f( void );      // codmod: append SAVE to codmod_ads_tune.log
++void CG_CodAdsTuneStart_f( void );     // codmod: adsLock+adsTune + checklist
++void CG_CodAdsTuneNext_f( void );      // codmod: cycle next iron-sight weapon + load
++void CG_CodUpdateScopeHold( void );    // codmod: phase 3.8
++void CG_CodUpdateQuickKnife( void );   // codmod: phase 5.5
++void CG_CodThreatColor( float t, vec4_t out ); // codmod: phase 5c white→red ramp
++void CG_CodColorForHealth( vec4_t hcolor );    // codmod: phase 5c by health/maxHealth
++void CG_CodDrawLowHealthBlood( void );         // codmod: phase 5c persistent vignette
++void CG_CodDrawCrosshair( const vec4_t hcolor ); // codmod: CoD 4-post bloom reticle
++void CG_CodTriggerHitMarker( qboolean headshot );                  // codmod: E9
++void CG_CodCheckHitMarker( playerState_t *ps, playerState_t *ops ); // codmod: E9
++void CG_CodDrawHitMarker( void );                                  // codmod: E9
++void CG_CodPadAimAssist( void );                                   // codmod: pad aim slowdown + auto-aim
++
+ //
+ // cg_consolecmds.c
+ //
+@@ -2353,6 +2477,8 @@ void        trap_R_AddPolysToScene( qhandle_t hShader, int numVerts, const polyV
+ void        trap_RB_ZombieFXAddNewHit( int entityNum, const vec3_t hitPos, const vec3_t hitDir );
+ // done.
+ void        trap_R_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b, int overdraw );
++void        trap_R_AddSpotLightToScene( const vec3_t org, float intensity, float r, float g, float b,
++										const vec3_t dir, float coneAngleDeg, int overdraw ); // codmod
+ void	    trap_R_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
+ void        trap_R_AddCoronaToScene( const vec3_t org, float r, float g, float b, float scale, int id, int flags );  //----(SA)	modified
+ void        trap_R_RenderScene( const refdef_t *fd );
+@@ -2417,6 +2543,8 @@ qboolean    trap_Key_IsDown( int keynum );
+ int         trap_Key_GetCatcher( void );
+ void        trap_Key_SetCatcher( int catcher );
+ int         trap_Key_GetKey( const char *binding );
++void        trap_Key_GetBindingBuf( int keynum, char *buf, int buflen ); // codmod
++void        trap_Key_SetBinding( int keynum, const char *binding );      // codmod
+ 
+ void CG_S_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t velocity, sfxHandle_t sfx, int volume );
+ void CG_S_AddRangedLoopingSound( int entityNum, const vec3_t origin, const vec3_t velocity, sfxHandle_t sfx, int range );
