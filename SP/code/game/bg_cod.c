@@ -69,8 +69,8 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_adsBobScale",        "0.85", 0,            CODOFS( adsBobScale ),        0 },
 	// codmod: E4 ADS breathing sway (viewmodel only, docs/phase-7-extras.md)
 	{ "cod_adsSwayEnable",      "1",    0,            CODOFS( adsSwayEnable ),      1 },
-	{ "cod_adsSwayPitch",       "0.45", 0,            CODOFS( adsSwayPitch ),       0 },
-	{ "cod_adsSwayYaw",         "0.3",  0,            CODOFS( adsSwayYaw ),         0 },
+	{ "cod_adsSwayPitch",       "0.34", 0,            CODOFS( adsSwayPitch ),       0 },
+	{ "cod_adsSwayYaw",         "0.22", 0,            CODOFS( adsSwayYaw ),         0 },
 	{ "cod_adsSwayRate",        "1.5",  0,            CODOFS( adsSwayRate ),        0 },
 	{ "cod_adsSwayMove",        "1.5",  0,            CODOFS( adsSwayMove ),        0 },
 	{ "cod_adsSwayCrouch",      "0.6",  0,            CODOFS( adsSwayCrouch ),      0 },
