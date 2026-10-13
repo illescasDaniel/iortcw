@@ -1538,8 +1538,8 @@ void R_Register( void ) {
 	r_drawSunRays = ri.Cvar_Get( "r_drawSunRays", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_sunlightMode = ri.Cvar_Get( "r_sunlightMode", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	// codmod: flashlight spot shadow map (needs r_depthPrepass); 0 disables
-	// codmod: exponent applied to surface albedo for dynamic light (<1 lifts near-black materials); 1 or 0 = off
-	r_dlightAlbedoLift = ri.Cvar_Get( "r_dlightAlbedoLift", "0.6", CVAR_ARCHIVE );
+	// codmod: exponent applied to surface albedo for dynamic light (<1 lifts near-black materials); 1 or 0 = off (default: little visible gain)
+	r_dlightAlbedoLift = ri.Cvar_Get( "r_dlightAlbedoLift", "1", CVAR_ARCHIVE );
 	r_flashlightShadow = ri.Cvar_Get( "r_flashlightShadow", "1", CVAR_ARCHIVE );
 	r_flashlightShadowSize = ri.Cvar_Get( "r_flashlightShadowSize", "1024", CVAR_ARCHIVE | CVAR_LATCH );
 

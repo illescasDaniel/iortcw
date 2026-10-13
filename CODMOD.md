@@ -9,7 +9,7 @@ The same changes are also kept as a patch series in that repo's `patches/` direc
 ## rend2 additions
 
 - **Per-pixel dynamic lights on models:** `R_DlightEntity` (tr_light.c) feeds MD3/MDS entities into the dlight passes
-  (`r_dlightEntities`), plus an additive specular pass (`r_dlightSpecular`) and an albedo lift for near-black
+  (`r_dlightEntities`), plus an additive specular pass (`r_dlightSpecular`) and an optional albedo lift (default off) for near-black
   surfaces (`r_dlightAlbedoLift`).
 - **Flashlight shadows:** the flashlight cones carry `REF_SHADOW_DLIGHT`. `R_RenderFlashlightShadowMap` (tr_main.c)
   renders one perspective depth map from the widest shadowed spot (the local player's body/weapon are excluded with
