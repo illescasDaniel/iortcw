@@ -45,6 +45,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 static cvar_t *in_keyboardDebug     = NULL;
 
 static SDL_GameController *gamepad = NULL;
+
+// codmod: gyro (DualSense etc.). Rates in deg/s, already bias/deadzone corrected.
+static qboolean gyroEnabled = qfalse;
+static float gyroYawRate = 0.0f, gyroPitchRate = 0.0f;
+static float gyroBias[2] = { 0.0f, 0.0f };
 static SDL_Joystick *stick = NULL;
 
 static qboolean mouseAvailable = qfalse;
@@ -770,6 +775,17 @@ static void IN_InitJoystick( void )
 	if (SDL_IsGameController(in_joystickNo->integer))
 		gamepad = SDL_GameControllerOpen(in_joystickNo->integer);
 
+#if SDL_VERSION_ATLEAST( 2, 0, 14 )
+	gyroEnabled = qfalse;
+	gyroYawRate = gyroPitchRate = 0.0f;
+	gyroBias[0] = gyroBias[1] = 0.0f;
+	if ( gamepad && SDL_GameControllerHasSensor( gamepad, SDL_SENSOR_GYRO ) &&
+		 SDL_GameControllerSetSensorEnabled( gamepad, SDL_SENSOR_GYRO, SDL_TRUE ) == 0 ) {
+		gyroEnabled = qtrue;
+		Com_Printf( "Gamepad gyro enabled\n" );
+	}
+#endif
+
 	IN_UpdateGamepadFamily();
 
 	Com_DPrintf( "Joystick %d opened\n", in_joystickNo->integer );
@@ -891,6 +907,63 @@ static qboolean KeyToAxisAndSign(int keynum, int *outAxis, int *outSign)
 IN_GamepadMove
 ===============
 */
+
+/*
+===============
+IN_GetGyroRates
+
+codmod: yaw/pitch turn rates in deg/s (view-angle sign: +yaw = left, +pitch = down).
+Returns qfalse when the pad has no gyro.
+===============
+*/
+qboolean IN_GetGyroRates( float *yawRate, float *pitchRate )
+{
+	*yawRate = gyroYawRate;
+	*pitchRate = gyroPitchRate;
+	return gyroEnabled;
+}
+
+#if SDL_VERSION_ATLEAST( 2, 0, 14 )
+static void IN_GyroSample( void )
+{
+	float data[3], rate[2], dz;
+	int i;
+
+	gyroYawRate = gyroPitchRate = 0.0f;
+	if ( !gyroEnabled || SDL_GameControllerGetSensorData( gamepad, SDL_SENSOR_GYRO, data, 3 ) != 0 ) {
+		return;
+	}
+
+	// SDL: rad/s, right-handed, x right / y up / z toward player.
+	rate[0] = data[1] * ( 180.0f / M_PI );		// yaw: +y = turn left = +YAW
+	rate[1] = -data[0] * ( 180.0f / M_PI );		// pitch: +x = nose up = -PITCH
+
+	for ( i = 0; i < 2; i++ ) {
+		float d = rate[i] - gyroBias[i];
+		// slowly learn the resting bias while the pad is nearly still
+		if ( fabs( d ) < 1.5f ) {
+			gyroBias[i] += d * 0.01f;
+			d = rate[i] - gyroBias[i];
+		}
+		rate[i] = d;
+	}
+
+	dz = Cvar_VariableValue( "cod_padGyroDeadzone" );
+	if ( dz < 0.0f ) {
+		dz = 0.0f;
+	}
+	for ( i = 0; i < 2; i++ ) {
+		if ( fabs( rate[i] ) <= dz ) {
+			rate[i] = 0.0f;
+		} else {
+			rate[i] -= ( rate[i] > 0 ? dz : -dz );
+		}
+	}
+	gyroYawRate = rate[0];
+	gyroPitchRate = rate[1];
+}
+#endif
+
 static void IN_GamepadMove( void )
 {
 	int i;
@@ -899,6 +972,9 @@ static void IN_GamepadMove( void )
 	qboolean padActivity = qfalse;
 
 	SDL_GameControllerUpdate();
+#if SDL_VERSION_ATLEAST( 2, 0, 14 )
+	IN_GyroSample();
+#endif
 
 	// check buttons
 	for (i = 0; i < SDL_CONTROLLER_BUTTON_MAX; i++)

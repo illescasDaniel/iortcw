@@ -516,6 +516,40 @@ void CL_JoystickMove( usercmd_t *cmd ) {
 
 /*
 =================
+CL_GyroMove
+
+codmod: gyro aiming. cod_padGyro 0 = off, 1 = only while ADS (default), 2 = always.
+Adds directly to the view angles, on top of the right stick.
+=================
+*/
+#define COD_STAT_ADS 8	// STAT_COD_ADS (game/bg_public.h): ADS fraction * 1000
+
+static void CL_GyroMove( void ) {
+	float yawRate, pitchRate, sens, dt;
+	int mode;
+
+	mode = (int)Cvar_VariableValue( "cod_padGyro" );
+	if ( mode <= 0 ) {
+		return;
+	}
+	if ( mode == 1 && cl.snap.ps.stats[COD_STAT_ADS] <= 100 ) {
+		return;
+	}
+	if ( !IN_GetGyroRates( &yawRate, &pitchRate ) ) {
+		return;
+	}
+
+	sens = Cvar_VariableValue( "cod_padGyroSens" );
+	if ( sens <= 0.0f ) {
+		sens = 1.0f;
+	}
+	dt = 0.001f * cls.frametime;
+	cl.viewangles[YAW] += yawRate * sens * dt;
+	cl.viewangles[PITCH] += pitchRate * sens * dt;
+}
+
+/*
+=================
 CL_MouseMove
 =================
 */
@@ -698,6 +732,9 @@ usercmd_t CL_CreateCmd( void ) {
 
 	// get basic movement from joystick
 	CL_JoystickMove( &cmd );
+
+	// codmod: gyro aiming
+	CL_GyroMove();
 
 	// check to make sure the angles haven't wrapped
 	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {

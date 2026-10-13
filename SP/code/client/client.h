@@ -592,6 +592,7 @@ void CL_ReadPackets( void );
 
 void CL_WritePacket( void );
 void IN_CenterView( void );
+qboolean IN_GetGyroRates( float *yawRate, float *pitchRate );	// codmod: sdl_input.c
 void IN_Notebook( void );
 void IN_Help( void );
 

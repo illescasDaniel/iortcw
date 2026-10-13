@@ -131,6 +131,9 @@ typedef struct {
 	float padSensX;            // stick look scale (1 = engine j_* default; 0.5 = half)
 	float padSensY;            // vertical scale (default lower than X)
 	int padAutoAim;            // 1 = stronger ADS chest pull (friction/magnetism always on for pads)
+	int padGyro;               // gyro aiming: 0 off, 1 only while ADS (default), 2 always
+	float padGyroSens;         // gyro sensitivity multiplier
+	float padGyroDeadzone;     // gyro noise gate, deg/s
 
 	// codmod: Phase 5c CoD on-screen HUD (docs/phase-5c-hud.md)
 	int hudEnable;             // master: clip/reserve ammo, no bars, low-HP blood/crosshair

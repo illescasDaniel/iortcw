@@ -164,6 +164,10 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_padSensX",           "0.5",  CVAR_ARCHIVE, CODOFS( padSensX ),           0 },
 	{ "cod_padSensY",           "0.35", CVAR_ARCHIVE, CODOFS( padSensY ),           0 },
 	{ "cod_padAutoAim",         "0",    CVAR_ARCHIVE, CODOFS( padAutoAim ),         1 },
+	// Gyro aiming (DualSense etc.): 0 off, 1 ADS only, 2 always.
+	{ "cod_padGyro",            "1",    CVAR_ARCHIVE, CODOFS( padGyro ),            1 },
+	{ "cod_padGyroSens",        "1",    CVAR_ARCHIVE, CODOFS( padGyroSens ),        0 },
+	{ "cod_padGyroDeadzone",    "0.3",  CVAR_ARCHIVE, CODOFS( padGyroDeadzone ),    0 },
 
 	// codmod: Phase 5c CoD HUD (docs/phase-5c-hud.md)
 	{ "cod_hudEnable",          "1",    0,            CODOFS( hudEnable ),          1 },
