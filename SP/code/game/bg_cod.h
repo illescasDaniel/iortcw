@@ -62,6 +62,11 @@ typedef struct {
 	float adsSwayMove;      // extra sway multiplier at cod_runSpeed (0 = movement does not matter)
 	float adsSwayCrouch;    // sway multiplier while crouched
 	float adsSwayProne;     // sway multiplier while prone
+	float aiSprint;         // E13: human AI sprint when charging / running to cover
+	float aiSprintScale;    // speed multiplier while sprinting (player sprint = 1.5)
+	float aiSprintTime;     // ms per sprint burst
+	float aiSprintCooldown; // ms after a burst before the next one
+	float aiSprintMinDist;  // only chase-sprint when the target is farther than this
 	float recoilEnable;     // E5: real view-angle kick per shot (player only)
 	float recoilScale;      // global multiplier on the per-weapon kick table
 	float recoilAdsScale;   // kick multiplier at full ADS

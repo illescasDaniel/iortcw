@@ -75,6 +75,12 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_adsSwayMove",        "1.5",  0,            CODOFS( adsSwayMove ),        0 },
 	{ "cod_adsSwayCrouch",      "0.6",  0,            CODOFS( adsSwayCrouch ),      0 },
 	{ "cod_adsSwayProne",       "0.3",  0,            CODOFS( adsSwayProne ),       0 },
+	// codmod: E13 AI sprint (server-only, human AI types)
+	{ "cod_aiSprint",           "1",    0,            CODOFS( aiSprint ),           1 },
+	{ "cod_aiSprintScale",      "1.5",  0,            CODOFS( aiSprintScale ),      0 },
+	{ "cod_aiSprintTime",       "2500", 0,            CODOFS( aiSprintTime ),       0 },
+	{ "cod_aiSprintCooldown",   "4000", 0,            CODOFS( aiSprintCooldown ),   0 },
+	{ "cod_aiSprintMinDist",    "350",  0,            CODOFS( aiSprintMinDist ),    0 },
 	// codmod: E5 recoil (docs/phase-7-extras.md). Per-weapon degrees live in PM_CodRecoilKick.
 	{ "cod_recoilEnable",       "1",    0,            CODOFS( recoilEnable ),       1 },
 	{ "cod_recoilScale",        "1",    0,            CODOFS( recoilScale ),        0 },

@@ -386,6 +386,8 @@ void AICast_UpdateInput( cast_state_t *cs, int time ) {
 	}
 	//
 	speed = cs->speedScale * cs->attributes[RUNNING_SPEED];
+	// codmod: E13 sprint burst (only reaches bi.speed below, WALK checks use the unboosted speed)
+	speed *= AICast_CodSprintMul( cs );
 	//
 	//if (speed <= (cs->attributes[WALKING_SPEED] + (cs->attributes[WALKING_SPEED] + 50 < cs->attributes[RUNNING_SPEED] ? 50 : -1)))	// do a fast shuffle if slightly over walking speed
 	if ( speed <= cs->attributes[WALKING_SPEED] ) {
@@ -480,6 +482,51 @@ void AICast_CodApplySpeedMode( cast_state_t *cs, int aiCharacter ) {
 		cs->attributes[RUNNING_SPEED]   *= bg_cod.aiSpeedScale;
 		cs->attributes[CROUCHING_SPEED] *= bg_cod.aiSpeedScale;
 	}
+}
+
+/*
+============
+AICast_CodTrySprint / AICast_CodSprintMul
+
+codmod: E13 AI sprint. Human AI get a timed speed burst (cod_aiSprintScale x, like the
+player's sprint) when charging a far enemy or running to cover, then a cooldown. State
+lives in static arrays, not cast_state_t, so savegame layout is unchanged (a load simply
+resets it). Never active during scripted events, crouching or walking.
+============
+*/
+static int codAiSprintUntil[MAX_CLIENTS];
+static int codAiSprintNext[MAX_CLIENTS];
+
+void AICast_CodTrySprint( cast_state_t *cs ) {
+	int n = cs->entityNum;
+
+	if ( !bg_cod.enable || !bg_cod.aiSprint || bg_cod.aiSpeedMode == 0 ) {
+		return;
+	}
+	if ( n < 0 || n >= MAX_CLIENTS || !AICast_CodIsHumanType( g_entities[n].aiCharacter ) ) {
+		return;
+	}
+	if ( cs->castScriptStatus.castScriptEventIndex >= 0 ) {
+		return;
+	}
+	if ( level.time < codAiSprintNext[n] || level.time < codAiSprintUntil[n] ) {
+		return;
+	}
+	codAiSprintUntil[n] = level.time + (int)bg_cod.aiSprintTime;
+	codAiSprintNext[n] = codAiSprintUntil[n] + (int)bg_cod.aiSprintCooldown;
+}
+
+float AICast_CodSprintMul( cast_state_t *cs ) {
+	int n = cs->entityNum;
+
+	if ( !bg_cod.enable || !bg_cod.aiSprint || n < 0 || n >= MAX_CLIENTS ) {
+		return 1.0f;
+	}
+	if ( level.time >= codAiSprintUntil[n] || cs->castScriptStatus.castScriptEventIndex >= 0
+		 || ( cs->actionFlags & CASTACTION_WALK ) || cs->speedScale < 0.9f ) {
+		return 1.0f;
+	}
+	return bg_cod.aiSprintScale;
 }
 
 /*

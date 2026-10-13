@@ -728,6 +728,8 @@ void AICast_QueryThink( cast_state_t *cs );
 void AICast_DeadClipWalls( cast_state_t *cs );
 void AICast_IdleReload( cast_state_t *cs );
 void AICast_CodApplySpeedMode( cast_state_t *cs, int aiCharacter );   // codmod: phase 2.4
+void AICast_CodTrySprint( cast_state_t *cs );                         // codmod: E13
+float AICast_CodSprintMul( cast_state_t *cs );                        // codmod: E13
 //
 // ai_cast_script.c
 qboolean AICast_ScriptRun( cast_state_t *cs, qboolean force );

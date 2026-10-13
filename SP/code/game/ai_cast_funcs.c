@@ -35,6 +35,7 @@ If you have questions concerning this license or the applicable additional terms
 
 
 #include "g_local.h"
+#include "bg_cod.h"     // codmod: E13
 #include "../qcommon/q_shared.h"
 #include "../botlib/botlib.h"      //bot lib interface
 #include "../botlib/be_aas.h"
@@ -2965,6 +2966,11 @@ char *AIFunc_BattleChase( cast_state_t *cs ) {
 	// slow down real close to the goal, so we don't go passed it
 	cs->speedScale = AICast_SpeedScaleForDistance( cs, dist, chaseDist );
 	//
+	// codmod: E13 charge -- sprint burst when the target is far (monsters excluded inside)
+	if ( cs->weaponNum != WP_GAUNTLET && dist > bg_cod.aiSprintMinDist ) {
+		AICast_CodTrySprint( cs );
+	}
+	//
 	// ...........................................................
 	// speed up over some time
 	#define BATTLE_CHASE_ACCEL_TIME     300
@@ -3651,6 +3657,11 @@ char *AIFunc_BattleTakeCoverStart( cast_state_t *cs ) {
 
 	// miscflag1 used to set predicted point as our goal, so we dont keep setting this over and over
 	cs->aiFlags &= ~AIFL_MISCFLAG1;
+
+	// codmod: E13 run to cover -- sprint burst if the cover spot is a real dash away
+	if ( cs->enemyNum >= 0 && VectorDistance( cs->bs->origin, cs->takeCoverPos ) > 200 ) {
+		AICast_CodTrySprint( cs );
+	}
 
 	cs->aifunc = AIFunc_BattleTakeCover;
 	return "AIFunc_BattleTakeCover";
