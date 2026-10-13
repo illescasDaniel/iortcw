@@ -1485,7 +1485,7 @@ void R_Register( void ) {
 	r_cameraExposure = ri.Cvar_Get( "r_cameraExposure", "1", CVAR_CHEAT );
 
 	r_depthPrepass = ri.Cvar_Get( "r_depthPrepass", "1", CVAR_ARCHIVE );
-	r_ao = ri.Cvar_Get( "r_ao", "3", CVAR_ARCHIVE );
+	r_ao = ri.Cvar_Get( "r_ao", "2", CVAR_ARCHIVE );
 	r_ssao = ri.Cvar_Get( "r_ssao", "0", 0 );   // derived from r_ao
 	r_ssaoRadius = ri.Cvar_Get( "r_ssaoRadius", "40", 0 );
 	ri.Cvar_CheckRange( r_ssaoRadius, 4, 512, qfalse );
