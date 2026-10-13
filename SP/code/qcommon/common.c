@@ -84,6 +84,7 @@ cvar_t  *com_blood;
 cvar_t  *com_buildScript;   // for automated data building scripts
 #ifdef CINEMATICS_INTRO
 cvar_t  *com_introPlayed;
+cvar_t  *cod_skipIntro;
 #endif
 cvar_t  *cl_paused;
 cvar_t  *sv_paused;
@@ -2427,6 +2428,7 @@ void Com_Init( char *commandLine ) {
 
 #ifdef CINEMATICS_INTRO
 	com_introPlayed = Cvar_Get( "com_introplayed", "0", CVAR_ARCHIVE );
+	cod_skipIntro = Cvar_Get( "cod_skipIntro", "0", CVAR_ARCHIVE );
 #endif
 	com_recommendedSet = Cvar_Get( "com_recommendedSet", "0", CVAR_ARCHIVE );
 
@@ -2484,7 +2486,7 @@ void Com_Init( char *commandLine ) {
 			//Cbuf_AddText ("cinematic " CINEMATICS_LOGO "\n");
 #endif
 #ifdef CINEMATICS_INTRO
-			if ( qtrue ) { // codmod: always play; the archived com_introPlayed is ignored (stale values skipped it)
+			if ( !cod_skipIntro->integer ) { // codmod: play unless the Skip Intro setting is on; the archived com_introPlayed is ignored
 				//Cvar_Set( com_introPlayed->name, "1" );		//----(SA)	force this to get played every time (but leave cvar for override)
 				Cbuf_AddText( "cinematic " CINEMATICS_INTRO " 3\n" );
 				//Cvar_Set( "nextmap", "cinematic " CINEMATICS_INTRO );
