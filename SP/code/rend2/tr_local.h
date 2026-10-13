@@ -2089,6 +2089,7 @@ extern  cvar_t  *r_forceSunLightScale;
 extern  cvar_t  *r_forceSunAmbientScale;
 extern  cvar_t  *r_sunlightMode;
 extern  cvar_t  *r_flashlightShadow;
+extern  cvar_t  *r_dlightAlbedoLift;
 extern  cvar_t  *r_flashlightShadowSize;
 extern  cvar_t  *r_drawSunRays;
 extern  cvar_t  *r_sunShadows;

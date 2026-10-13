@@ -454,6 +454,12 @@ void main()
 	float roughness = pow(2.0 / (8190.0 * gloss + 2.0), 0.25);
   #endif
 
+  #if defined(USE_LIGHT_VECTOR)
+	// codmod: near-black albedo barely reflects the flashlight; lift it for dynamic light only
+	if (u_AoParams.z > 0.0)
+		reflectance  = CalcDiffuse(pow(max(diffuse.rgb, vec3(0.001)), vec3(u_AoParams.z)), NH, EH, roughness);
+	else
+  #endif
 	reflectance  = CalcDiffuse(diffuse.rgb, NH, EH, roughness);
 
   #if defined(r_deluxeSpecular)

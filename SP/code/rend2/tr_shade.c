@@ -369,7 +369,9 @@ static void SetDlightShadowMask( shaderProgram_t *sp, const dlight_t *dl )
 	vec4_t params;
 	qboolean on = dl->shadowed && backEnd.flashShadowReady;
 
-	VectorSet4( params, 0.0f, on ? 1.0f : 0.0f, 0.0f, 0.0f );
+	float lift = r_dlightAlbedoLift->value;
+
+	VectorSet4( params, 0.0f, on ? 1.0f : 0.0f, ( lift > 0.0f && lift < 1.0f ) ? lift : 0.0f, 0.0f );
 	if ( on ) {
 		GL_BindToTMU( tr.flashShadowMaskImage, TB_AOMAP );
 	}
