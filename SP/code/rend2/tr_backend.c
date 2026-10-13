@@ -900,6 +900,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			oldNumIndex = tess.numIndexes;
 
 			rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+			if ( dlighted && entityNum != REFENTITYNUM_WORLD ) {
+				tess.dlightBits |= backEnd.currentEntity->needDlights; // codmod: model dlights
+			}
 
 			// RF, convert the newly created vertexes into dust particles, and overwrite
 			if (backEnd.currentEntity->e.reFlags & REFLAG_ZOMBIEFX) {
@@ -1044,6 +1047,9 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 		// add the triangles for this surface
 		rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+		if ( dlighted && entityNum != REFENTITYNUM_WORLD ) {
+			tess.dlightBits |= backEnd.currentEntity->needDlights; // codmod: model dlights
+		}
 
 		// RF, convert the newly created vertexes into dust particles, and overwrite
 		if ( backEnd.currentEntity->e.reFlags & REFLAG_ZOMBIEFX ) {

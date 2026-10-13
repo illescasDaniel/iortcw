@@ -1912,6 +1912,7 @@ extern cvar_t	*r_drawSun;				// controls drawing of sun quad
 							// "2" also draw lens flare effect centered on sun
 extern cvar_t	*r_dynamiclight;		// dynamic lights enabled/disabled
 extern cvar_t	*r_dlightScale;			// global user attenuation of dlights
+extern cvar_t	*r_dlightEntities;	// codmod: per-pixel dlights on models (0 = old vertex-only)
 extern cvar_t	*r_dlightBacks;			// dlight non-facing surfaces for continuity
 
 extern	cvar_t	*r_norefresh;			// bypasses the ref rendering
@@ -2440,6 +2441,7 @@ LIGHTS
 */
 
 void R_DlightBmodel( bmodel_t *bmodel );
+int R_DlightEntity( trRefEntity_t *ent, const vec3_t localCenter, float radius );
 void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent );
 void R_TransformDlights( int count, dlight_t *dl, orientationr_t *or );
 int R_LightForPoint( vec3_t point, vec3_t ambientLight, vec3_t directedLight, vec3_t lightDir );

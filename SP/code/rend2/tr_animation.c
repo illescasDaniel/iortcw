@@ -327,6 +327,7 @@ void R_AddAnimSurfaces( trRefEntity_t *ent ) {
 	mdsSurface_t    *surface;
 	shader_t        *shader = 0;
 	int             cubemapIndex;
+	int             dlightMask;
 	int i, fogNum, cull;
 	qboolean personalModel;
 
@@ -343,6 +344,14 @@ void R_AddAnimSurfaces( trRefEntity_t *ent ) {
 	cull = R_CullModel( header, ent );
 	if ( cull == CULL_OUT ) {
 		return;
+	}
+
+	// codmod: per-pixel dlights (flashlight etc.) on models
+	{
+		int frameSize = (int) ( sizeof( mdsFrame_t ) - sizeof( mdsBoneFrameCompressed_t ) + header->numBones * sizeof( mdsBoneFrameCompressed_t ) );
+		mdsFrame_t *lf = ( mdsFrame_t * )( ( byte * ) header + header->ofsFrames + ent->e.frame * frameSize );
+
+		dlightMask = R_DlightEntity( ent, lf->localOrigin, lf->radius );
 	}
 
 	//
@@ -405,7 +414,7 @@ void R_AddAnimSurfaces( trRefEntity_t *ent ) {
 		// don't add third_person objects if not viewing through a portal
 		if ( !personalModel ) {
 			// GR - always tessellate these objects
-			R_AddDrawSurf( (void *)surface, shader, fogNum, qfalse, qfalse, cubemapIndex, ATI_TESS_TRUFORM );
+			R_AddDrawSurf( (void *)surface, shader, fogNum, dlightMask != 0, qfalse, cubemapIndex, ATI_TESS_TRUFORM );
 		}
 
 		surface = ( mdsSurface_t * )( (byte *)surface + surface->ofsEnd );

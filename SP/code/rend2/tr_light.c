@@ -69,6 +69,72 @@ void R_TransformDlights( int count, dlight_t *dl, orientationr_t *or ) {
 
 /*
 =============
+R_DlightEntity
+
+codmod: which dlights touch a model entity's bounding sphere (local center +
+radius). Sets ent->needDlights so the back end lights the model per pixel,
+like the world, instead of only the coarse per-entity term. Spot lights are
+tested against their cone. Returns the mask.
+=============
+*/
+int R_DlightEntity( trRefEntity_t *ent, const vec3_t localCenter, float radius ) {
+	int i, mask;
+	vec3_t center, v;
+	dlight_t *dl;
+
+	ent->needDlights = 0;
+	if ( !r_dlightEntities->integer || !r_dlightMode->integer || !tr.refdef.num_dlights ) {
+		return 0;
+	}
+	if ( ent->e.renderfx & RF_DEPTHHACK ) {
+		return 0; // view weapon: keep the old behaviour
+	}
+	if ( tr.refdef.rdflags & ( RDF_NOWORLDMODEL | RDF_SNOOPERVIEW ) ) {
+		return 0;
+	}
+
+	VectorCopy( ent->e.origin, center );
+	VectorMA( center, localCenter[0], ent->e.axis[0], center );
+	VectorMA( center, localCenter[1], ent->e.axis[1], center );
+	VectorMA( center, localCenter[2], ent->e.axis[2], center );
+	radius *= ent->axisLength ? ent->axisLength : 1.0f;
+
+	mask = 0;
+	for ( i = 0; i < tr.refdef.num_dlights && i < 32; i++ ) {
+		float d;
+
+		dl = &tr.refdef.dlights[i];
+		if ( dl->dlshader ) {
+			continue;
+		}
+		VectorSubtract( center, dl->origin, v );
+		d = VectorLength( v );
+		if ( d - radius > dl->radius ) {
+			continue;
+		}
+		if ( dl->spotCosOuter > -1.5f ) {
+			float cosO = dl->spotCosOuter;
+			float sinO = sqrt( 1.0f - cosO * cosO );
+			vec3_t apexV;
+
+			if ( sinO < 0.001f ) {
+				sinO = 0.001f;
+			}
+			// move the apex back by r/sin(a) so the cone covers the sphere
+			VectorMA( v, radius / sinO, dl->dir, apexV );
+			if ( DotProduct( apexV, dl->dir ) < VectorLength( apexV ) * cosO ) {
+				continue;
+			}
+		}
+		mask |= 1 << i;
+	}
+
+	ent->needDlights = mask;
+	return mask;
+}
+
+/*
+=============
 R_DlightBmodel
 
 Determine which dynamic lights may effect this bmodel
@@ -418,6 +484,9 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 
 		if ( dl->dlshader ) {  //----(SA)	if the dlight has a diff shader specified, you don't know what it does, so don't let it affect entities lighting
 			continue;
+		}
+		if ( i < 32 && ( ent->needDlights & ( 1 << i ) ) ) {
+			continue; // codmod: lit per pixel in the back end (R_DlightEntity)
 		}
 
 		VectorSubtract( dl->origin, lightOrigin, dir );

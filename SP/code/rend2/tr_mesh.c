@@ -322,6 +322,7 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	int lod;
 	int fogNum;
 	int cubemapIndex;
+	int dlightMask;
 	qboolean personalModel;
 
 	// don't add third_person objects if not in a portal
@@ -365,6 +366,9 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	if ( cull == CULL_OUT ) {
 		return;
 	}
+
+	// codmod: per-pixel dlights (flashlight etc.) on models
+	dlightMask = R_DlightEntity( ent, model->frames[ent->e.frame].localOrigin, model->frames[ent->e.frame].radius );
 
 	//
 	// set up lighting now that we know we aren't culled
@@ -451,7 +455,7 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 		// don't add third_person objects if not viewing through a portal
 		if ( !personalModel ) {
 // GR - tessellate according to model capabilities
-			R_AddDrawSurf( (void *)&model->vaoSurfaces[i], shader, fogNum, qfalse, qfalse, cubemapIndex, tr.currentModel->ATI_tess );
+			R_AddDrawSurf( (void *)&model->vaoSurfaces[i], shader, fogNum, dlightMask != 0, qfalse, cubemapIndex, tr.currentModel->ATI_tess );
 		}
 
 		surface++;
