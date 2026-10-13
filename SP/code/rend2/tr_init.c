@@ -192,6 +192,8 @@ cvar_t  *r_forceSun;
 cvar_t  *r_forceSunLightScale;
 cvar_t  *r_forceSunAmbientScale;
 cvar_t  *r_sunlightMode;
+cvar_t  *r_flashlightShadow;
+cvar_t  *r_flashlightShadowSize;
 cvar_t  *r_drawSunRays;
 cvar_t  *r_sunShadows;
 cvar_t  *r_shadowFilter;
@@ -1534,6 +1536,9 @@ void R_Register( void ) {
 	r_forceSunAmbientScale = ri.Cvar_Get( "r_forceSunAmbientScale", "0.5", CVAR_CHEAT );
 	r_drawSunRays = ri.Cvar_Get( "r_drawSunRays", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_sunlightMode = ri.Cvar_Get( "r_sunlightMode", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	// codmod: flashlight spot shadow map (needs r_depthPrepass); 0 disables
+	r_flashlightShadow = ri.Cvar_Get( "r_flashlightShadow", "1", CVAR_ARCHIVE );
+	r_flashlightShadowSize = ri.Cvar_Get( "r_flashlightShadowSize", "1024", CVAR_ARCHIVE | CVAR_LATCH );
 
 	r_sunShadows = ri.Cvar_Get( "r_sunShadows", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_shadowFilter = ri.Cvar_Get( "r_shadowFilter", "1", CVAR_ARCHIVE | CVAR_LATCH );

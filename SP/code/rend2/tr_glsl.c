@@ -1094,6 +1094,7 @@ void GLSL_InitGPUShaders(void)
 		GLSL_InitUniforms(&tr.dlightShader[i]);
 		
 		GLSL_SetUniformInt(&tr.dlightShader[i], UNIFORM_DIFFUSEMAP, TB_DIFFUSEMAP);
+		GLSL_SetUniformInt(&tr.dlightShader[i], UNIFORM_AOMAP, TB_AOMAP);
 
 		GLSL_FinishGPUShader(&tr.dlightShader[i]);
 
@@ -1507,6 +1508,25 @@ void GLSL_InitGPUShaders(void)
 
 	numEtcShaders++;
 
+	// codmod: flashlight spot shadow mask
+	attribs = ATTR_POSITION | ATTR_TEXCOORD;
+	extradefines[0] = '\0';
+	Q_strcat(extradefines, 1024, "#define USE_SPOT_SHADOW\n");
+	Q_strcat(extradefines, 1024, va("#define r_flashShadowMapSize %f\n", (float)(tr.flashShadowDepthImage ? tr.flashShadowDepthImage->width : 1024)));
+	Q_strcat(extradefines, 1024, va("#define r_shadowMapSize %f\n", r_shadowMapSize->value));
+
+	if (!GLSL_InitGPUShader(&tr.flashShadowmaskShader, "shadowmask", attribs, qtrue, extradefines, qtrue, fallbackShader_shadowmask_vp, fallbackShader_shadowmask_fp))
+	{
+		ri.Error(ERR_FATAL, "Could not load flashlight shadowmask shader!");
+	}
+
+	GLSL_InitUniforms(&tr.flashShadowmaskShader);
+	GLSL_SetUniformInt(&tr.flashShadowmaskShader, UNIFORM_SCREENDEPTHMAP, TB_COLORMAP);
+	GLSL_SetUniformInt(&tr.flashShadowmaskShader, UNIFORM_SHADOWMAP, TB_SHADOWMAP);
+	GLSL_FinishGPUShader(&tr.flashShadowmaskShader);
+
+	numEtcShaders++;
+
 
 	for (i = 0; i < 2; i++)
 	{
@@ -1650,6 +1670,7 @@ void GLSL_ShutdownGPUShaders(void)
 		GLSL_DeleteGPUShader(&tr.calclevels4xShader[i]);
 
 	GLSL_DeleteGPUShader(&tr.shadowmaskShader);
+	GLSL_DeleteGPUShader(&tr.flashShadowmaskShader);
 	for ( i = 0; i < 2; i++)
 		GLSL_DeleteGPUShader(&tr.ssaoShader[i]);
 	GLSL_DeleteGPUShader(&tr.ssaoUpShader);

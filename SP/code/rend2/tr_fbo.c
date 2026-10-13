@@ -365,6 +365,21 @@ void FBO_Init(void)
 		}
 	}
 
+	if (tr.flashShadowDepthImage)
+	{
+		tr.flashShadowFbo = FBO_Create("_flashshadowmap", tr.flashShadowDepthImage->width, tr.flashShadowDepthImage->height);
+		FBO_CreateBuffer(tr.flashShadowFbo, GL_RGBA8, 0, 0);
+		FBO_AttachImage(tr.flashShadowFbo, tr.flashShadowDepthImage, GL_DEPTH_ATTACHMENT, 0);
+		R_CheckFBO(tr.flashShadowFbo);
+	}
+
+	if (tr.flashShadowMaskImage)
+	{
+		tr.flashShadowMaskFbo = FBO_Create("_flashshadowmask", tr.flashShadowMaskImage->width, tr.flashShadowMaskImage->height);
+		FBO_AttachImage(tr.flashShadowMaskFbo, tr.flashShadowMaskImage, GL_COLOR_ATTACHMENT0, 0);
+		R_CheckFBO(tr.flashShadowMaskFbo);
+	}
+
 	if (tr.screenShadowImage)
 	{
 		tr.screenShadowFbo = FBO_Create("_screenshadow", tr.screenShadowImage->width, tr.screenShadowImage->height);

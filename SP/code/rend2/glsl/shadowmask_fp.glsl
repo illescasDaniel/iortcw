@@ -94,6 +94,38 @@ float getLinearDepth(sampler2D depthMap, vec2 tex, float zFarDivZNear)
 	return 1.0 / mix(zFarDivZNear, 1.0, sampleZDivW);
 }
 
+#if defined(USE_SPOT_SHADOW)
+// codmod: flashlight spot shadow, single perspective map. Result is 1 = lit, 0 = shadowed.
+uniform vec4 u_LightOrigin;
+
+void main()
+{
+	float depth = getLinearDepth(u_ScreenDepthMap, var_DepthTex, u_ViewInfo.x);
+	vec3 pos = u_ViewOrigin + var_ViewDir * depth;
+	vec3 toLight = u_LightOrigin.xyz - pos;
+	float dist = length(toLight);
+	pos += toLight * ((1.5 + dist * 0.004) / max(dist, 1.0));
+
+	vec4 sp = u_ShadowMvp * vec4(pos, 1.0);
+	float result = 1.0;
+
+	if (sp.w > 0.0)
+	{
+		sp.xyz = sp.xyz * (0.5 / sp.w) + vec3(0.5);
+		if (all(greaterThan(sp.xyz, vec3(0.0))) && all(lessThan(sp.xyz, vec3(1.0))))
+		{
+			float t = 1.0 / r_flashShadowMapSize;
+			result = 0.0;
+			for (int x = -1; x <= 1; x++)
+				for (int y = -1; y <= 1; y++)
+					result += shadow2D(u_ShadowMap, vec3(sp.xy + vec2(float(x), float(y)) * t, sp.z));
+			result *= (1.0 / 9.0);
+		}
+	}
+
+	gl_FragColor = vec4(vec3(result), 1.0);
+}
+#else
 void main()
 {
 	float result;
@@ -141,3 +173,4 @@ void main()
 
 	gl_FragColor = vec4(vec3(result), 1.0);
 }
+#endif

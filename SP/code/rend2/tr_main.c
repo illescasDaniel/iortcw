@@ -1800,6 +1800,10 @@ static void R_AddEntitySurface (int entityNum)
 		return;
 	}
 
+	if ( ( tr.viewParms.flags & VPF_NOPLAYER ) && ( ent->e.renderfx & ( RF_FIRST_PERSON | RF_THIRD_PERSON | RF_DEPTHHACK ) ) ) {
+		return;
+	}
+
 	// simple generated models, like sprites and beams, are not culled
 	switch ( ent->e.reType ) {
 	case RT_PORTALSURFACE:
@@ -2787,6 +2791,78 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 
 		Mat4Multiply(tr.viewParms.projectionMatrix, tr.viewParms.world.modelMatrix, tr.refdef.sunShadowMvp[level]);
 	}
+}
+
+/*
+=================
+R_RenderFlashlightShadowMap
+
+codmod: one perspective depth map from the widest shadowed spot dlight (the flashlight).
+The back end turns it into a screen-space mask (RB_DrawSurfs) that the dlight shaders sample.
+=================
+*/
+void R_RenderFlashlightShadowMap(const refdef_t *fd)
+{
+	viewParms_t shadowParms;
+	vec3_t fwd, upHint;
+	float cosMin = 2.0f, zFar = 0.0f, deg;
+	int i, best = -1;
+
+	tr.refdef.flashShadow = qfalse;
+
+	if (!glRefConfig.framebufferObject || !tr.flashShadowFbo || !r_flashlightShadow->integer || !r_depthPrepass->integer)
+		return;
+
+	for (i = 0; i < tr.refdef.num_dlights; i++)
+	{
+		dlight_t *dl = &tr.refdef.dlights[i];
+
+		if (!dl->shadowed || dl->spotCosOuter <= -1.5f)
+			continue;
+		if (best < 0 || dl->spotCosOuter < cosMin)
+		{
+			best = i;
+			cosMin = dl->spotCosOuter;
+		}
+		if (dl->radius > zFar)
+			zFar = dl->radius;
+	}
+
+	if (best < 0)
+		return;
+
+	VectorCopy(tr.refdef.dlights[best].dir, fwd);
+	if (fabs(fwd[2]) > 0.99f)
+		VectorSet(upHint, 1, 0, 0);
+	else
+		VectorSet(upHint, 0, 0, 1);
+
+	Com_Memset(&shadowParms, 0, sizeof(shadowParms));
+	shadowParms.viewportX = 0;
+	shadowParms.viewportY = 0;
+	shadowParms.viewportWidth = tr.flashShadowFbo->width;
+	shadowParms.viewportHeight = tr.flashShadowFbo->height;
+	shadowParms.isPortal = qfalse;
+	shadowParms.isMirror = qfalse;
+
+	deg = acos(cosMin > 1.0f ? 1.0f : (cosMin < 0.2f ? 0.2f : cosMin)) * 180.0f / M_PI;
+	shadowParms.fovX = shadowParms.fovY = MIN(2.0f * (deg + 4.0f), 150.0f);
+	shadowParms.targetFbo = tr.flashShadowFbo;
+	shadowParms.flags = VPF_DEPTHSHADOW | VPF_NOVIEWMODEL | VPF_NOPLAYER;
+	shadowParms.zFar = zFar;
+
+	VectorCopy(tr.refdef.dlights[best].origin, shadowParms.or.origin);
+	VectorCopy(fwd, shadowParms.or.axis[0]);
+	CrossProduct(upHint, fwd, shadowParms.or.axis[1]);
+	VectorNormalize(shadowParms.or.axis[1]);
+	CrossProduct(fwd, shadowParms.or.axis[1], shadowParms.or.axis[2]);
+	VectorCopy(shadowParms.or.origin, shadowParms.pvsOrigin);
+
+	R_RenderView(&shadowParms);
+
+	Mat4Multiply(tr.viewParms.projectionMatrix, tr.viewParms.world.modelMatrix, tr.refdef.flashShadowMvp);
+	VectorCopy(shadowParms.or.origin, tr.refdef.flashShadowOrigin);
+	tr.refdef.flashShadow = qtrue;
 }
 
 void R_RenderCubemapSide( int cubemapIndex, int cubemapSide, qboolean subscene )

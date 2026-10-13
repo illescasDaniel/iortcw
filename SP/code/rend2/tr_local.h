@@ -575,6 +575,7 @@ typedef struct dlight_s {
 	vec3_t	dir;
 	vec3_t	transformedDir;
 	float	spotCosOuter;
+	qboolean shadowed;	// codmod: REF_SHADOW_DLIGHT, sampled against the flashlight shadow mask
 } dlight_t;
 
 typedef struct corona_s {
@@ -882,6 +883,11 @@ typedef struct {
 	struct pshadow_s *pshadows;
 
 	float       sunShadowMvp[4][16];
+
+	// codmod: flashlight spot shadow (see R_RenderFlashlightShadowMap)
+	qboolean    flashShadow;
+	float       flashShadowMvp[16];
+	vec3_t      flashShadowOrigin;
 	float       sunDir[4];
 	float       sunCol[4];
 	float       sunAmbCol[4];
@@ -945,7 +951,8 @@ typedef enum {
 	VPF_ORTHOGRAPHIC    = 0x10,
 	VPF_USESUNLIGHT     = 0x20,
 	VPF_FARPLANEFRUSTUM = 0x40,
-	VPF_NOCUBEMAPS      = 0x80
+	VPF_NOCUBEMAPS      = 0x80,
+	VPF_NOPLAYER        = 0x100	// codmod: skip the local player's body and weapon (flashlight shadow)
 } viewParmFlags_t;
 
 typedef struct {
@@ -1637,6 +1644,7 @@ typedef struct {
 	FBO_t *last2DFBO;
 	qboolean    colorMask[4];
 	qboolean    depthFill;
+	qboolean    flashShadowReady;	// tr.flashShadowMaskImage holds this view's flashlight shadow mask
 	qboolean    aoReady;	// tr.aoImage holds the AO of this view (ambient only AO)
 } backEndState_t;
 
@@ -1697,6 +1705,8 @@ typedef struct {
 	image_t					*fixedLevelsImage;
 	image_t					*sunShadowDepthImage[4];
 	image_t                 *screenShadowImage;
+	image_t                 *flashShadowDepthImage;
+	image_t                 *flashShadowMaskImage;
 	image_t                 *screenSsaoImage;
 	image_t                 *aoImage;        // full resolution AO for ambient only AO
 	image_t                 *ssaoDepthImage; // half resolution copy of the depth for SSAO
@@ -1719,6 +1729,8 @@ typedef struct {
 	FBO_t					*targetLevelsFbo;
 	FBO_t					*sunShadowFbo[4];
 	FBO_t					*screenShadowFbo;
+	FBO_t					*flashShadowFbo;
+	FBO_t					*flashShadowMaskFbo;
 	FBO_t					*screenSsaoFbo;
 	FBO_t					*ssaoDepthFbo;
 	FBO_t					*aoFbo;
@@ -1773,6 +1785,7 @@ typedef struct {
 	qboolean        smaaAvailable;       // shaders compiled and images/FBOs exist
 	shaderProgram_t calclevels4xShader[2];
 	shaderProgram_t shadowmaskShader;
+	shaderProgram_t flashShadowmaskShader;
 	shaderProgram_t ssaoShader[2]; // 0 = hemisphere, 1 = GTAO
 	shaderProgram_t ssaoUpShader;
 	shaderProgram_t depthBlurShader[4];
@@ -2075,6 +2088,8 @@ extern  cvar_t  *r_forceSun;
 extern  cvar_t  *r_forceSunLightScale;
 extern  cvar_t  *r_forceSunAmbientScale;
 extern  cvar_t  *r_sunlightMode;
+extern  cvar_t  *r_flashlightShadow;
+extern  cvar_t  *r_flashlightShadowSize;
 extern  cvar_t  *r_drawSunRays;
 extern  cvar_t  *r_sunShadows;
 extern  cvar_t  *r_shadowFilter;
@@ -2149,6 +2164,7 @@ void R_RenderView( viewParms_t *parms );
 void R_RenderDlightCubemaps(const refdef_t *fd);
 void R_RenderPshadowMaps(const refdef_t *fd);
 void R_RenderSunShadowMaps(const refdef_t *fd, int level);
+void R_RenderFlashlightShadowMap(const refdef_t *fd);
 void R_RenderCubemapSide( int cubemapIndex, int cubemapSide, qboolean subscene );
 
 void R_AddMD3Surfaces( trRefEntity_t *e );

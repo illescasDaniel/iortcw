@@ -1334,10 +1334,10 @@ void CG_CodAddFlashlight( void ) {
 	// has r_dynamiclight 0.
 	trap_R_AddSpotLightToScene( start, radius * 0.55f,
 								bg_cod.flashlightR, bg_cod.flashlightG, bg_cod.flashlightB,
-								dir, 16.0f, REF_FORCE_DLIGHT );
+								dir, 16.0f, REF_FORCE_DLIGHT | REF_SHADOW_DLIGHT );
 	trap_R_AddSpotLightToScene( start, radius,
 								bg_cod.flashlightR * 0.65f, bg_cod.flashlightG * 0.65f, bg_cod.flashlightB * 0.65f,
-								dir, 28.0f, REF_FORCE_DLIGHT );
+								dir, 28.0f, REF_FORCE_DLIGHT | REF_SHADOW_DLIGHT );
 }
 
 /*

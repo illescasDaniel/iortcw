@@ -350,6 +350,9 @@ void main()
   #if defined(USE_LIGHT_VECTOR)
 	attenuation  = CalcLightAttenuation(float(var_LightDir.w > 0.0), var_LightDir.w / sqrLightDist);
 	attenuation *= CalcSpotAttenuation(-L);
+	// codmod: flashlight shadow mask
+	if (u_AoParams.y > 0.5)
+		attenuation *= texture2D(u_AoMap, gl_FragCoord.xy * r_FBufScale).r;
   #else
 	attenuation  = 1.0;
   #endif

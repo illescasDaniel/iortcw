@@ -363,6 +363,19 @@ static void ComputeDeformValues(int *deformGen, vec5_t deformParams)
 }
 
 
+// codmod: bind the flashlight shadow mask (shares the AO texture unit) and flag it for the dlight shaders
+static void SetDlightShadowMask( shaderProgram_t *sp, const dlight_t *dl )
+{
+	vec4_t params;
+	qboolean on = dl->shadowed && backEnd.flashShadowReady;
+
+	VectorSet4( params, 0.0f, on ? 1.0f : 0.0f, 0.0f, 0.0f );
+	if ( on ) {
+		GL_BindToTMU( tr.flashShadowMaskImage, TB_AOMAP );
+	}
+	GLSL_SetUniformVec4( sp, UNIFORM_AOPARAMS, params );
+}
+
 static void ProjectDlightTexture( void ) {
 	int		l;
 	vec3_t	origin;
@@ -449,6 +462,7 @@ static void ProjectDlightTexture( void ) {
 		GLSL_SetUniformVec4(sp, UNIFORM_LIGHTSPOT, vector);
 	  
 		GL_BindToTMU( tr.dlightImage, TB_COLORMAP );
+		SetDlightShadowMask( sp, dl );
 
 		// include GLS_DEPTHFUNC_EQUAL so alpha tested surfaces don't add light
 		// where they aren't rendered
@@ -902,6 +916,7 @@ static void ForwardDlight( void ) {
 
 		GLSL_SetUniformVec4(sp, UNIFORM_NORMALSCALE, pStage->normalScale);
 		GLSL_SetUniformVec4(sp, UNIFORM_SPECULARSCALE, pStage->specularScale);
+		SetDlightShadowMask(sp, dl);
 		
 		// include GLS_DEPTHFUNC_EQUAL so alpha tested surfaces don't add light
 		// where they aren't rendered

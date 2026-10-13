@@ -354,10 +354,15 @@ void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, fl
 		return;
 	}
 
-	overdraw &= ~REF_FORCE_DLIGHT;
-	overdraw &= ~REF_JUNIOR_DLIGHT;
+	{
+		qboolean shadowed = ( overdraw & REF_SHADOW_DLIGHT ) != 0;
+		overdraw &= ~REF_FORCE_DLIGHT;
+		overdraw &= ~REF_JUNIOR_DLIGHT;
+		overdraw &= ~REF_SHADOW_DLIGHT;
 
-	dl = &backEndData->dlights[r_numdlights++];
+		dl = &backEndData->dlights[r_numdlights++];
+		dl->shadowed = shadowed;
+	}
 	VectorCopy( org, dl->origin );
 
 	dl->radius = intensity * r_dlightScale->value;  //----(SA)	modified
@@ -690,6 +695,16 @@ void RE_RenderScene( const refdef_t *fd ) {
 		{
 			Mat4Copy(tr.lastCascadeSunMvp, tr.refdef.sunShadowMvp[3]);
 		}
+	}
+
+	// codmod: flashlight spot shadow
+	if (!( fd->rdflags & ( RDF_NOWORLDMODEL | RDF_SNOOPERVIEW ) ))
+	{
+		R_RenderFlashlightShadowMap(fd);
+	}
+	else
+	{
+		tr.refdef.flashShadow = qfalse;
 	}
 
 	// playing with cube maps

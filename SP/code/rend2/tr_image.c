@@ -2965,6 +2965,17 @@ void R_CreateBuiltinImages( void ) {
 			tr.screenShadowImage = R_CreateImage("*screenShadow", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_RGBA8);
 		}
 
+		// codmod: flashlight spot shadow map + its screen-space mask
+		{
+			int fsz = r_flashlightShadowSize->integer;
+			if (fsz < 256) fsz = 256;
+			if (fsz > 4096) fsz = 4096;
+			tr.flashShadowDepthImage = R_CreateImage("*flashShadowDepth", NULL, fsz, fsz, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_DEPTH_COMPONENT24);
+			qglTextureParameterfEXT(tr.flashShadowDepthImage->texnum, GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_R_TO_TEXTURE);
+			qglTextureParameterfEXT(tr.flashShadowDepthImage->texnum, GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+			tr.flashShadowMaskImage = R_CreateImage("*flashShadowMask", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_R8);
+		}
+
 		if (r_cubeMapping->integer)
 		{
 			tr.renderCubeImage = R_CreateImage("*renderCube", NULL, r_cubemapSize->integer, r_cubemapSize->integer, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE | IMGFLAG_MIPMAP | IMGFLAG_CUBEMAP, rgbFormat);

@@ -1459,6 +1459,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 	isShadowView = !!(backEnd.viewParms.flags & VPF_DEPTHSHADOW);
 
 	backEnd.aoReady = qfalse;
+	backEnd.flashShadowReady = qfalse;
 
 	// clear the z buffer, set the modelview, etc
 	RB_BeginDrawingView ();
@@ -1613,6 +1614,73 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 					RB_InstantQuad2(quadVerts, texCoords);
 				}
+			}
+
+			// codmod: flashlight shadow mask (screen space, sampled by the dlight shaders)
+			if (backEnd.refdef.flashShadow && tr.flashShadowMaskFbo && tr.flashShadowDepthImage && !(backEnd.refdef.rdflags & RDF_SNOOPERVIEW))
+			{
+				vec4_t quadVerts[4];
+				vec2_t texCoords[4];
+				vec4_t box;
+				vec4_t lightOrigin;
+
+				FBO_Bind(tr.flashShadowMaskFbo);
+
+				box[0] = backEnd.viewParms.viewportX      * tr.flashShadowMaskFbo->width / (float)glConfig.vidWidth;
+				box[1] = backEnd.viewParms.viewportY      * tr.flashShadowMaskFbo->height / (float)glConfig.vidHeight;
+				box[2] = backEnd.viewParms.viewportWidth  * tr.flashShadowMaskFbo->width / (float)glConfig.vidWidth;
+				box[3] = backEnd.viewParms.viewportHeight * tr.flashShadowMaskFbo->height / (float)glConfig.vidHeight;
+
+				qglViewport(box[0], box[1], box[2], box[3]);
+				qglScissor(box[0], box[1], box[2], box[3]);
+
+				box[0] = backEnd.viewParms.viewportX / (float)glConfig.vidWidth;
+				box[1] = backEnd.viewParms.viewportY / (float)glConfig.vidHeight;
+				box[2] = box[0] + backEnd.viewParms.viewportWidth / (float)glConfig.vidWidth;
+				box[3] = box[1] + backEnd.viewParms.viewportHeight / (float)glConfig.vidHeight;
+
+				texCoords[0][0] = box[0]; texCoords[0][1] = box[3];
+				texCoords[1][0] = box[2]; texCoords[1][1] = box[3];
+				texCoords[2][0] = box[2]; texCoords[2][1] = box[1];
+				texCoords[3][0] = box[0]; texCoords[3][1] = box[1];
+
+				VectorSet4(quadVerts[0], -1.0f,  1.0f, 0, 1);
+				VectorSet4(quadVerts[1],  1.0f,  1.0f, 0, 1);
+				VectorSet4(quadVerts[2],  1.0f, -1.0f, 0, 1);
+				VectorSet4(quadVerts[3], -1.0f, -1.0f, 0, 1);
+
+				GL_State(GLS_DEPTHTEST_DISABLE);
+
+				GLSL_BindProgram(&tr.flashShadowmaskShader);
+
+				GL_BindToTMU(tr.renderDepthImage, TB_COLORMAP);
+				GL_BindToTMU(tr.flashShadowDepthImage, TB_SHADOWMAP);
+
+				GLSL_SetUniformMat4(&tr.flashShadowmaskShader, UNIFORM_SHADOWMVP, backEnd.refdef.flashShadowMvp);
+				VectorCopy(backEnd.refdef.flashShadowOrigin, lightOrigin);
+				lightOrigin[3] = 1.0f;
+				GLSL_SetUniformVec4(&tr.flashShadowmaskShader, UNIFORM_LIGHTORIGIN, lightOrigin);
+				GLSL_SetUniformVec3(&tr.flashShadowmaskShader, UNIFORM_VIEWORIGIN, backEnd.refdef.vieworg);
+				{
+					vec3_t viewVector;
+
+					float zmax = backEnd.viewParms.zFar;
+					float ymax = zmax * tan(backEnd.viewParms.fovY * M_PI / 360.0f);
+					float xmax = zmax * tan(backEnd.viewParms.fovX * M_PI / 360.0f);
+
+					VectorScale(backEnd.refdef.viewaxis[0], zmax, viewVector);
+					GLSL_SetUniformVec3(&tr.flashShadowmaskShader, UNIFORM_VIEWFORWARD, viewVector);
+					VectorScale(backEnd.refdef.viewaxis[1], xmax, viewVector);
+					GLSL_SetUniformVec3(&tr.flashShadowmaskShader, UNIFORM_VIEWLEFT, viewVector);
+					VectorScale(backEnd.refdef.viewaxis[2], ymax, viewVector);
+					GLSL_SetUniformVec3(&tr.flashShadowmaskShader, UNIFORM_VIEWUP, viewVector);
+
+					GLSL_SetUniformVec4(&tr.flashShadowmaskShader, UNIFORM_VIEWINFO, viewInfo);
+				}
+
+				RB_InstantQuad2(quadVerts, texCoords);
+
+				backEnd.flashShadowReady = qtrue;
 			}
 
 			if (r_ssao->integer)
@@ -2230,6 +2298,13 @@ const void *RB_PostProcess(const void *data)
 		FBO_Bind(NULL);
 	}
 #endif
+
+	if (r_flashlightShadow->integer == 2 && tr.flashShadowMaskImage)
+	{
+		ivec4_t dstBox;
+		VectorSet4(dstBox, 0, 0, 320, 240);
+		FBO_BlitFromTexture(tr.flashShadowMaskImage, NULL, NULL, dstFbo, dstBox, NULL, NULL, 0);
+	}
 
 	if (0 && r_sunlightMode->integer)
 	{
