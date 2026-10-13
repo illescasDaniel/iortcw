@@ -1608,6 +1608,14 @@ static void CG_RunWeapLerpFrame( clientInfo_t *ci, weaponInfo_t *wi, lerpFrame_t
 	} else if ( newAnimation != lf->animationNumber )   {
 		int animId = newAnimation & ~ANIM_TOGGLEBIT;
 
+		// codmod: prediction replays the reload-start command every frame until the
+		// snapshot acks it, flipping only the toggle bit each time. Don't restart a
+		// reload that is still playing, or it sticks on frame 0 for a few frames.
+		if ( ( animId == WEAP_RELOAD1 || animId == WEAP_RELOAD2 || animId == WEAP_RELOAD3 )
+			 && animId == ( lf->animationNumber & ~ANIM_TOGGLEBIT )
+			 && cg.time < lf->animationTime + lf->animation->numFrames * lf->animation->frameLerp ) {
+			lf->animationNumber = newAnimation;
+		} else
 		// clear on raise/alt (vanilla) and on attack — otherwise a same-bit
 		// restart can blend from the held last frame and look like no kick
 		if ( animId == WEAP_RAISE ||

@@ -741,6 +741,20 @@ void CG_PredictPlayerState( void ) {
 		CG_TouchTriggerPrediction();
 	}
 
+	// codmod: weapAnim is carried over from the last predicted frame, not taken from the
+	// snapshot. If the server began the reload on a command we never replayed (last shot
+	// mispredicted: releasedFire is not networked), nothing here sets RELOAD1 and the
+	// empty-clip reload played no first-person anim. Start it from the snapshot state.
+	if ( bg_cod.enable && cg.predictedPlayerState.weaponstate == WEAPON_RELOADING ) {
+		int anim = cg.predictedPlayerState.weapAnim & ~ANIM_TOGGLEBIT;
+
+		if ( anim != WEAP_RELOAD1 && anim != WEAP_RELOAD2 && anim != WEAP_RELOAD3 ) {
+			cg.predictedPlayerState.weapAnim =
+				( ( cg.predictedPlayerState.weapAnim & ANIM_TOGGLEBIT ) ^ ANIM_TOGGLEBIT ) | WEAP_RELOAD1;
+			cg.predictedPlayerState.weapAnimTimer = 0;
+		}
+	}
+
 	if ( cg_showmiss.integer > 1 ) {
 		CG_Printf( "[%i : %i] ", cg_pmove.cmd.serverTime, cg.time );
 	}
