@@ -1033,6 +1033,9 @@ typedef struct {
 								// since weapon kicks are client-side, and damage feedback
 								// is rare enough that we can transmit that as an event
 	float recoilPitch, recoilPitchAngle;
+	short codRecoilLastDelta[2];    // E5: previous predicted delta_angles pitch/yaw
+	float codRecoilOff[2];          // E5: view smoothing offset (deg), decays to 0
+	qboolean codRecoilInit;
 
 	// Duffy
 	qboolean cameraMode;        // if rendering from a camera

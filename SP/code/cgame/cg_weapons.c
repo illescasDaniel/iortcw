@@ -4801,6 +4801,10 @@ void CG_WeaponFireRecoil( int weapon ) {
 	float yawRandom;
 	vec3_t recoil;
 	//
+	// codmod: E5 replaces this cosmetic kick with the real aim recoil (bg_pmove.c)
+	if ( bg_cod.enable && bg_cod.recoilEnable && weapon != WP_PANZERFAUST ) {
+		return;
+	}
 	pitchRecoilAdd = 0;
 	pitchAdd = 0;
 	yawRandom = 0;

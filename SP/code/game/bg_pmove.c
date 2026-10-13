@@ -2657,6 +2657,118 @@ static void PM_SwitchIfEmpty( void ) {
 
 
 /*
+================
+PM_CodRecoilKick
+
+codmod: E5 real view-angle recoil. Called once per shot from PM_Weapon (player only). Moves
+ps->delta_angles so the true aim climbs and bullets follow it; the unrecovered part is kept
+in STAT_COD_RECOIL (networked, prediction-safe). cgame smooths the snap visually.
+Per-weapon peak degrees: pitch up, random yaw +-.
+================
+*/
+static void PM_CodRecoilKick( void ) {
+	playerState_t *ps = pm->ps;
+	float pitch, yaw, scale, ads, maxShort;
+	unsigned int h;
+	int kick;
+
+	if ( ps->aiChar || !bg_cod.enable || !bg_cod.recoilEnable ) {
+		return;
+	}
+
+	switch ( ps->weapon ) {
+	case WP_LUGER:
+	case WP_SILENCER:
+	case WP_COLT:
+	case WP_AKIMBO:         pitch = 0.9f; yaw = 0.25f; break;
+	case WP_MP40:           pitch = 0.75f; yaw = 0.3f; break;
+	case WP_THOMPSON:       pitch = 0.85f; yaw = 0.3f; break;
+	case WP_STEN:           pitch = 0.65f; yaw = 0.3f; break;
+	case WP_FG42:
+	case WP_FG42SCOPE:      pitch = 0.9f; yaw = 0.3f; break;
+	case WP_VENOM:          pitch = 0.5f; yaw = 0.35f; break;
+	case WP_MAUSER:
+	case WP_GARAND:         pitch = 2.4f; yaw = 0.5f; break;
+	case WP_SNIPERRIFLE:
+	case WP_SNOOPERSCOPE:   pitch = 2.8f; yaw = 0.4f; break;
+	case WP_PANZERFAUST:    pitch = 3.0f; yaw = 0.2f; break;
+	default:
+		return;
+	}
+
+	scale = bg_cod.recoilScale;
+	ads = (float)ps->stats[STAT_COD_ADS] / 1000.0f;
+	if ( ads < 0.0f ) {
+		ads = 0.0f;
+	} else if ( ads > 1.0f ) {
+		ads = 1.0f;
+	}
+	scale *= 1.0f + ( bg_cod.recoilAdsScale - 1.0f ) * ads;
+	if ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) {
+		scale *= bg_cod.recoilProne;
+	} else if ( ps->pm_flags & PMF_DUCKED ) {
+		scale *= bg_cod.recoilCrouch;
+	}
+
+	// deterministic per-shot random, identical on server and client prediction
+	h = (unsigned int)pm->cmd.serverTime * 2654435761u;
+	h ^= h >> 15;
+	yaw *= scale * ( ( ( h & 0xffff ) / 32767.5f ) - 1.0f );
+	pitch *= scale;
+
+	maxShort = ANGLE2SHORT( bg_cod.recoilMax );
+	if ( ps->stats[STAT_COD_RECOIL] >= maxShort ) {
+		pitch = 0;      // already at the climb ceiling
+	}
+	kick = ANGLE2SHORT( pitch );
+	ps->delta_angles[PITCH] -= kick;
+	ps->delta_angles[YAW] += ANGLE2SHORT( yaw );
+	ps->stats[STAT_COD_RECOIL] += kick;
+}
+
+/*
+================
+PM_CodRecoilFrame
+
+codmod: E5 per-frame recovery. Looking down by hand cancels stored kick first (so a player
+who pulls down is not dragged below their aim); after cod_recoilDelay ms without firing the
+rest drifts back at cod_recoilRecover deg/s.
+================
+*/
+static void PM_CodRecoilFrame( void ) {
+	playerState_t *ps = pm->ps;
+	int acc = ps->stats[STAT_COD_RECOIL];
+	int rec, pull;
+
+	if ( acc <= 0 ) {
+		ps->stats[STAT_COD_RECOIL] = 0;
+		return;
+	}
+	if ( ps->aiChar || !bg_cod.enable || !bg_cod.recoilEnable ) {
+		ps->stats[STAT_COD_RECOIL] = 0;
+		return;
+	}
+
+	pull = (short)( pm->cmd.angles[PITCH] - pm->oldcmd.angles[PITCH] );
+	if ( pull > 0 ) {
+		acc -= pull;
+		if ( acc < 0 ) {
+			acc = 0;
+		}
+	}
+
+	if ( acc > 0 && pm->cmd.serverTime - ps->lastFireTime > (int)bg_cod.recoilDelay ) {
+		rec = (int)( ANGLE2SHORT( bg_cod.recoilRecover ) * pml.frametime );
+		if ( rec > acc ) {
+			rec = acc;
+		}
+		acc -= rec;
+		ps->delta_angles[PITCH] += rec;
+	}
+	ps->stats[STAT_COD_RECOIL] = acc;
+}
+
+/*
 ==============
 PM_WeaponUseAmmo
 	accounts for clips being used/not used
@@ -3774,6 +3886,8 @@ static void PM_Weapon( void ) {
 		pm->ps->aimSpreadScaleFloat = 255;
 	}
 	pm->ps->aimSpreadScale = (int)( pm->ps->aimSpreadScaleFloat );
+
+	PM_CodRecoilKick();
 
 	pm->ps->weaponTime += addTime;
 
@@ -5123,6 +5237,7 @@ void PmoveSingle( pmove_t *pmove ) {
 	if ( !isDummy ) {
 		// done.
 		if ( !( pm->ps->pm_flags & PMF_LIMBO ) ) { // JPW NERVE
+			PM_CodRecoilFrame();
 			PM_UpdateViewAngles( pm->ps, &pm->cmd, pm->trace ); //----(SA)	modified
 
 		}

@@ -75,6 +75,15 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_adsSwayMove",        "1.5",  0,            CODOFS( adsSwayMove ),        0 },
 	{ "cod_adsSwayCrouch",      "0.6",  0,            CODOFS( adsSwayCrouch ),      0 },
 	{ "cod_adsSwayProne",       "0.3",  0,            CODOFS( adsSwayProne ),       0 },
+	// codmod: E5 recoil (docs/phase-7-extras.md). Per-weapon degrees live in PM_CodRecoilKick.
+	{ "cod_recoilEnable",       "1",    0,            CODOFS( recoilEnable ),       1 },
+	{ "cod_recoilScale",        "1",    0,            CODOFS( recoilScale ),        0 },
+	{ "cod_recoilAdsScale",     "0.55", 0,            CODOFS( recoilAdsScale ),     0 },
+	{ "cod_recoilCrouch",       "0.8",  0,            CODOFS( recoilCrouch ),       0 },
+	{ "cod_recoilProne",        "0.6",  0,            CODOFS( recoilProne ),        0 },
+	{ "cod_recoilRecover",      "14",   0,            CODOFS( recoilRecover ),      0 },
+	{ "cod_recoilDelay",        "120",  0,            CODOFS( recoilDelay ),        0 },
+	{ "cod_recoilMax",          "10",   0,            CODOFS( recoilMax ),          0 },
 	// codmod: FOV zoom magnifies the RF_DEPTHHACK viewmodel; push it forward while ADS so
 	// it doesn't fill the screen from the hip. Used as a fine bias on top of tag_flash align.
 	{ "cod_adsGunFovComp",      "2",    0,            CODOFS( adsGunFovComp ),      0 },

@@ -62,6 +62,14 @@ typedef struct {
 	float adsSwayMove;      // extra sway multiplier at cod_runSpeed (0 = movement does not matter)
 	float adsSwayCrouch;    // sway multiplier while crouched
 	float adsSwayProne;     // sway multiplier while prone
+	float recoilEnable;     // E5: real view-angle kick per shot (player only)
+	float recoilScale;      // global multiplier on the per-weapon kick table
+	float recoilAdsScale;   // kick multiplier at full ADS
+	float recoilCrouch;     // kick multiplier while crouched
+	float recoilProne;      // kick multiplier while prone
+	float recoilRecover;    // deg/s the unrecovered kick drifts back after firing stops
+	float recoilDelay;      // ms after the last shot before recovery starts
+	float recoilMax;        // deg, cap on accumulated climb
 	float adsGunFovComp;    // pushes the viewmodel forward in proportion to the FOV zoom (cgame)
 	float adsSightHeight;   // default u above tag_flash bore to the rear sight (cgame auto-align)
 	float adsBarrelBack;    // default u from tag_flash back to the rear sight along the bore

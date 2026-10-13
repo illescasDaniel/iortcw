@@ -357,6 +357,53 @@ static void CG_StepOffset( void ) {
 
 /*
 ================
+CG_CodRecoilSmooth
+
+codmod: E5. The recoil kick moves the real aim (ps->delta_angles) in one step; to avoid a
+visual snap, any sudden predicted delta_angles jump is cancelled in the view and eased back
+out over ~45 ms. Recovery (small positive steps) is intentionally not smoothed.
+================
+*/
+static void CG_CodRecoilSmooth( vec3_t angles ) {
+	playerState_t *ps = &cg.predictedPlayerState;
+	float dp, dy;
+
+	if ( !bg_cod.enable || !bg_cod.recoilEnable ) {
+		cg.codRecoilOff[PITCH] = cg.codRecoilOff[YAW] = 0;
+		cg.codRecoilInit = qfalse;
+		return;
+	}
+	if ( !cg.codRecoilInit ) {
+		cg.codRecoilLastDelta[PITCH] = ps->delta_angles[PITCH];
+		cg.codRecoilLastDelta[YAW] = ps->delta_angles[YAW];
+		cg.codRecoilOff[PITCH] = cg.codRecoilOff[YAW] = 0;
+		cg.codRecoilInit = qtrue;
+	}
+
+	dp = SHORT2ANGLE( (short)( ps->delta_angles[PITCH] - cg.codRecoilLastDelta[PITCH] ) );
+	dy = SHORT2ANGLE( (short)( ps->delta_angles[YAW] - cg.codRecoilLastDelta[YAW] ) );
+	cg.codRecoilLastDelta[PITCH] = ps->delta_angles[PITCH];
+	cg.codRecoilLastDelta[YAW] = ps->delta_angles[YAW];
+
+	if ( dp < -0.2f && dp > -20.0f ) {
+		cg.codRecoilOff[PITCH] -= dp;       // kick lifts the aim; offset pushes the view back down
+	}
+	if ( fabs( dy ) > 0.05f && fabs( dy ) < 5.0f ) {
+		cg.codRecoilOff[YAW] -= dy;
+	}
+
+	angles[PITCH] += cg.codRecoilOff[PITCH];
+	angles[YAW] += cg.codRecoilOff[YAW];
+
+	{
+		float k = expf( -(float)cg.frametime / 45.0f );
+		cg.codRecoilOff[PITCH] *= k;
+		cg.codRecoilOff[YAW] *= k;
+	}
+}
+
+/*
+================
 CG_KickAngles
 ================
 */
@@ -563,6 +610,7 @@ static void CG_OffsetFirstPersonView( void ) {
 	// RF, add new weapon kick angles
 	CG_KickAngles();
 	VectorAdd( angles, cg.kickAngles, angles );
+	CG_CodRecoilSmooth( angles );
 	// RF, pitch is already added
 	//angles[0] -= cg.kickAngles[PITCH];
 
