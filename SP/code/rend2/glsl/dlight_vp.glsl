@@ -4,6 +4,8 @@ attribute vec3 attr_Normal;
 
 uniform vec4   u_DlightInfo;
 uniform vec4   u_LightSpot; // codmod: xyz dir (local), w = cos(outer); w < -1.5 = point
+uniform vec3   u_LocalViewOrigin; // codmod: specular pass
+uniform vec4   u_SpecularScale;   // codmod: x > 0 = additive specular pass
 
 #if defined(USE_DEFORM_VERTEXES)
 uniform int    u_DeformGen;
@@ -16,6 +18,7 @@ uniform mat4   u_ModelViewProjectionMatrix;
 
 varying vec2   var_Tex1;
 varying vec4   var_Color;
+varying vec3   var_SpecColor;
 
 #if defined(USE_DEFORM_VERTEXES)
 vec3 DeformPosition(const vec3 pos, const vec3 normal, const vec2 st)
@@ -89,6 +92,8 @@ void main()
 	float dlightmod = step(0.0, dot(dist, normal));
 	dlightmod *= clamp(2.0 * (1.0 - abs(dist.z) * u_DlightInfo.a), 0.0, 1.0);
 
+	float spotMul = 1.0;
+
 	// codmod: clip classic projective dlights to the spotlight cone
 	if (u_LightSpot.w > -1.5)
 	{
@@ -98,13 +103,33 @@ void main()
 		{
 			float cd = dot(normalize(u_LightSpot.xyz), lightToFrag * inversesqrt(len2));
 			float inner = mix(u_LightSpot.w, 1.0, 0.35);
-			dlightmod *= smoothstep(u_LightSpot.w, inner, cd);
+			spotMul = smoothstep(u_LightSpot.w, inner, cd);
 		}
 		else
 		{
-			dlightmod = 0.0;
+			spotMul = 0.0;
 		}
 	}
-	
+	dlightmod *= spotMul;
+
+	// codmod: Blinn-Phong highlight for the additive specular pass (shiny/dark metal
+	// gets no help from the multiplicative diffuse pass). Radius-based falloff.
+	var_SpecColor = vec3(0.0);
+	if (u_SpecularScale.x > 0.0)
+	{
+		float dist2 = dot(dist, dist);
+		if (dist2 > 0.0001)
+		{
+			vec3 L = dist * inversesqrt(dist2);
+			vec3 V = normalize(u_LocalViewOrigin - position);
+			vec3 N = normalize(normal);
+			float att = clamp(1.0 - sqrt(dist2) * u_DlightInfo.a * 0.5, 0.0, 1.0);
+			float nl = max(dot(N, L), 0.0);
+			float nh = max(dot(N, normalize(L + V)), 0.0);
+			float spec = pow(nh, 24.0) * step(0.0, dot(N, L)) * nl;
+			var_SpecColor = u_Color.rgb * (spec * att * att * spotMul * u_SpecularScale.x);
+		}
+	}
+
 	var_Color = u_Color * dlightmod;
 }

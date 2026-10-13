@@ -1912,6 +1912,7 @@ extern cvar_t	*r_drawSun;				// controls drawing of sun quad
 							// "2" also draw lens flare effect centered on sun
 extern cvar_t	*r_dynamiclight;		// dynamic lights enabled/disabled
 extern cvar_t	*r_dlightScale;			// global user attenuation of dlights
+extern cvar_t	*r_dlightSpecular;
 extern cvar_t	*r_dlightEntities;	// codmod: per-pixel dlights on models (0 = old vertex-only)
 extern cvar_t	*r_dlightBacks;			// dlight non-facing surfaces for continuity
 

@@ -83,6 +83,7 @@ cvar_t  *r_fastsky;
 cvar_t  *r_drawSun;
 cvar_t  *r_dynamiclight;
 cvar_t  *r_dlightBacks;
+cvar_t  *r_dlightSpecular; // codmod: specular highlight strength on model dlights
 cvar_t  *r_dlightEntities; // codmod: per-pixel dlights on models
 cvar_t  *r_dlightScale; //----(SA)	added
 
@@ -1573,6 +1574,7 @@ void R_Register( void ) {
 	r_dynamiclight = ri.Cvar_Get( "r_dynamiclight", "1", CVAR_ARCHIVE );
 	r_dlightScale = ri.Cvar_Get( "r_dlightScale", "1.0", CVAR_ARCHIVE );   //----(SA)	added
 	r_dlightBacks = ri.Cvar_Get( "r_dlightBacks", "1", CVAR_ARCHIVE );
+	r_dlightSpecular = ri.Cvar_Get( "r_dlightSpecular", "1.0", 0 );
 	r_dlightEntities = ri.Cvar_Get( "r_dlightEntities", "1", 0 );
 	r_finish = ri.Cvar_Get( "r_finish", "0", CVAR_ARCHIVE );
 	r_textureMode = ri.Cvar_Get( "r_textureMode", "GL_LINEAR_MIPMAP_LINEAR", CVAR_ARCHIVE );

@@ -460,12 +460,25 @@ static void ProjectDlightTexture( void ) {
 		}
 
 		GLSL_SetUniformInt(sp, UNIFORM_ALPHATEST, 1);
+		VectorSet4( vector, 0, 0, 0, 0 );
+		GLSL_SetUniformVec4(sp, UNIFORM_SPECULARSCALE, vector);
 
 		R_DrawElements(tess.numIndexes, tess.firstIndex);
 
 		backEnd.pc.c_totalIndexes += tess.numIndexes;
 		backEnd.pc.c_dlightIndexes += tess.numIndexes;
 		backEnd.pc.c_dlightVertexes += tess.numVertexes;
+
+		// codmod: additive specular highlight on models (metal etc.)
+		if ( r_dlightSpecular->value > 0.0f && backEnd.currentEntity != &tr.worldEntity
+			&& !( backEnd.currentEntity->e.renderfx & RF_DEPTHHACK ) ) {
+			VectorSet4( vector, r_dlightSpecular->value, 0, 0, 0 );
+			GLSL_SetUniformVec4(sp, UNIFORM_SPECULARSCALE, vector);
+			GLSL_SetUniformVec3(sp, UNIFORM_LOCALVIEWORIGIN, backEnd.or.viewOrigin);
+			GLSL_SetUniformInt(sp, UNIFORM_ALPHATEST, 0);
+			GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL );
+			R_DrawElements(tess.numIndexes, tess.firstIndex);
+		}
 	}
 }
 
