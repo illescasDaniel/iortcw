@@ -2484,7 +2484,7 @@ void Com_Init( char *commandLine ) {
 			//Cbuf_AddText ("cinematic " CINEMATICS_LOGO "\n");
 #endif
 #ifdef CINEMATICS_INTRO
-			if ( !com_introPlayed->integer ) {
+			if ( qtrue ) { // codmod: always play; the archived com_introPlayed is ignored (stale values skipped it)
 				//Cvar_Set( com_introPlayed->name, "1" );		//----(SA)	force this to get played every time (but leave cvar for override)
 				Cbuf_AddText( "cinematic " CINEMATICS_INTRO " 3\n" );
 				//Cvar_Set( "nextmap", "cinematic " CINEMATICS_INTRO );
