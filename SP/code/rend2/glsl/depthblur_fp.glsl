@@ -51,7 +51,13 @@ vec4 depthGaussian1D(sampler2D imageMap, sampler2D depthMap, vec2 tex, float zFa
 	float total = 1.0;
 #endif
 
+#if defined(USE_DEPTH)
+	// depth tolerance relative to the distance (3% + 1.5 units): tight close up
+	// where edges are visible, looser far away where it is only noise
+	float zLimit = depthCenter * 0.03 + 1.5 / zFar;
+#else
 	float zLimit = 5.0 / zFar;
+#endif
 	int i, j;
 	for (i = 0; i < 2; i++)
 	{

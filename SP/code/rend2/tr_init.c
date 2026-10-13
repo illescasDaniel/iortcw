@@ -153,7 +153,14 @@ cvar_t  *r_forceAutoExposureMin;
 cvar_t  *r_forceAutoExposureMax;
 
 cvar_t  *r_depthPrepass;
+cvar_t  *r_ao;
 cvar_t  *r_ssao;
+cvar_t  *r_ssaoRadius;
+cvar_t  *r_ssaoStrength;
+cvar_t  *r_ssaoSamples;
+cvar_t  *r_ssaoMode;
+cvar_t  *r_ssaoSlices;
+cvar_t  *r_ssaoSteps;
 
 cvar_t  *r_normalMapping;
 cvar_t  *r_specularMapping;
@@ -1342,6 +1349,41 @@ void R_ApplyAA( void ) {
 	r_ext_framebuffer_multisample = ri.Cvar_Get( "r_ext_framebuffer_multisample", "0", CVAR_ARCHIVE | CVAR_LATCH );
 }
 
+/*
+==================
+R_ApplyAO
+
+r_ao is the single user-facing ambient occlusion setting:
+0 off, 1 hemisphere, 2-4 GTAO low (1x2) / medium (2x4) / high (2x6).
+It drives r_ssao, r_ssaoMode, r_ssaoSlices and r_ssaoSteps, all live.
+-1 leaves them alone.
+==================
+*/
+void R_ApplyAO( void ) {
+	static const int slices[] = { 1, 2, 2 };
+	static const int steps[] = { 2, 4, 6 };
+	static const char *strength[] = { "1", "1", "0.8" };   // High finds more occluders, keep it from going too dark
+	int ao = r_ao->integer;
+
+	r_ao->modified = qfalse;
+	if ( ao < 0 ) {
+		return;
+	}
+	if ( ao > 4 ) {
+		ao = 4;
+	}
+	ri.Cvar_Set( "r_ssao", ao ? "1" : "0" );
+	ri.Cvar_Set( "r_ssaoMode", ao >= 2 ? "1" : "0" );
+	if ( ao < 2 ) {
+		ri.Cvar_Set( "r_ssaoStrength", "1" );
+	}
+	if ( ao >= 2 ) {
+		ri.Cvar_Set( "r_ssaoSlices", va( "%d", slices[ao - 2] ) );
+		ri.Cvar_Set( "r_ssaoSteps", va( "%d", steps[ao - 2] ) );
+		ri.Cvar_Set( "r_ssaoStrength", strength[ao - 2] );
+	}
+}
+
 void R_Register( void ) {
 	#ifdef USE_RENDERER_DLOPEN
 	com_altivec = ri.Cvar_Get("com_altivec", "1", CVAR_ARCHIVE);
@@ -1443,7 +1485,21 @@ void R_Register( void ) {
 	r_cameraExposure = ri.Cvar_Get( "r_cameraExposure", "1", CVAR_CHEAT );
 
 	r_depthPrepass = ri.Cvar_Get( "r_depthPrepass", "1", CVAR_ARCHIVE );
-	r_ssao = ri.Cvar_Get( "r_ssao", "0", CVAR_LATCH | CVAR_ARCHIVE );
+	r_ao = ri.Cvar_Get( "r_ao", "3", CVAR_ARCHIVE );
+	r_ssao = ri.Cvar_Get( "r_ssao", "0", 0 );   // derived from r_ao
+	r_ssaoRadius = ri.Cvar_Get( "r_ssaoRadius", "40", 0 );
+	ri.Cvar_CheckRange( r_ssaoRadius, 4, 512, qfalse );
+	r_ssaoStrength = ri.Cvar_Get( "r_ssaoStrength", "1", 0 );
+	ri.Cvar_CheckRange( r_ssaoStrength, 0, 4, qfalse );
+	r_ssaoSamples = ri.Cvar_Get( "r_ssaoSamples", "16", 0 );
+	ri.Cvar_CheckRange( r_ssaoSamples, 4, 32, qtrue );
+	r_ssaoMode = ri.Cvar_Get( "r_ssaoMode", "1", 0 );
+	ri.Cvar_CheckRange( r_ssaoMode, 0, 1, qtrue );
+	r_ssaoSlices = ri.Cvar_Get( "r_ssaoSlices", "2", 0 );
+	ri.Cvar_CheckRange( r_ssaoSlices, 1, 4, qtrue );
+	r_ssaoSteps = ri.Cvar_Get( "r_ssaoSteps", "4", 0 );
+	ri.Cvar_CheckRange( r_ssaoSteps, 2, 12, qtrue );
+	R_ApplyAO();
 
 	r_normalMapping = ri.Cvar_Get( "r_normalMapping", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_specularMapping = ri.Cvar_Get( "r_specularMapping", "1", CVAR_ARCHIVE | CVAR_LATCH );

@@ -811,6 +811,9 @@ typedef enum
 
 	UNIFORM_LIGHTSPOT, // xyz = world/local spot dir, w = cos(outer half-angle); w < -1.5 = point
 
+	UNIFORM_SSAOPARAMS, // radius, strength, bias, sample count
+	UNIFORM_HALFDEPTHMAP, // half resolution depth, same size as the AO image
+
 	UNIFORM_COUNT
 } uniform_t;
 
@@ -1690,6 +1693,7 @@ typedef struct {
 	image_t					*sunShadowDepthImage[4];
 	image_t                 *screenShadowImage;
 	image_t                 *screenSsaoImage;
+	image_t                 *ssaoDepthImage; // half resolution copy of the depth for SSAO
 	image_t					*hdrDepthImage;
 	image_t                 *renderCubeImage;
 	
@@ -1710,6 +1714,7 @@ typedef struct {
 	FBO_t					*sunShadowFbo[4];
 	FBO_t					*screenShadowFbo;
 	FBO_t					*screenSsaoFbo;
+	FBO_t					*ssaoDepthFbo;
 	FBO_t					*hdrDepthFbo;
 	FBO_t                   *renderCubeFbo;
 
@@ -1761,7 +1766,8 @@ typedef struct {
 	qboolean        smaaAvailable;       // shaders compiled and images/FBOs exist
 	shaderProgram_t calclevels4xShader[2];
 	shaderProgram_t shadowmaskShader;
-	shaderProgram_t ssaoShader;
+	shaderProgram_t ssaoShader[2]; // 0 = hemisphere, 1 = GTAO
+	shaderProgram_t ssaoUpShader;
 	shaderProgram_t depthBlurShader[4];
 	shaderProgram_t testcubeShader;
 
@@ -2009,6 +2015,7 @@ extern  cvar_t  *r_smaa;
 extern  cvar_t  *r_smaaDebug;
 extern  cvar_t  *r_aa;
 void R_ApplyAA( void );
+void R_ApplyAO( void );
 extern  cvar_t  *r_forceToneMap;
 extern  cvar_t  *r_forceToneMapMin;
 extern  cvar_t  *r_forceToneMapAvg;
@@ -2022,7 +2029,14 @@ extern  cvar_t  *r_forceAutoExposureMax;
 extern  cvar_t  *r_cameraExposure;
 
 extern  cvar_t  *r_depthPrepass;
+extern  cvar_t  *r_ao;
 extern  cvar_t  *r_ssao;
+extern  cvar_t  *r_ssaoRadius;
+extern  cvar_t  *r_ssaoStrength;
+extern  cvar_t  *r_ssaoSamples;
+extern  cvar_t  *r_ssaoMode;
+extern  cvar_t  *r_ssaoSlices;
+extern  cvar_t  *r_ssaoSteps;
 
 extern  cvar_t  *r_normalMapping;
 extern  cvar_t  *r_specularMapping;

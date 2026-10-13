@@ -1488,7 +1488,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 					qglCopyTextureSubImage2DEXT(tr.renderDepthImage->texnum, GL_TEXTURE_2D, 0, 0, 0, 0, 0, glConfig.vidWidth, glConfig.vidHeight);
 			}
 
-			if (tr.hdrDepthFbo)
+			if (tr.hdrDepthFbo && (r_ssao->integer || r_shadowBlur->integer))
 			{
 				// need the depth in a texture we can do GL_LINEAR sampling on, so copy it to an HDR image
 				vec4_t srcTexCoords;
@@ -1612,9 +1612,23 @@ const void	*RB_DrawSurfs( const void *data ) {
 				vec4_t quadVerts[4];
 				vec2_t texCoords[4];
 
-				viewInfo[2] = 1.0f / ((float)(tr.quarterImage[0]->width)  * tan(backEnd.viewParms.fovX * M_PI / 360.0f) * 2.0f);
-				viewInfo[3] = 1.0f / ((float)(tr.quarterImage[0]->height) * tan(backEnd.viewParms.fovY * M_PI / 360.0f) * 2.0f);
-				viewInfo[3] *= (float)backEnd.viewParms.viewportHeight / (float)backEnd.viewParms.viewportWidth;
+				vec4_t ssaoParams;
+				vec2_t invTexRes;
+
+				// the ssao shader wants tan(fov / 2) here, not a texel size
+				viewInfo[2] = tan(backEnd.viewParms.fovX * M_PI / 360.0f);
+				viewInfo[3] = tan(backEnd.viewParms.fovY * M_PI / 360.0f);
+
+				if (r_ssaoMode->integer)
+					VectorSet4(ssaoParams, r_ssaoRadius->value, r_ssaoStrength->value, r_ssaoSlices->integer, r_ssaoSteps->integer);
+				else
+					VectorSet4(ssaoParams, r_ssaoRadius->value, r_ssaoStrength->value, 0.1f, r_ssaoSamples->integer);
+				invTexRes[0] = 1.0f / (float)tr.ssaoDepthImage->width;
+				invTexRes[1] = 1.0f / (float)tr.ssaoDepthImage->height;
+
+				// half resolution depth: the AO is half resolution too, and fetching from a
+				// small texture keeps the many random taps in cache (nearest, no invented depths)
+				FBO_FastBlit(tr.hdrDepthFbo, NULL, tr.ssaoDepthFbo, NULL, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 				FBO_Bind(tr.quarterFbo[0]);
 
@@ -1633,11 +1647,13 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 				GL_State( GLS_DEPTHTEST_DISABLE );
 
-				GLSL_BindProgram(&tr.ssaoShader);
+				GLSL_BindProgram(&tr.ssaoShader[r_ssaoMode->integer ? 1 : 0]);
 
-				GL_BindToTMU(tr.hdrDepthImage, TB_COLORMAP);
+				GL_BindToTMU(tr.ssaoDepthImage, TB_COLORMAP);
 
-				GLSL_SetUniformVec4(&tr.ssaoShader, UNIFORM_VIEWINFO, viewInfo);
+				GLSL_SetUniformVec4(&tr.ssaoShader[r_ssaoMode->integer ? 1 : 0], UNIFORM_VIEWINFO, viewInfo);
+				GLSL_SetUniformVec4(&tr.ssaoShader[r_ssaoMode->integer ? 1 : 0], UNIFORM_SSAOPARAMS, ssaoParams);
+				GLSL_SetUniformVec2(&tr.ssaoShader[r_ssaoMode->integer ? 1 : 0], UNIFORM_INVTEXRES, invTexRes);
 
 				RB_InstantQuad2(quadVerts, texCoords); //, color, shaderProgram, invTexRes);
 
@@ -1653,7 +1669,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 				GLSL_BindProgram(&tr.depthBlurShader[0]);
 
 				GL_BindToTMU(tr.quarterImage[0],  TB_COLORMAP);
-				GL_BindToTMU(tr.hdrDepthImage, TB_LIGHTMAP);
+				GL_BindToTMU(tr.ssaoDepthImage, TB_LIGHTMAP);
 
 				GLSL_SetUniformVec4(&tr.depthBlurShader[0], UNIFORM_VIEWINFO, viewInfo);
 
@@ -1668,7 +1684,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 				GLSL_BindProgram(&tr.depthBlurShader[1]);
 
 				GL_BindToTMU(tr.quarterImage[1],  TB_COLORMAP);
-				GL_BindToTMU(tr.hdrDepthImage, TB_LIGHTMAP);
+				GL_BindToTMU(tr.ssaoDepthImage, TB_LIGHTMAP);
 
 				GLSL_SetUniformVec4(&tr.depthBlurShader[1], UNIFORM_VIEWINFO, viewInfo);
 
@@ -2054,12 +2070,22 @@ const void *RB_PostProcess(const void *data)
 
 	if (r_ssao->integer)
 	{
+		vec4_t viewInfo;
+
 		srcBox[0] = backEnd.viewParms.viewportX      * tr.screenSsaoImage->width  / (float)glConfig.vidWidth;
 		srcBox[1] = backEnd.viewParms.viewportY      * tr.screenSsaoImage->height / (float)glConfig.vidHeight;
 		srcBox[2] = backEnd.viewParms.viewportWidth  * tr.screenSsaoImage->width  / (float)glConfig.vidWidth;
 		srcBox[3] = backEnd.viewParms.viewportHeight * tr.screenSsaoImage->height / (float)glConfig.vidHeight;
 
-		FBO_Blit(tr.screenSsaoFbo, srcBox, NULL, srcFbo, dstBox, NULL, NULL, GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO);
+		// depth aware upsample of the half resolution AO, multiplied onto the scene
+		VectorSet4(viewInfo, backEnd.viewParms.zFar / r_znear->value, backEnd.viewParms.zFar, 0.0f, 0.0f);
+
+		GLSL_BindProgram(&tr.ssaoUpShader);
+		GLSL_SetUniformVec4(&tr.ssaoUpShader, UNIFORM_VIEWINFO, viewInfo);
+		GL_BindToTMU(tr.hdrDepthImage, TB_LIGHTMAP);
+		GL_BindToTMU(tr.ssaoDepthImage, TB_NORMALMAP);
+
+		FBO_Blit(tr.screenSsaoFbo, srcBox, NULL, srcFbo, dstBox, &tr.ssaoUpShader, NULL, GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO);
 	}
 
 	srcBox[0] = backEnd.viewParms.viewportX;

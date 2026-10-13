@@ -413,6 +413,13 @@ void FBO_Init(void)
 		R_CheckFBO(tr.hdrDepthFbo);
 	}
 
+	if (tr.ssaoDepthImage)
+	{
+		tr.ssaoDepthFbo = FBO_Create("_ssaoDepth", tr.ssaoDepthImage->width, tr.ssaoDepthImage->height);
+		FBO_AttachImage(tr.ssaoDepthFbo, tr.ssaoDepthImage, GL_COLOR_ATTACHMENT0, 0);
+		R_CheckFBO(tr.ssaoDepthFbo);
+	}
+
 	if (tr.screenSsaoImage)
 	{
 		tr.screenSsaoFbo = FBO_Create("_screenssao", tr.screenSsaoImage->width, tr.screenSsaoImage->height);

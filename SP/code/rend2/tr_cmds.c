@@ -382,6 +382,9 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 	if ( r_aa->modified ) {
 		R_ApplyAA();
 	}
+	if ( r_ao->modified ) {
+		R_ApplyAO();
+	}
 	glState.finishCalled = qfalse;
 
 	tr.frameCount++;

@@ -1926,6 +1926,7 @@ Q3R2STRINGOBJ = \
   $(B)/rend2/glsl/shadowmask_vp.o \
   $(B)/rend2/glsl/ssao_fp.o \
   $(B)/rend2/glsl/ssao_vp.o \
+  $(B)/rend2/glsl/ssaoup_fp.o \
   $(B)/rend2/glsl/texturecolor_fp.o \
   $(B)/rend2/glsl/texturecolor_vp.o \
   $(B)/rend2/glsl/tonemap_fp.o \

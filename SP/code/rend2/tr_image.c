@@ -2907,8 +2907,8 @@ void R_CreateBuiltinImages( void ) {
 		if (tr.screenScratchImage)
 			R_CreateSmaaImages(width, height);
 
-		if (r_shadowBlur->integer || r_ssao->integer)
-			tr.hdrDepthImage = R_CreateImage("*hdrDepth", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_R32F);
+		// always created: r_ao switches SSAO on and off live
+		tr.hdrDepthImage = R_CreateImage("*hdrDepth", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_R32F);
 
 		if (r_drawSunRays->integer)
 			tr.sunRaysImage = R_CreateImage("*sunRays", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, rgbFormat);
@@ -2939,9 +2939,10 @@ void R_CreateBuiltinImages( void ) {
 			tr.quarterImage[x] = R_CreateImage(va("*quarter%d", x), NULL, width / 2, height / 2, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_RGBA8);
 		}
 
-		if (r_ssao->integer)
 		{
 			tr.screenSsaoImage = R_CreateImage("*screenSsao", NULL, width / 2, height / 2, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_RGBA8);
+
+		tr.ssaoDepthImage = R_CreateImage("*ssaoDepth", NULL, width / 2, height / 2, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_R32F);
 		}
 
 		for( x = 0; x < MAX_DRAWN_PSHADOWS; x++)

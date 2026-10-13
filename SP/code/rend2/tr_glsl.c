@@ -48,6 +48,7 @@ extern const char *fallbackShader_shadowmask_vp;
 extern const char *fallbackShader_shadowmask_fp;
 extern const char *fallbackShader_ssao_vp;
 extern const char *fallbackShader_ssao_fp;
+extern const char *fallbackShader_ssaoup_fp;
 extern const char *fallbackShader_texturecolor_vp;
 extern const char *fallbackShader_texturecolor_fp;
 extern const char *fallbackShader_smaa_lib;
@@ -171,6 +172,9 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_SmaaMetrics", GLSL_VEC4 },
 
 	{ "u_LightSpot", GLSL_VEC4 },
+
+	{ "u_SsaoParams", GLSL_VEC4 },
+	{ "u_HalfDepthMap", GLSL_INT },
 };
 
 typedef enum
@@ -1501,19 +1505,45 @@ void GLSL_InitGPUShaders(void)
 	numEtcShaders++;
 
 
+	for (i = 0; i < 2; i++)
+	{
+		attribs = ATTR_POSITION | ATTR_TEXCOORD;
+		extradefines[0] = '\0';
+
+		if (i == 1)
+			Q_strcat(extradefines, 1024, "#define USE_GTAO\n");
+
+		if (!GLSL_InitGPUShader(&tr.ssaoShader[i], "ssao", attribs, qtrue, extradefines, qtrue, fallbackShader_ssao_vp, fallbackShader_ssao_fp))
+		{
+			ri.Error(ERR_FATAL, "Could not load ssao shader!");
+		}
+
+		GLSL_InitUniforms(&tr.ssaoShader[i]);
+
+		GLSL_SetUniformInt(&tr.ssaoShader[i], UNIFORM_SCREENDEPTHMAP, TB_COLORMAP);
+
+		GLSL_FinishGPUShader(&tr.ssaoShader[i]);
+
+		numEtcShaders++;
+	}
+
+
+	// depth aware upsample + composite of the half resolution AO (drawn like a texturecolor blit)
 	attribs = ATTR_POSITION | ATTR_TEXCOORD;
 	extradefines[0] = '\0';
 
-	if (!GLSL_InitGPUShader(&tr.ssaoShader, "ssao", attribs, qtrue, extradefines, qtrue, fallbackShader_ssao_vp, fallbackShader_ssao_fp))
+	if (!GLSL_InitGPUShader(&tr.ssaoUpShader, "ssaoup", attribs, qtrue, extradefines, qtrue, fallbackShader_texturecolor_vp, fallbackShader_ssaoup_fp))
 	{
-		ri.Error(ERR_FATAL, "Could not load ssao shader!");
+		ri.Error(ERR_FATAL, "Could not load ssaoup shader!");
 	}
 
-	GLSL_InitUniforms(&tr.ssaoShader);
+	GLSL_InitUniforms(&tr.ssaoUpShader);
 
-	GLSL_SetUniformInt(&tr.ssaoShader, UNIFORM_SCREENDEPTHMAP, TB_COLORMAP);
+	GLSL_SetUniformInt(&tr.ssaoUpShader, UNIFORM_SCREENIMAGEMAP, TB_COLORMAP);
+	GLSL_SetUniformInt(&tr.ssaoUpShader, UNIFORM_SCREENDEPTHMAP, TB_LIGHTMAP);
+	GLSL_SetUniformInt(&tr.ssaoUpShader, UNIFORM_HALFDEPTHMAP, TB_NORMALMAP);
 
-	GLSL_FinishGPUShader(&tr.ssaoShader);
+	GLSL_FinishGPUShader(&tr.ssaoUpShader);
 
 	numEtcShaders++;
 
@@ -1617,7 +1647,9 @@ void GLSL_ShutdownGPUShaders(void)
 		GLSL_DeleteGPUShader(&tr.calclevels4xShader[i]);
 
 	GLSL_DeleteGPUShader(&tr.shadowmaskShader);
-	GLSL_DeleteGPUShader(&tr.ssaoShader);
+	for ( i = 0; i < 2; i++)
+		GLSL_DeleteGPUShader(&tr.ssaoShader[i]);
+	GLSL_DeleteGPUShader(&tr.ssaoUpShader);
 
 	for ( i = 0; i < 4; i++)
 		GLSL_DeleteGPUShader(&tr.depthBlurShader[i]);
