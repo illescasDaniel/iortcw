@@ -1859,6 +1859,28 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 	angles[YAW] += bobScale * scale * fracsin * 0.01;
 	angles[PITCH] += bobScale * scale * fracsin * 0.01;
 
+	// codmod: E4 ADS breathing sway. Two incommensurate slow sines on pitch/yaw, only while
+	// ADS (e), bigger when moving, smaller crouched/prone. Viewmodel only: aim and spread
+	// are untouched, so it is purely presentation.
+	if ( bg_cod.enable && bg_cod.adsEnable && bg_cod.adsSwayEnable ) {
+		float e = BG_CodSmoothstep( CG_CodAdsFrac() );
+		if ( e > 0.0f ) {
+			playerState_t *ps = &cg.predictedPlayerState;
+			float t = cg.time * 0.001f * bg_cod.adsSwayRate;
+			float amp = e;
+			float spd = bg_cod.runSpeed > 1.0f ? cg.xyspeed / bg_cod.runSpeed : 0.0f;
+
+			amp *= 1.0f + bg_cod.adsSwayMove * ( spd > 1.5f ? 1.5f : spd );
+			if ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) {
+				amp *= bg_cod.adsSwayProne;
+			} else if ( ps->pm_flags & PMF_DUCKED ) {
+				amp *= bg_cod.adsSwayCrouch;
+			}
+			angles[PITCH] += amp * bg_cod.adsSwayPitch * ( sin( t ) + 0.4f * sin( t * 2.3f + 1.3f ) );
+			angles[YAW] += amp * bg_cod.adsSwayYaw * ( sin( t * 0.73f + 0.6f ) + 0.4f * sin( t * 1.9f ) );
+		}
+	}
+
 	// codmod: procedural sprint gun-lower (phase 4.1). Visual only — fire is not gated here.
 	sprintE = BG_CodSmoothstep( CG_CodSprintFrac() );
 	if ( sprintE > 0.0f ) {

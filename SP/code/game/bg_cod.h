@@ -55,6 +55,13 @@ typedef struct {
 	float hipSpreadScale;   // extra hip multiplier after the floor (1 = none)
 	float adsSensScale;     // extra multiplier on top of the FOV-derived sensitivity scale
 	float adsBobScale;      // viewmodel bob/land-dip/idle-drift are scaled by 1 - e*adsBobScale
+	float adsSwayEnable;    // E4: breathing sway of the viewmodel while ADS (cgame only)
+	float adsSwayPitch;     // degrees, peak pitch sway at full ADS, standing still
+	float adsSwayYaw;       // degrees, peak yaw sway
+	float adsSwayRate;      // rad/s of the slow breathing cycle
+	float adsSwayMove;      // extra sway multiplier at cod_runSpeed (0 = movement does not matter)
+	float adsSwayCrouch;    // sway multiplier while crouched
+	float adsSwayProne;     // sway multiplier while prone
 	float adsGunFovComp;    // pushes the viewmodel forward in proportion to the FOV zoom (cgame)
 	float adsSightHeight;   // default u above tag_flash bore to the rear sight (cgame auto-align)
 	float adsBarrelBack;    // default u from tag_flash back to the rear sight along the bore

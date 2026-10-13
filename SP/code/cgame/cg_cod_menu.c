@@ -341,6 +341,13 @@ static const codMenuItem_t cg_codMenuItems[] = {
 	{ COD_MI_FLOAT, "cod_hipSpreadScale",     "cod_hipSpreadScale",     0.05f, 0.25f, NULL },
 	{ COD_MI_FLOAT, "cod_adsSensScale",       "cod_adsSensScale",       0.05f, 0.25f, NULL },
 	{ COD_MI_FLOAT, "cod_adsBobScale",        "cod_adsBobScale",        0.05f, 0.25f, NULL },
+	{ COD_MI_BOOL,  "cod_adsSwayEnable",      "cod_adsSwayEnable",      1,    1,    NULL },
+	{ COD_MI_FLOAT, "cod_adsSwayPitch",       "cod_adsSwayPitch",       0.05f, 0.25f, NULL },
+	{ COD_MI_FLOAT, "cod_adsSwayYaw",         "cod_adsSwayYaw",         0.05f, 0.25f, NULL },
+	{ COD_MI_FLOAT, "cod_adsSwayRate",        "cod_adsSwayRate",        0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsSwayMove",        "cod_adsSwayMove",        0.1f, 0.5f, NULL },
+	{ COD_MI_FLOAT, "cod_adsSwayCrouch",      "cod_adsSwayCrouch",      0.05f, 0.25f, NULL },
+	{ COD_MI_FLOAT, "cod_adsSwayProne",       "cod_adsSwayProne",       0.05f, 0.25f, NULL },
 	{ COD_MI_FLOAT, "cod_adsGunFovComp",      "cod_adsGunFovComp",      0.5f, 2,    NULL },
 	{ COD_MI_FLOAT, "cod_scopeSwitchTime",    "cod_scopeSwitchTime",    10,   50,   NULL },
 

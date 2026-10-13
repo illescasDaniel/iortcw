@@ -67,6 +67,14 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_hipSpreadScale",     "1",    0,            CODOFS( hipSpreadScale ),     0 },
 	{ "cod_adsSensScale",       "1",    0,            CODOFS( adsSensScale ),       0 },
 	{ "cod_adsBobScale",        "0.85", 0,            CODOFS( adsBobScale ),        0 },
+	// codmod: E4 ADS breathing sway (viewmodel only, docs/phase-7-extras.md)
+	{ "cod_adsSwayEnable",      "1",    0,            CODOFS( adsSwayEnable ),      1 },
+	{ "cod_adsSwayPitch",       "0.45", 0,            CODOFS( adsSwayPitch ),       0 },
+	{ "cod_adsSwayYaw",         "0.3",  0,            CODOFS( adsSwayYaw ),         0 },
+	{ "cod_adsSwayRate",        "1.5",  0,            CODOFS( adsSwayRate ),        0 },
+	{ "cod_adsSwayMove",        "1.5",  0,            CODOFS( adsSwayMove ),        0 },
+	{ "cod_adsSwayCrouch",      "0.6",  0,            CODOFS( adsSwayCrouch ),      0 },
+	{ "cod_adsSwayProne",       "0.3",  0,            CODOFS( adsSwayProne ),       0 },
 	// codmod: FOV zoom magnifies the RF_DEPTHHACK viewmodel; push it forward while ADS so
 	// it doesn't fill the screen from the hip. Used as a fine bias on top of tag_flash align.
 	{ "cod_adsGunFovComp",      "2",    0,            CODOFS( adsGunFovComp ),      0 },
