@@ -1672,8 +1672,12 @@ void RB_IQMSurfaceAnimVao(srfVaoIQModel_t * surface)
 		return;
 
 	//RB_CheckVao(surface->vao);
-	RB_EndSurface();
-	RB_BeginSurface(tess.shader, tess.fogNum, tess.cubemapIndex);
+	{
+		int dlightBits = tess.dlightBits; // codmod: keep model dlight bits across the restart
+		RB_EndSurface();
+		RB_BeginSurface( tess.shader, tess.fogNum, tess.cubemapIndex );
+		tess.dlightBits = dlightBits;
+	}
 
 	R_BindVao(surface->vao);
 

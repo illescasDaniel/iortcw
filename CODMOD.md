@@ -17,3 +17,16 @@ The same changes are also kept as a patch series in that repo's `patches/` direc
   `USE_SPOT_SHADOW`) that `dlight_fp.glsl` and `lightall_fp.glsl` multiply into the light. The mask shares the
   `TB_AOMAP` unit via `u_AoParams.y`. Cvars: `r_flashlightShadow` (0 off, 2 shows the mask), `r_flashlightShadowSize`.
   The stock `r_dlightMode 2` cube-map shadows remain non-functional and are not used.
+- **Dynamic lights on GPU (VAO) models:** static MD3 props (the `escape1` cages and iron gates) stayed dark under the
+  flashlight even though `R_DlightEntity` gave them a dlight mask. Three stock rend2 gaps, all fixed:
+  1. `RB_RenderDrawSurfList` (tr_backend.c) ORs the entity's `needDlights` into `tess.dlightBits` *before* the surface
+     call, because VAO surfaces draw inside it.
+  2. Every `RB_EndSurface(); RB_BeginSurface()` restart (`RB_CheckOverflow`, `RB_CheckVao`, `RB_SurfaceVaoCached`,
+     `RB_SurfaceGrid`, `RB_SurfaceVaoMdvMesh`, `RB_IQMSurfaceAnimVao`) keeps `tess.dlightBits`; `RB_BeginSurface`
+     used to zero them.
+  3. `ForwardDlight` (tr_shade.c) picks the entity lightall variant (`LIGHTDEF_ENTITY_VERTEX/BONE_ANIMATION`,
+     plus the bone matrix) for models; the world variant skips `u_ModelMatrix`, so model-space positions were lit
+     as if they were world space and the light missed them.
+
+  `ForwardDlight` also ignores baked vertex colour (`rgbGen vertex`) as a light modulator, so dark baked surfaces
+  reflect the flashlight. Result: the flashlight lights and shadows the whole scene, world and models alike.

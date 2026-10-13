@@ -809,6 +809,16 @@ static void ForwardDlight( void ) {
 			index &= ~LIGHTDEF_LIGHTTYPE_MASK;
 			index |= LIGHTDEF_USE_LIGHT_VECTOR;
 
+			// codmod: models need the entity variant (u_ModelMatrix), or their model-space
+			// positions are lit as if they were world space and the light misses them
+			if (backEnd.currentEntity && backEnd.currentEntity != &tr.worldEntity)
+			{
+				if (glState.boneAnimation)
+					index |= LIGHTDEF_ENTITY_BONE_ANIMATION;
+				else
+					index |= LIGHTDEF_ENTITY_VERTEX_ANIMATION;
+			}
+
 			sp = &tr.lightallShader[index];
 		}
 
@@ -821,6 +831,11 @@ static void ForwardDlight( void ) {
 		GLSL_SetUniformVec3(sp, UNIFORM_LOCALVIEWORIGIN, backEnd.or.viewOrigin);
 
 		GLSL_SetUniformFloat(sp, UNIFORM_VERTEXLERP, glState.vertexAttribsInterpolation);
+
+		if (glState.boneAnimation)
+		{
+			GLSL_SetUniformMat4BoneMatrix(sp, UNIFORM_BONEMATRIX, glState.boneMatrix, glState.boneAnimation);
+		}
 
 		if ((deformGen != DGEN_NONE && tess.shader->deforms[0].deformationWave.frequency < 0 )
 			|| pStage->alphaGen == AGEN_NORMALZFADE)
@@ -864,6 +879,14 @@ static void ForwardDlight( void ) {
 			vec4_t vertColor;
 
 			ComputeShaderColors(pStage, baseColor, vertColor, GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE);
+
+			// codmod: baked vertex colour (rgbGen vertex) must not modulate dynamic light, or surfaces
+			// with dark baked vertex lighting (fences, gates, props) barely reflect the flashlight
+			if (vertColor[0] != 0.0f || vertColor[1] != 0.0f || vertColor[2] != 0.0f)
+			{
+				baseColor[0] = baseColor[1] = baseColor[2] = 1.0f;
+				vertColor[0] = vertColor[1] = vertColor[2] = 0.0f;
+			}
 
 			GLSL_SetUniformVec4(sp, UNIFORM_BASECOLOR, baseColor);
 			GLSL_SetUniformVec4(sp, UNIFORM_VERTCOLOR, vertColor);

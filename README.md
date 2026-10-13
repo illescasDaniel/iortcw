@@ -30,6 +30,9 @@ folder, so vanilla RTCW keeps working side by side. The campaign, maps, enemies 
 - Xbox / PlayStation controller support through SDL GameController, with the `+quickkick` pad command
 
 **Renderer (rend2)**
+- **Fully dynamic flashlight:** per-pixel spot light that lights world *and* models (characters, props, static MD3
+  and IQM meshes, which stock rend2 skipped), and **casts real-time shadows** from one spot shadow map plus a
+  screen-space mask (`r_flashlightShadow`). Details in [CODMOD.md](CODMOD.md)
 - **SMAA 1x** post-process anti-aliasing (4 quality levels) and a unified `r_aa` setting covering SMAA and MSAA 2/4/8x
 - Wayland-friendly fullscreen and mode switching without recreating the GL context
 - Fix for an HD texture `ResampleTexture` stack overflow

@@ -899,10 +899,11 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			oldNumVerts = tess.numVertexes;
 			oldNumIndex = tess.numIndexes;
 
-			rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+			// VAO surfaces draw inside the surface call, so set the bits first
 			if ( dlighted && entityNum != REFENTITYNUM_WORLD ) {
 				tess.dlightBits |= backEnd.currentEntity->needDlights; // codmod: model dlights
 			}
+			rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
 
 			// RF, convert the newly created vertexes into dust particles, and overwrite
 			if (backEnd.currentEntity->e.reFlags & REFLAG_ZOMBIEFX) {
@@ -1045,11 +1046,11 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		oldNumVerts = tess.numVertexes;
 		oldNumIndex = tess.numIndexes;
 
-		// add the triangles for this surface
-		rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+		// add the triangles for this surface; VAO surfaces draw inside the call, so set the bits first
 		if ( dlighted && entityNum != REFENTITYNUM_WORLD ) {
 			tess.dlightBits |= backEnd.currentEntity->needDlights; // codmod: model dlights
 		}
+		rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
 
 		// RF, convert the newly created vertexes into dust particles, and overwrite
 		if ( backEnd.currentEntity->e.reFlags & REFLAG_ZOMBIEFX ) {

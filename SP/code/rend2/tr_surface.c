@@ -53,11 +53,14 @@ RB_CheckOverflow
 ==============
 */
 void RB_CheckOverflow( int verts, int indexes ) {
+	int dlightBits;
+
 	if ( tess.numVertexes + verts < SHADER_MAX_VERTEXES
 		 && tess.numIndexes + indexes < SHADER_MAX_INDEXES ) {
 		return;
 	}
 
+	dlightBits = tess.dlightBits; // codmod: keep model dlight bits across the restart
 	RB_EndSurface();
 
 	if ( verts >= SHADER_MAX_VERTEXES ) {
@@ -68,14 +71,19 @@ void RB_CheckOverflow( int verts, int indexes ) {
 	}
 
 	RB_BeginSurface( tess.shader, tess.fogNum, tess.cubemapIndex );
+	tess.dlightBits = dlightBits;
 }
 
 void RB_CheckVao(vao_t *vao)
 {
 	if (vao != glState.currentVao)
 	{
-		RB_EndSurface();
-		RB_BeginSurface(tess.shader, tess.fogNum, tess.cubemapIndex);
+		{
+			int dlightBits = tess.dlightBits; // codmod: keep model dlight bits across the restart
+			RB_EndSurface();
+			RB_BeginSurface( tess.shader, tess.fogNum, tess.cubemapIndex );
+			tess.dlightBits = dlightBits;
+		}
 
 		R_BindVao(vao);
 	}
@@ -452,8 +460,12 @@ static qboolean RB_SurfaceVaoCached(int numVerts, srfVert_t *verts, int numIndex
 
 	if (endSurface)
 	{
-		RB_EndSurface();
-		RB_BeginSurface(tess.shader, tess.fogNum, tess.cubemapIndex);
+		{
+			int dlightBits = tess.dlightBits; // codmod: keep model dlight bits across the restart
+			RB_EndSurface();
+			RB_BeginSurface( tess.shader, tess.fogNum, tess.cubemapIndex );
+			tess.dlightBits = dlightBits;
+		}
 	}
 
 	if (recycleVertexBuffer)
@@ -1042,8 +1054,12 @@ static void RB_SurfaceGrid( srfBspSurface_t *srf ) {
 
 			// if we don't have enough space for at least one strip, flush the buffer
 			if ( vrows < 2 || irows < 1 ) {
-				RB_EndSurface();
-				RB_BeginSurface( tess.shader, tess.fogNum, tess.cubemapIndex );
+				{
+					int dlightBits = tess.dlightBits; // codmod: keep model dlight bits across the restart
+					RB_EndSurface();
+					RB_BeginSurface( tess.shader, tess.fogNum, tess.cubemapIndex );
+					tess.dlightBits = dlightBits;
+				}
 			} else {
 				break;
 			}
@@ -1256,8 +1272,12 @@ void RB_SurfaceVaoMdvMesh(srfVaoMdvMesh_t * surface)
 		return;
 
 	//RB_CheckVao(surface->vao);
-	RB_EndSurface();
-	RB_BeginSurface(tess.shader, tess.fogNum, tess.cubemapIndex);
+	{
+		int dlightBits = tess.dlightBits; // codmod: keep model dlight bits across the restart
+		RB_EndSurface();
+		RB_BeginSurface( tess.shader, tess.fogNum, tess.cubemapIndex );
+		tess.dlightBits = dlightBits;
+	}
 
 	R_BindVao(surface->vao);
 
