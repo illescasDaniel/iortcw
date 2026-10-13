@@ -2973,6 +2973,21 @@ CL_CheckPaused
 Check whether client has been paused.
 ==================
 */
+/*
+==================
+CL_InMenuOnly
+
+True while only a menu or cinematic is on screen: main menu, intro/videos and
+the pause menu. Not during loading or normal play.
+==================
+*/
+qboolean CL_InMenuOnly( void ) {
+	if ( clc.state == CA_DISCONNECTED || clc.state == CA_CINEMATIC ) {
+		return qtrue;
+	}
+	return clc.state == CA_ACTIVE && ( Key_GetCatcher() & KEYCATCH_UI ) ? qtrue : qfalse;
+}
+
 qboolean CL_CheckPaused(void)
 {
 	// if cl_paused->modified is set, the cvar has only been changed in

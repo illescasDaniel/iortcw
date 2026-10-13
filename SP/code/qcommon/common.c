@@ -107,6 +107,7 @@ cvar_t	*com_legacyprotocol;
 cvar_t	*com_basegame;
 cvar_t  *com_homepath;
 cvar_t	*com_busyWait;
+cvar_t	*com_maxfpsMenu;
 cvar_t	*com_maxfpsPrecise;
 cvar_t	*com_maxfpsSpinUs;
 cvar_t	*com_maxfpsMode;
@@ -2414,6 +2415,8 @@ void Com_Init( char *commandLine ) {
 	com_abnormalExit = Cvar_Get( "com_abnormalExit", "0", CVAR_ROM );
 	com_busyWait = Cvar_Get("com_busyWait", "0", CVAR_ARCHIVE);
 	// absolute-deadline frame limiter (float fps, hybrid sleep+spin); 0 = legacy integer-ms limiter
+	// FPS cap for menus/cinematics only: -1 monitor refresh, 0 off, else fps
+	com_maxfpsMenu = Cvar_Get( "com_maxfpsMenu", "-1", CVAR_ARCHIVE );
 	com_maxfpsPrecise = Cvar_Get( "com_maxfpsPrecise", "0", CVAR_ARCHIVE );
 	// spin margin in us before each deadline: -1 auto, 0 sleep only
 	com_maxfpsSpinUs = Cvar_Get( "com_maxfpsSpinUs", "-1", CVAR_ARCHIVE );
@@ -2779,6 +2782,41 @@ static int Com_PaceLead( void ) {
 	return tmp[PACE_RING - 2];
 }
 
+/*
+=================
+Com_ResolveFps
+
+-1 = monitor refresh rate (60 if the renderer has not reported it yet).
+=================
+*/
+static float Com_ResolveFps( float fps ) {
+	if ( fps < 0 ) {
+		return com_displayRefresh->value > 1 ? com_displayRefresh->value : 60;
+	}
+	return fps;
+}
+
+/*
+=================
+Com_EffectiveFps
+
+The in-game cap (com_maxfps), lowered to com_maxfpsMenu while only a menu or
+cinematic is showing. Unfocused/minimized caps are handled by the callers.
+=================
+*/
+static float Com_EffectiveFps( void ) {
+	float fps = Com_ResolveFps( com_maxfps->value );
+
+	if ( com_maxfpsMenu->value != 0 && CL_InMenuOnly() ) {
+		float menuFps = Com_ResolveFps( com_maxfpsMenu->value );
+
+		if ( fps <= 0 || menuFps < fps ) {
+			fps = menuFps;
+		}
+	}
+	return fps;
+}
+
 static void Com_FrameWaitTop( void ) {
 	float fps;
 	long long now;
@@ -2795,7 +2833,7 @@ static void Com_FrameWaitTop( void ) {
 	} else if ( com_unfocused->integer && com_maxfpsUnfocused->value > 0 ) {
 		fps = com_maxfpsUnfocused->value;
 	} else {
-		fps = com_maxfps->value;
+		fps = Com_EffectiveFps();
 	}
 
 	now = Sys_Microseconds();
@@ -3041,8 +3079,8 @@ void Com_Frame( void ) {
 				minMsec = 1000 / com_maxfpsMinimized->integer;
 			else if(com_unfocused->integer && com_maxfpsUnfocused->integer > 0)
 				minMsec = 1000 / com_maxfpsUnfocused->integer;
-			else if(com_maxfps->integer > 0)
-				minMsec = 1000 / com_maxfps->integer;
+			else if(Com_EffectiveFps() >= 1)
+				minMsec = 1000 / (int)Com_EffectiveFps();
 			else
 				minMsec = 1;
 			

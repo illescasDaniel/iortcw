@@ -1151,6 +1151,7 @@ long long Sys_Microseconds( void );
 
 // Hybrid sleep+spin to an absolute Sys_Microseconds deadline. spinUs: <0 auto, 0 sleep only.
 // Returns microseconds woken past the deadline.
+qboolean CL_InMenuOnly( void );     // only a menu/cinematic on screen (client)
 long long Sys_WaitUntil( long long deadlineUs, int spinUs );
 
 // Frame pacer hooks called by the renderer around the buffer swap (finish = glFinish)

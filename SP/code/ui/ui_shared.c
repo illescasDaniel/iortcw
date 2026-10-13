@@ -2417,6 +2417,28 @@ int Item_Multi_FindCvarByValue( itemDef_t *item ) {
 	return 0;
 }
 
+// "%hz" in a list label becomes the monitor refresh rate ("Auto (%hz)" -> "Auto (144)")
+static const char *Item_Multi_Label( const char *label ) {
+	static char out[128];
+	const char *tok = strstr( label, "%hz" );
+	int hz;
+
+	if ( !tok ) {
+		return label;
+	}
+	hz = (int)( DC->getCVarValue( "r_displayRefreshActual" ) + 0.5f );
+	if ( hz > 1 ) {
+		Com_sprintf( out, sizeof( out ), "%.*s%d%s", (int)( tok - label ), label, hz, tok + 3 );
+	} else {
+		// unknown rate: drop the " (%hz)" part
+		Com_sprintf( out, sizeof( out ), "%.*s%s", (int)( tok - label ), label, tok + 3 );
+		for ( hz = strlen( out ) - 1; hz >= 0 && ( out[hz] == ' ' || out[hz] == '(' || out[hz] == ')' ); hz-- ) {
+			out[hz] = '\0';
+		}
+	}
+	return out;
+}
+
 const char *Item_Multi_Setting( itemDef_t *item ) {
 	char buff[1024];
 	float value = 0;
@@ -2431,11 +2453,11 @@ const char *Item_Multi_Setting( itemDef_t *item ) {
 		for ( i = 0; i < multiPtr->count; i++ ) {
 			if ( multiPtr->strDef ) {
 				if ( Q_stricmp( buff, multiPtr->cvarStr[i] ) == 0 ) {
-					return multiPtr->cvarList[i];
+					return Item_Multi_Label( multiPtr->cvarList[i] );
 				}
 			} else {
 				if ( multiPtr->cvarValue[i] == value ) {
-					return multiPtr->cvarList[i];
+					return Item_Multi_Label( multiPtr->cvarList[i] );
 				}
 			}
 		}

@@ -96,6 +96,10 @@ void CL_FlushMemory( void ) {
 void CL_StartHunkUsers( qboolean rendererOnly ) {
 }
 
+qboolean CL_InMenuOnly( void ) {
+	return qfalse;
+}
+
 void CL_ShutdownAll(qboolean shutdownRef) {
 }
 
