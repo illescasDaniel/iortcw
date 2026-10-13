@@ -1681,6 +1681,18 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 			}
 
 			GLSL_SetUniformVec4(sp, UNIFORM_ENABLETEXTURES, enableTextures);
+
+			// ambient only AO: opaque stages of the main view
+			{
+				vec4_t aoParams;
+				int blendBits = pStage->stateBits & (GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS);
+				qboolean useAo = backEnd.aoReady && (blendBits == 0 || blendBits == (GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO)) && !r_lightmap->integer;
+
+				VectorSet4(aoParams, useAo ? 1.0f : 0.0f, 0, 0, 0);
+				if (useAo)
+					GL_BindToTMU(tr.aoImage, TB_AOMAP);
+				GLSL_SetUniformVec4(sp, UNIFORM_AOPARAMS, aoParams);
+			}
 		}
 		else if ( pStage->bundle[1].image[0] != 0 )
 		{

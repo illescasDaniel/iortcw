@@ -154,6 +154,7 @@ cvar_t  *r_forceAutoExposureMax;
 
 cvar_t  *r_depthPrepass;
 cvar_t  *r_ao;
+cvar_t  *r_ssaoAmbient;
 cvar_t  *r_ssao;
 cvar_t  *r_ssaoRadius;
 cvar_t  *r_ssaoStrength;
@@ -1487,6 +1488,7 @@ void R_Register( void ) {
 	r_depthPrepass = ri.Cvar_Get( "r_depthPrepass", "1", CVAR_ARCHIVE );
 	r_ao = ri.Cvar_Get( "r_ao", "2", CVAR_ARCHIVE );
 	r_ssao = ri.Cvar_Get( "r_ssao", "0", 0 );   // derived from r_ao
+	r_ssaoAmbient = ri.Cvar_Get( "r_ssaoAmbient", "1", 0 );   // 1: AO only dims the baked/ambient light in lightall, 0: multiply the final image
 	r_ssaoRadius = ri.Cvar_Get( "r_ssaoRadius", "40", 0 );
 	ri.Cvar_CheckRange( r_ssaoRadius, 4, 512, qfalse );
 	r_ssaoStrength = ri.Cvar_Get( "r_ssaoStrength", "1", 0 );

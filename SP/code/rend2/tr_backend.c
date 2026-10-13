@@ -1452,6 +1452,8 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 	isShadowView = !!(backEnd.viewParms.flags & VPF_DEPTHSHADOW);
 
+	backEnd.aoReady = qfalse;
+
 	// clear the z buffer, set the modelview, etc
 	RB_BeginDrawingView ();
 
@@ -1690,6 +1692,32 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 
 				RB_InstantQuad2(quadVerts, texCoords); //, color, shaderProgram, invTexRes);
+
+				if (r_ssaoAmbient->integer && tr.aoFbo)
+				{
+					// full resolution AO for lightall to apply to the ambient light
+					ivec4_t aoBox, aoDst;
+					vec4_t upInfo;
+
+					aoBox[0] = 0;
+					aoBox[1] = 0;
+					aoBox[2] = tr.screenSsaoImage->width;
+					aoBox[3] = tr.screenSsaoImage->height;
+					aoDst[0] = 0;
+					aoDst[1] = 0;
+					aoDst[2] = tr.aoFbo->width;
+					aoDst[3] = tr.aoFbo->height;
+
+					VectorSet4(upInfo, backEnd.viewParms.zFar / r_znear->value, backEnd.viewParms.zFar, 0.0f, 0.0f);
+
+					GLSL_BindProgram(&tr.ssaoUpShader);
+					GLSL_SetUniformVec4(&tr.ssaoUpShader, UNIFORM_VIEWINFO, upInfo);
+					GL_BindToTMU(tr.hdrDepthImage, TB_LIGHTMAP);
+					GL_BindToTMU(tr.ssaoDepthImage, TB_NORMALMAP);
+
+					FBO_Blit(tr.screenSsaoFbo, aoBox, NULL, tr.aoFbo, aoDst, &tr.ssaoUpShader, NULL, 0);
+					backEnd.aoReady = qtrue;
+				}
 			}
 		}
 
@@ -2068,7 +2096,7 @@ const void *RB_PostProcess(const void *data)
 	dstBox[2] = backEnd.viewParms.viewportWidth;
 	dstBox[3] = backEnd.viewParms.viewportHeight;
 
-	if (r_ssao->integer)
+	if (r_ssao->integer && !r_ssaoAmbient->integer)
 	{
 		vec4_t viewInfo;
 

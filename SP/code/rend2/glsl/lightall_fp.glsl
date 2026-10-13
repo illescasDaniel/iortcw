@@ -47,6 +47,10 @@ uniform vec4      u_CubeMapInfo;
 
 uniform int       u_AlphaTest;
 
+// ambient only AO: scales the baked / ambient light, never the sun or dynamic lights
+uniform sampler2D u_AoMap;
+uniform vec4      u_AoParams;
+
 varying vec4      var_TexCoords;
 
 varying vec4      var_Color;
@@ -298,6 +302,14 @@ void main()
 	lightColor *= lightmapColor.rgb;
 #endif
 
+	float aoValue = 1.0;
+	if (u_AoParams.x > 0.5)
+		aoValue = texture2D(u_AoMap, gl_FragCoord.xy * r_FBufScale).r;
+
+  #if !defined(USE_LIGHT_VECTOR)
+	lightColor *= aoValue;
+  #endif
+
 	vec2 texCoords = var_TexCoords.xy;
 
 #if defined(USE_PARALLAXMAP)
@@ -391,7 +403,7 @@ void main()
 	// light is below the surface
 	ambientColor = max(ambientColor - lightColor * surfNL, vec3(0.0));
   #else
-	ambientColor = var_ColorAmbient.rgb;
+	ambientColor = var_ColorAmbient.rgb * aoValue;
   #endif
 
 	NL = clamp(dot(N, L), 0.0, 1.0);

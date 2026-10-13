@@ -407,7 +407,9 @@ enum
 	TB_SHADOWMAP   = 5,
 	TB_CUBEMAP     = 6,
 	TB_SHADOWMAP4  = 6,
-	NUM_TEXTURE_BUNDLES = 7
+	NUM_TEXTURE_BUNDLES = 7,
+	TB_AOMAP       = 7,		// full res ambient occlusion, only lightall samples it
+	NUM_TEXTURE_UNITS = 8
 };
 
 typedef enum
@@ -813,6 +815,8 @@ typedef enum
 
 	UNIFORM_SSAOPARAMS, // radius, strength, bias, sample count
 	UNIFORM_HALFDEPTHMAP, // half resolution depth, same size as the AO image
+	UNIFORM_AOMAP,
+	UNIFORM_AOPARAMS, // x = 1 when the lightall AO map is valid for this draw
 
 	UNIFORM_COUNT
 } uniform_t;
@@ -1633,6 +1637,7 @@ typedef struct {
 	FBO_t *last2DFBO;
 	qboolean    colorMask[4];
 	qboolean    depthFill;
+	qboolean    aoReady;	// tr.aoImage holds the AO of this view (ambient only AO)
 } backEndState_t;
 
 /*
@@ -1693,6 +1698,7 @@ typedef struct {
 	image_t					*sunShadowDepthImage[4];
 	image_t                 *screenShadowImage;
 	image_t                 *screenSsaoImage;
+	image_t                 *aoImage;        // full resolution AO for ambient only AO
 	image_t                 *ssaoDepthImage; // half resolution copy of the depth for SSAO
 	image_t					*hdrDepthImage;
 	image_t                 *renderCubeImage;
@@ -1715,6 +1721,7 @@ typedef struct {
 	FBO_t					*screenShadowFbo;
 	FBO_t					*screenSsaoFbo;
 	FBO_t					*ssaoDepthFbo;
+	FBO_t					*aoFbo;
 	FBO_t					*hdrDepthFbo;
 	FBO_t                   *renderCubeFbo;
 
@@ -2030,6 +2037,7 @@ extern  cvar_t  *r_cameraExposure;
 
 extern  cvar_t  *r_depthPrepass;
 extern  cvar_t  *r_ao;
+extern  cvar_t  *r_ssaoAmbient;
 extern  cvar_t  *r_ssao;
 extern  cvar_t  *r_ssaoRadius;
 extern  cvar_t  *r_ssaoStrength;

@@ -175,6 +175,8 @@ static uniformInfo_t uniformsInfo[] =
 
 	{ "u_SsaoParams", GLSL_VEC4 },
 	{ "u_HalfDepthMap", GLSL_INT },
+	{ "u_AoMap", GLSL_INT },
+	{ "u_AoParams", GLSL_VEC4 },
 };
 
 typedef enum
@@ -1251,6 +1253,7 @@ void GLSL_InitGPUShaders(void)
 		GLSL_SetUniformInt(&tr.lightallShader[i], UNIFORM_SPECULARMAP, TB_SPECULARMAP);
 		GLSL_SetUniformInt(&tr.lightallShader[i], UNIFORM_SHADOWMAP,   TB_SHADOWMAP);
 		GLSL_SetUniformInt(&tr.lightallShader[i], UNIFORM_CUBEMAP,     TB_CUBEMAP);
+		GLSL_SetUniformInt(&tr.lightallShader[i], UNIFORM_AOMAP,       TB_AOMAP);
 
 		GLSL_FinishGPUShader(&tr.lightallShader[i]);
 
