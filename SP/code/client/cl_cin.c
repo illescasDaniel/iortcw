@@ -46,6 +46,7 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "client.h"
 #include "snd_local.h"
+#include "cl_cin_avi.h"
 
 #define MAXSIZE             8
 #define MINSIZE             4
@@ -143,6 +144,7 @@ typedef struct {
 	int playonwalls;
 	byte*               buf;
 	long drawX, drawY;
+	cinAvi_t *avi;              // HD MJPEG/AVI replacement; NULL while playing the RoQ
 } cin_cache;
 
 static cinematics_t cin;
@@ -1109,9 +1111,19 @@ static byte* RoQFetchInterlaced( byte *source ) {
 	return cinTable[currentHandle].buf2;
 }
 */
+static void AviInit( void );
+static void AviInterrupt( void );
+
 static void RoQReset( void ) {
 
 	if ( currentHandle < 0 ) {
+		return;
+	}
+
+	if ( cinTable[currentHandle].avi ) {
+		CIN_AVI_Rewind( cinTable[currentHandle].avi );
+		AviInit();
+		cinTable[currentHandle].status = FMV_LOOPED;
 		return;
 	}
 
@@ -1310,6 +1322,76 @@ static void RoQ_init( void ) {
 *
 ******************************************************************************/
 
+/*
+==================
+AviInit / AviInterrupt
+
+HD MJPEG/AVI counterpart of RoQ_init / RoQInterrupt: one call decodes up to the next video
+frame, feeding any audio chunks on the way.
+==================
+*/
+static void AviInit( void ) {
+	cin_cache *c = &cinTable[currentHandle];
+
+	c->startTime = c->lastTime = CL_ScaledMilliseconds();
+	c->roqFPS = CIN_AVI_FPS( c->avi );
+	c->numQuads = -1;
+}
+
+static void AviInterrupt( void ) {
+	cin_cache *c;
+
+	if ( currentHandle < 0 ) {
+		return;
+	}
+	c = &cinTable[currentHandle];
+
+	for ( ;; ) {
+		switch ( CIN_AVI_Next( c->avi ) ) {
+		case CIN_AVI_AUDIO:
+			if ( !c->silent ) {
+				int samples, rate, channels;
+				const byte *pcm = CIN_AVI_Audio( c->avi, &samples, &rate, &channels );
+
+				if ( c->numQuads == -1 && !c->sound ) {
+					S_Update();
+					s_rawend[CIN_STREAM] = s_soundtime;
+				}
+				S_RawSamples( 0, samples, rate, 2, channels, pcm, 1.0f, -1 );
+				c->sound = 1;
+			}
+			continue;
+		case CIN_AVI_VIDEO:
+			c->dirty = qtrue;
+			if ( c->numQuads == -1 ) {
+				c->startTime = c->lastTime = CL_ScaledMilliseconds();
+			}
+			c->numQuads++;
+			return;
+		case CIN_AVI_ERROR:
+			Com_DPrintf( "cinematic AVI decode error in %s\n", c->fileName );
+			// fall through
+		default:
+			if ( c->holdAtEnd ) {
+				c->status = FMV_IDLE;
+			} else if ( c->looping ) {
+				RoQReset();
+			} else {
+				c->status = FMV_EOF;
+			}
+			return;
+		}
+	}
+}
+
+static void CIN_Step( void ) {
+	if ( currentHandle >= 0 && cinTable[currentHandle].avi ) {
+		AviInterrupt();
+	} else {
+		RoQInterrupt();
+	}
+}
+
 static void RoQShutdown( void ) {
 	const char *s;
 
@@ -1323,6 +1405,11 @@ static void RoQShutdown( void ) {
 	Com_DPrintf( "finished cinematic\n" );
 	cinTable[currentHandle].status = FMV_IDLE;
 
+	if ( cinTable[currentHandle].avi ) {
+		CIN_AVI_Close( cinTable[currentHandle].avi );
+		cinTable[currentHandle].avi = NULL;
+		cinTable[currentHandle].buf = NULL;
+	}
 	if ( cinTable[currentHandle].iFile ) {
 		FS_FCloseFile( cinTable[currentHandle].iFile );
 		cinTable[currentHandle].iFile = 0;
@@ -1425,7 +1512,7 @@ e_status CIN_RunCinematic( int handle ) {
 	start = cinTable[currentHandle].startTime;
 	while ( ( cinTable[currentHandle].tfps != cinTable[currentHandle].numQuads ) && ( cinTable[currentHandle].status == FMV_PLAY ) )
 	{
-		RoQInterrupt();
+		CIN_Step();
 		if ( start != cinTable[currentHandle].startTime ) {
 			cinTable[currentHandle].tfps = ( ( ( CL_ScaledMilliseconds() - cinTable[currentHandle].startTime ) * cinTable[currentHandle].roqFPS ) / 1000 );
 
@@ -1439,7 +1526,7 @@ e_status CIN_RunCinematic( int handle ) {
 		if ( s_rawend[CIN_STREAM] < s_soundtime && ( s_soundtime - s_rawend[CIN_STREAM] ) < 100 ) {
 			cinTable[currentHandle].startTime -= ( s_soundtime - s_rawend[CIN_STREAM] );
 			do {
-				RoQInterrupt();
+				CIN_Step();
 			} while ( s_rawend[CIN_STREAM] < s_soundtime &&  cinTable[currentHandle].status == FMV_PLAY );
 		}
 	}
@@ -1497,6 +1584,64 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 	cin.currentHandle = currentHandle;
 
 	strcpy( cinTable[currentHandle].fileName, name );
+
+	cinTable[currentHandle].avi = NULL;
+	cinTable[currentHandle].buf = NULL;
+
+	// HD remaster: prefer video/<name>.avi over <name>.roq when the pack is installed
+	{
+		int nlen = (int)strlen( name );
+		char aviName[MAX_OSPATH];
+
+		if ( nlen > 4 && !Q_stricmp( name + nlen - 4, ".roq" ) ) {
+			Q_strncpyz( aviName, name, sizeof( aviName ) );
+			Q_strncpyz( aviName + nlen - 4, ".avi", 5 );
+			cinTable[currentHandle].avi = CIN_AVI_Open( aviName );
+		}
+	}
+
+	if ( cinTable[currentHandle].avi ) {
+		cin_cache *c = &cinTable[currentHandle];
+
+		c->iFile = 0;
+		CIN_SetExtents( currentHandle, x, y, w, h );
+		CIN_SetLooping( currentHandle, ( systemBits & CIN_loop ) != 0 );
+		c->CIN_WIDTH = c->drawX = CIN_AVI_Width( c->avi );
+		c->CIN_HEIGHT = c->drawY = CIN_AVI_Height( c->avi );
+		c->xsize = c->CIN_WIDTH;
+		c->ysize = c->CIN_HEIGHT;
+		c->samplesPerPixel = 4;
+		c->buf = CIN_AVI_Frame( c->avi );
+		c->holdAtEnd = ( systemBits & CIN_hold ) != 0;
+		c->alterGameState = ( systemBits & CIN_system ) != 0;
+		c->playonwalls = 1;
+		c->silent = ( systemBits & CIN_silent ) != 0;
+		c->shader = ( systemBits & CIN_shader ) != 0;
+		c->letterBox = ( systemBits & CIN_letterBox ) != 0;
+		c->sound = 0;
+		c->inMemory = 0;
+
+		if ( c->alterGameState ) {
+			if ( uivm ) {
+				VM_Call( uivm, UI_SET_ACTIVE_MENU, UIMENU_NONE );
+			}
+		} else {
+			c->playonwalls = cl_inGameVideo->integer;
+		}
+
+		AviInit();
+		c->status = FMV_PLAY;
+		Com_DPrintf( "trFMV::play(), playing %s as AVI\n", arg );
+
+		if ( c->alterGameState ) {
+			clc.state = CA_CINEMATIC;
+		}
+		Con_Close();
+		if ( !c->silent ) {
+			s_rawend[0] = s_soundtime;
+		}
+		return currentHandle;
+	}
 
 	cinTable[currentHandle].ROQSize = 0;
 	cinTable[currentHandle].ROQSize = FS_FOpenFileRead( cinTable[currentHandle].fileName, &cinTable[currentHandle].iFile, qtrue );
@@ -1665,18 +1810,33 @@ void CIN_DrawCinematic( int handle ) {
 
 
 	if ( cinTable[handle].letterBox ) {
-		float barheight;
-		float vh;
-		vh = (float)cls.glconfig.vidHeight;
+		// Fixed 640:270 picture (the design letterbox on a 4:3 screen) fitted to the real
+		// window instead of being stretched with the 640x480 virtual screen, so widescreen
+		// displays keep the film aspect ratio. Black bars fill the rest.
+		float vw = (float)cls.glconfig.vidWidth;
+		float vh = (float)cls.glconfig.vidHeight;
+		float bw = vw;
+		float bh = vw * ( (float)( SCREEN_HEIGHT - LETTERBOX_OFFSET * 2 ) / (float)SCREEN_WIDTH );
 
-		barheight = ( (float)LETTERBOX_OFFSET / 480.0f ) * vh;  //----(SA)	added
+		if ( bh > vh ) {
+			bh = vh;
+			bw = vh * ( (float)SCREEN_WIDTH / (float)( SCREEN_HEIGHT - LETTERBOX_OFFSET * 2 ) );
+		}
+		x = ( vw - bw ) * 0.5f;
+		y = ( vh - bh ) * 0.5f;
+		w = bw;
+		h = bh;
 
 		re.SetColor( &colorBlack[0] );
-//		re.DrawStretchPic( 0, 0, SCREEN_WIDTH, LETTERBOX_OFFSET, 0, 0, 0, 0, cls.whiteShader );
-//		re.DrawStretchPic( 0, SCREEN_HEIGHT-LETTERBOX_OFFSET, SCREEN_WIDTH, LETTERBOX_OFFSET, 0, 0, 0, 0, cls.whiteShader );
-		//----(SA)	adjust for 640x480
-		re.DrawStretchPic( 0, 0, w, barheight, 0, 0, 0, 0, cls.whiteShader );
-		re.DrawStretchPic( 0, vh - barheight - 1, w, barheight + 1, 0, 0, 0, 0, cls.whiteShader );
+		if ( y > 0 ) {
+			re.DrawStretchPic( 0, 0, vw, y, 0, 0, 0, 0, cls.whiteShader );
+			re.DrawStretchPic( 0, y + h, vw, vh - ( y + h ) + 1, 0, 0, 0, 0, cls.whiteShader );
+		}
+		if ( x > 0 ) {
+			re.DrawStretchPic( 0, 0, x, vh, 0, 0, 0, 0, cls.whiteShader );
+			re.DrawStretchPic( x + w, 0, vw - ( x + w ) + 1, vh, 0, 0, 0, 0, cls.whiteShader );
+		}
+		re.SetColor( NULL );
 	}
 
 	if ( cinTable[handle].dirty && ( cinTable[handle].CIN_WIDTH != cinTable[handle].drawX || cinTable[handle].CIN_HEIGHT != cinTable[handle].drawY ) ) {
