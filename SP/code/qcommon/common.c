@@ -555,6 +555,20 @@ Returns qtrue if any late commands were added, which
 will keep the demoloop from immediately starting
 =================
 */
+static qboolean Com_StartupHasGameCommand( void ) {
+	int i;
+
+	for ( i = 0 ; i < com_numConsoleLines ; i++ ) {
+		const char *l = com_consoleLines[i];
+
+		if ( !l || !l[0] || !Q_stricmpn( l, "set ", 4 ) || !Q_stricmpn( l, "seta ", 5 ) || !Q_stricmpn( l, "exec ", 5 ) ) {
+			continue;
+		}
+		return qtrue;
+	}
+	return qfalse;
+}
+
 qboolean Com_AddStartupCommands( void ) {
 	int i;
 	qboolean added;
@@ -2461,7 +2475,9 @@ void Com_Init( char *commandLine ) {
 	com_frameTime = Com_Milliseconds();
 
 	// add + commands from command line
-	if ( !Com_AddStartupCommands() ) {
+	// codmod: launchers pass +set/+exec only, which must not suppress the intro; any other command
+	// (map, loadgame, cinematic, ...) still does.
+	if ( !Com_AddStartupCommands() || !Com_StartupHasGameCommand() ) {
 		// if the user didn't give any commands, run default action
 		if ( !com_dedicated->integer ) {
 #ifdef CINEMATICS_LOGO

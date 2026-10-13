@@ -3794,6 +3794,15 @@ static void CG_Draw2D(stereoFrame_t stereoFrame) {
 	}
 
 	if ( cg.cameraMode ) { //----(SA)	no 2d when in camera view
+		// codmod: rend2 does not clear the bars outside the letterboxed refdef, so they showed stale
+		// framebuffer contents; paint them black explicitly.
+		if ( cg_letterbox.integer && cg.refdef.y > 0 ) {
+			vec4_t black = { 0, 0, 0, 1 };
+			float bar = 480.0f * cg.refdef.y / cgs.glconfig.vidHeight;
+
+			CG_FillRect( -2000, 0, 4640, bar, black );
+			CG_FillRect( -2000, 480.0f - bar, 4640, bar, black );
+		}
 		CG_DrawFlashBlend();    // (for fades)
 		return;
 	}

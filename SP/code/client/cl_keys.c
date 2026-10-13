@@ -2327,7 +2327,7 @@ void CL_KeyDownEvent( int key, unsigned time )
 	// most keys during demo playback will bring up the menu, but non-ascii
 
 	// keys can still be used for bound actions
-	if ( ( key < 128 || key == K_MOUSE1 ) &&
+	if ( ( key < 128 || key == K_MOUSE1 || clc.state == CA_CINEMATIC ) && // codmod: any key skips a cinematic
 		( clc.demoplaying || clc.state == CA_CINEMATIC ) && Key_GetCatcher( ) == 0 ) {
 
 		if (Cvar_VariableValue ("com_cameraMode") == 0) {
