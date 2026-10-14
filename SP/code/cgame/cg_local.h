@@ -752,7 +752,8 @@ typedef struct {
 	int clientNum;
 
 	qboolean demoPlayback;
-	int timeFracUs;             // codmod: sub-ms remainder of the paced game clock (0..999)
+	int timeFracUs;             // codmod: view clock offset from cg.time in us (smoothed, can be <0 or >999)
+	int predictLagMs;           // codmod: cg.time - predicted commandTime (the cmd is built before the clock advances)
 	qboolean levelShot;             // taking a level menu screenshot
 	int deferredPlayerLoading;
 	qboolean loading;               // don't defer players at initial startup

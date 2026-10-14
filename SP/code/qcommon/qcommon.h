@@ -1159,6 +1159,7 @@ void Com_PresentWait( void ( *finish )( void ) );
 void Com_PresentDone( void ( *finish )( void ) );
 // Sub-millisecond remainder (0..999 us) of the paced game clock, for cgame interpolation
 extern int com_frameFracUs;
+extern long long com_frameClockUs;
 // Sys_Microseconds time right after the last buffer swap (bench: present cadence)
 extern long long com_lastPresentUs;
 

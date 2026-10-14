@@ -1053,13 +1053,15 @@ qboolean CL_GameCommand( void ) {
 
 
 
+static int clViewFracUs;        // codmod: view clock offset from cl.serverTime (CL_UpdateViewClock)
+
 /*
 =====================
 CL_CGameRendering
 =====================
 */
 void CL_CGameRendering( stereoFrame_t stereo ) {
-	VM_Call( cgvm, CG_DRAW_ACTIVE_FRAME, cl.serverTime, stereo, clc.demoplaying, com_frameFracUs );
+	VM_Call( cgvm, CG_DRAW_ACTIVE_FRAME, cl.serverTime, stereo, clc.demoplaying, clViewFracUs );
 	VM_Debug( 0 );
 }
 
@@ -1202,6 +1204,40 @@ void CL_FirstSnapshot( void ) {
 
 /*
 ==================
+CL_UpdateViewClock
+
+codmod: the game clock (cl.serverTime) ticks in whole ms and is nudged +1/-2 ms on
+snapshots to track the server, so the camera position, which follows it, steps
+unevenly while mouse look turns in real time. Strafing while aiming at a fixed point
+shows that as jitter. The view clock advances with the smooth frame clock and eases
+toward the game clock; cgame renders the view at its offset (clViewFracUs).
+==================
+*/
+static void CL_UpdateViewClock( void ) {
+	static double viewUs;
+	static long long prevClockUs;
+	static qboolean valid;
+	double targetUs, err;
+
+	targetUs = cl.serverTime * 1000.0 + com_frameFracUs;
+	if ( !cl_viewSmooth->integer || clc.demoplaying || !valid || com_frameClockUs <= prevClockUs ) {
+		viewUs = targetUs;
+	} else {
+		viewUs += ( com_frameClockUs - prevClockUs ) * ( com_timescale->value > 0 ? com_timescale->value : 1.0f );
+		err = targetUs - viewUs;
+		if ( fabs( err ) > 15000.0 ) {
+			viewUs = targetUs;      // pause, load, hitch or time reset
+		} else {
+			viewUs += err * 0.04;   // ~25 frame time constant: a 1 ms nudge becomes ~40 us steps
+		}
+	}
+	valid = qtrue;
+	prevClockUs = com_frameClockUs;
+	clViewFracUs = (int)( viewUs - cl.serverTime * 1000.0 );
+}
+
+/*
+==================
 CL_SetCGameTime
 ==================
 */
@@ -1292,6 +1328,8 @@ void CL_SetCGameTime( void ) {
 	if ( cl.newSnapshots ) {
 		CL_AdjustTimeDelta();
 	}
+
+	CL_UpdateViewClock();
 
 	if ( !clc.demoplaying ) {
 		return;

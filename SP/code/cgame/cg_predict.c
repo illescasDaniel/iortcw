@@ -526,6 +526,7 @@ void CG_PredictPlayerState( void ) {
 	vec3_t deltaAngles;
 
 	cg.hyperspace = qfalse; // will be set if touching a trigger_teleport
+	cg.predictLagMs = 0;
 
 	// if this is the first frame we must guarantee
 	// predictedPlayerState is valid even if there is some
@@ -757,6 +758,11 @@ void CG_PredictPlayerState( void ) {
 
 	if ( cg_showmiss.integer > 1 ) {
 		CG_Printf( "[%i : %i] ", cg_pmove.cmd.serverTime, cg.time );
+	}
+
+	cg.predictLagMs = cg.time - cg.predictedPlayerState.commandTime;
+	if ( cg.predictLagMs < 0 || cg.predictLagMs > 33 ) {
+		cg.predictLagMs = 0;
 	}
 
 	if ( !moved ) {

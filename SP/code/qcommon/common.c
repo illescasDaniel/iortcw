@@ -115,6 +115,7 @@ cvar_t	*com_maxfpsGpuSync;
 static cvar_t	*com_vsync;
 static cvar_t	*com_displayRefresh;
 int com_frameFracUs;
+long long com_frameClockUs;   // smooth frame clock (paced schedule, or real time uncapped)
 long long com_lastPresentUs;
 #ifndef DEDICATED
 cvar_t  *con_autochat;
@@ -3033,6 +3034,7 @@ static int Com_PacedMsec( int eventMsec ) {
 	if ( !pacer.active || com_dedicated->integer || com_timedemo->integer ) {
 		synced = qfalse;
 		com_frameFracUs = 0;
+		com_frameClockUs = Sys_Microseconds();
 		return eventMsec;
 	}
 	if ( !synced ) {
@@ -3042,6 +3044,7 @@ static int Com_PacedMsec( int eventMsec ) {
 		gameClockUs = 0;
 		lastMs = 0;
 		com_frameFracUs = 0;
+		com_frameClockUs = pacer.frameStartUs;
 		return eventMsec;
 	}
 
@@ -3061,6 +3064,7 @@ static int Com_PacedMsec( int eventMsec ) {
 	if ( com_frameFracUs < 0 ) {
 		com_frameFracUs = 0;
 	}
+	com_frameClockUs = originUs + (long long)gameClockUs;
 	return msec;
 }
 

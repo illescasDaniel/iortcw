@@ -1277,10 +1277,11 @@ static int CG_CalcViewValues( void ) {
 	VectorCopy( ps->origin, cg.refdef.vieworg );
 	VectorCopy( ps->viewangles, cg.refdefViewAngles );
 
-	// codmod: the game ticks in whole ms but frames land between ticks; carry the
-	// view forward by the sub-ms remainder so paced frames move evenly
-	if ( cg_subMsecLerp.integer && cg.timeFracUs && ps->pm_type == PM_NORMAL && !ps->viewlocked ) {
-		VectorMA( cg.refdef.vieworg, cg.timeFracUs * 0.000001f, ps->velocity, cg.refdef.vieworg );
+	// codmod: the predicted origin is at the last command's time (whole ms, one frame
+	// behind cg.time) while mouse look is current; carry the view to the smoothed view
+	// clock so strafing while holding aim on a point does not jitter
+	if ( cg_subMsecLerp.integer && ps->pm_type == PM_NORMAL && !ps->viewlocked ) {
+		VectorMA( cg.refdef.vieworg, ( cg.predictLagMs * 1000 + cg.timeFracUs ) * 0.000001f, ps->velocity, cg.refdef.vieworg );
 	}
 
 	// add error decay
@@ -1624,7 +1625,7 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 
 	cg.time = serverTime;
 	// codmod: microseconds into this game millisecond (paced frames only); visual-only
-	cg.timeFracUs = ( frameFracUs > 0 && frameFracUs < 1000 ) ? frameFracUs : 0;
+	cg.timeFracUs = ( frameFracUs > -30000 && frameFracUs < 30000 ) ? frameFracUs : 0;
 	cg.demoPlayback = demoPlayback;
 
 	// update cvars
