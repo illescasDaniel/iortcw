@@ -237,6 +237,9 @@ cvar_t  *r_shownormals;
 cvar_t  *r_finish;
 cvar_t  *r_swapFinish;
 cvar_t  *r_flaresAsync;
+cvar_t  *r_gpuProfile;
+cvar_t  *r_smaaStencil;
+cvar_t  *r_ssaoDepthMips;
 cvar_t  *r_clear;
 cvar_t  *r_swapInterval;
 cvar_t  *r_textureMode;
@@ -1591,6 +1594,9 @@ void R_Register( void ) {
 	r_swapFinish = ri.Cvar_Get( "r_swapFinish", "0", 0 );
 	// 1 = flare visibility via occlusion queries; 0 = stock depth readback (stalls the GPU)
 	r_flaresAsync = ri.Cvar_Get( "r_flaresAsync", "1", 0 );
+	r_gpuProfile = ri.Cvar_Get( "r_gpuProfile", "0", 0 );
+	r_smaaStencil = ri.Cvar_Get( "r_smaaStencil", "1", 0 );
+	r_ssaoDepthMips = ri.Cvar_Get( "r_ssaoDepthMips", "1", 0 );
 	r_textureMode = ri.Cvar_Get( "r_textureMode", "GL_LINEAR_MIPMAP_LINEAR", CVAR_ARCHIVE );
 
 	r_swapInterval = ri.Cvar_Get( "r_swapInterval", "0",
@@ -1688,6 +1694,7 @@ void R_Register( void ) {
 	ri.Cmd_AddCommand( "gfxinfo", GfxInfo_f );
 	ri.Cmd_AddCommand( "minimize", GLimp_Minimize );
 	ri.Cmd_AddCommand( "gfxmeminfo", GfxMemInfo_f );
+	ri.Cmd_AddCommand( "gpuprof", R_GpuProf_f );
 	ri.Cmd_AddCommand( "exportCubemaps", R_ExportCubemaps_f );
 	ri.Cmd_AddCommand( "taginfo", R_TagInfo_f );
 
@@ -1842,6 +1849,7 @@ void RE_Shutdown( qboolean destroyWindow ) {
 	ri.Cmd_RemoveCommand( "gfxinfo" );
 	ri.Cmd_RemoveCommand( "minimize" );
 	ri.Cmd_RemoveCommand( "gfxmeminfo" );
+	ri.Cmd_RemoveCommand( "gpuprof" );
 	ri.Cmd_RemoveCommand( "exportCubemaps" );
 	ri.Cmd_RemoveCommand( "taginfo" );
 
@@ -1853,6 +1861,7 @@ void RE_Shutdown( qboolean destroyWindow ) {
 		R_IssuePendingRenderCommands();
 		R_ShutDownQueries();
 		R_ShutdownFlareQueries();
+		R_ShutdownGpuProf();
 		if (glRefConfig.framebufferObject)
 			FBO_Shutdown();
 		R_DeleteTextures();

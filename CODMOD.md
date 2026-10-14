@@ -55,5 +55,26 @@ Benchmark (`cl_benchDemo` replay, 2561x1601, SMAA 3, RTX 4070 Laptop, median of 
    visibility lags 1-2 frames (hidden by the flare fade). Results are keyed by flare id, scene and portal flag, not by
    `flare_t` slot, because hidden flares are freed every frame. `r_flaresAsync 1`; `0` is the stock readback.
 
-No effect (measured): non-blocking sun-flare query, `__GL_MaxFramesAllowed=3`, XWayland vs native Wayland, reading the
+No effect at the time (measured): non-blocking sun-flare query (later shipped, see below), `__GL_MaxFramesAllowed=3`, XWayland vs native Wayland, reading the
 depth as `GL_UNSIGNED_INT`.
+
+## GPU pass profiling and lossless pass savings (2026-10-14)
+
+`r_gpuProfile 1` (tr_gpuprof.c) times each pass with `GL_TIMESTAMP` queries in an 8-frame ring (read without
+blocking); `gpuprof` prints the table, which is also printed at renderer shutdown. Marks are `RB_GpuMark("name")`
+calls in tr_backend.c and tr_postprocess.c. Bench 247 -> 303 FPS, GPU time ~4.07 -> 3.21 ms/frame:
+
+1. **`RB_UpdateSunFlareVis`**: stock read the previous frame's sun query with a blocking `GL_QUERY_RESULT`. Now a
+   4-query ring (`tr.sunFlareQuery[]`), read when available. Sun rays now run only when the sun is visible (stock
+   counted not-ready results as visible).
+2. **`RB_SMAA(src, dst, box)`** writes the blend to `dst` directly; `RB_PostProcess` tone-maps to scratch and SMAA
+   writes back, removing two full-screen copies.
+3. **SMAA stencil** (`r_smaaStencil 1`): `smaaEdgesFbo` owns a depth-stencil renderbuffer shared with `smaaBlendFbo`;
+   edges write stencil 1, weights run where stencil == 1.
+4. **GTAO depth mips** (`r_ssaoDepthMips 1`): `ssaoDepthImage` has `SSAO_DEPTH_MIPS` (4) point-downsampled levels,
+   one FBO each (`tr.ssaoDepthMipFbo[]`), rebuilt per frame with nearest blits. `ssao_fp.glsl` `viewDepthMip()` reads
+   level `floor(clamp(log2(tap px) - 3.3, 0, mips))`, point-sampled; level 0 taps are unchanged. Not bit-exact
+   (differences of 1-2/255 on a few % of pixels), visually identical.
+5. **`ssaoup_fp.glsl`** uses `textureGather` (ARB_texture_gather, with the old 8-fetch loop as fallback).
+
+All but 4 give bit-identical screenshots (`scripts/shots.sh` + `scripts/shots-diff.py` in the outer repo).

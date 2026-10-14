@@ -2944,6 +2944,27 @@ void R_CreateBuiltinImages( void ) {
 
 		tr.aoImage = R_CreateImage("*ao", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_R8);
 		tr.ssaoDepthImage = R_CreateImage("*ssaoDepth", NULL, width / 2, height / 2, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_R32F);
+
+		// codmod: point-sampled mip chain for GTAO's far taps (filled per frame in RB_DrawSurfs).
+		// LINEAR_MIPMAP_NEAREST keeps level 0 sampled exactly as before; only textureLod
+		// with a lod > 0 (GTAO) ever reads the smaller levels.
+		{
+			int level;
+
+			tr.ssaoDepthMips = 0;
+			for (level = 1; level <= SSAO_DEPTH_MIPS; level++)
+			{
+				int w = (width / 2) >> level, h = (height / 2) >> level;
+
+				if (w < 1 || h < 1)
+					break;
+				qglTextureImage2DEXT(tr.ssaoDepthImage->texnum, GL_TEXTURE_2D, level, GL_R32F, w, h, 0, GL_RED, GL_FLOAT, NULL);
+				tr.ssaoDepthMips = level;
+			}
+			qglTextureParameteriEXT(tr.ssaoDepthImage->texnum, GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, tr.ssaoDepthMips);
+			if (tr.ssaoDepthMips)
+				qglTextureParameteriEXT(tr.ssaoDepthImage->texnum, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+		}
 		}
 
 		for( x = 0; x < MAX_DRAWN_PSHADOWS; x++)

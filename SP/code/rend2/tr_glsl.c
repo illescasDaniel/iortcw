@@ -177,6 +177,7 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_HalfDepthMap", GLSL_INT },
 	{ "u_AoMap", GLSL_INT },
 	{ "u_AoParams", GLSL_VEC4 },
+	{ "u_SsaoMips", GLSL_VEC2 },
 };
 
 typedef enum

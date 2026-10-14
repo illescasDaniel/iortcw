@@ -3,6 +3,7 @@ uniform sampler2D u_ScreenDepthMap;
 uniform vec4   u_ViewInfo;   // zfar / znear, zfar, tan(fovX / 2), tan(fovY / 2)
 uniform vec4   u_SsaoParams; // radius (world units), strength, then: hemisphere: bias, samples; GTAO: slices, steps per side
 uniform vec2   u_InvTexRes;  // 1 / size of the depth texture
+uniform vec2   u_SsaoMips;   // GTAO: deepest point-sampled depth mip (0 = none), mip offset in log2 pixels
 
 varying vec2   var_ScreenTex;
 
@@ -70,6 +71,34 @@ vec3 viewNormal(const vec2 tex, const vec3 pc)
 }
 
 #if defined(USE_GTAO)
+
+// Far taps read a smaller, point-sampled copy of the depth (XeGTAO's depth MIP trick):
+// neighbouring pixels walk in different random directions, and fetching far taps
+// from level 0 missed the texture cache most of the time. Level n is used once the
+// tap is more than 2^(n + offset) pixels away, so its position error (< 2^n pixels)
+// stays a small fraction of the tap distance. Taps that stay on level 0 are sampled
+// exactly as before (bilinear).
+float viewDepthMip(const vec2 tex, const vec2 offPixels)
+{
+	float lod = floor(clamp(log2(length(offPixels)) - u_SsaoMips.y, 0.0, u_SsaoMips.x));
+	float d;
+
+	if (lod < 0.5)
+	{
+		d = textureLod(u_ScreenDepthMap, tex, 0.0).r;
+	}
+	else
+	{
+		// point sample: the texel centre, so bilinear filtering does not blend depths
+		vec2 size = vec2(textureSize(u_ScreenDepthMap, int(lod)));
+		d = textureLod(u_ScreenDepthMap, (floor(tex * size) + 0.5) / size, lod).r;
+	}
+
+	if (d < VIEWMODEL_DEPTH || d > SKY_DEPTH)
+		return -1.0;
+
+	return u_ViewInfo.y / mix(u_ViewInfo.x, 1.0, d);
+}
 
 // Ground Truth Ambient Occlusion (Jimenez et al. 2016, "Practical Real-Time
 // Strategies for Accurate Indirect Occlusion"), following the structure of Intel's
@@ -161,8 +190,9 @@ void main()
 
 			vec2 tex0 = tex + off;
 			vec2 tex1 = tex - off;
-			float z0 = viewDepth(tex0);
-			float z1 = viewDepth(tex1);
+			vec2 offPixels = off / u_InvTexRes;
+			float z0 = viewDepthMip(tex0, offPixels);
+			float z1 = viewDepthMip(tex1, offPixels);
 
 			if (z0 > 0.0)
 			{

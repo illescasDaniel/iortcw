@@ -1462,6 +1462,8 @@ const void	*RB_DrawSurfs( const void *data ) {
 	backEnd.aoReady = qfalse;
 	backEnd.flashShadowReady = qfalse;
 
+	RB_GpuMark( "pre-view" );
+
 	// clear the z buffer, set the modelview, etc
 	RB_BeginDrawingView ();
 
@@ -1482,6 +1484,11 @@ const void	*RB_DrawSurfs( const void *data ) {
 		RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
 		qglColorMask(!backEnd.colorMask[0], !backEnd.colorMask[1], !backEnd.colorMask[2], !backEnd.colorMask[3]);
 		backEnd.depthFill = qfalse;
+
+		if (isShadowView)
+			RB_GpuMark( (backEnd.viewParms.flags & VPF_ORTHOGRAPHIC) ? "sunshadow" : (backEnd.viewParms.flags & VPF_NOPLAYER) ? "flashshadow" : "shadowmap" );
+		else
+			RB_GpuMark( "prepass" );
 
 		if (!isShadowView)
 		{
@@ -1507,6 +1514,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 				FBO_BlitFromTexture(tr.renderDepthImage, srcTexCoords, NULL, tr.hdrDepthFbo, NULL, NULL, NULL, 0);
 			}
+			RB_GpuMark( "depthcopy" );
 
 			if (r_sunlightMode->integer && backEnd.viewParms.flags & VPF_USESUNLIGHT)
 			{
@@ -1615,6 +1623,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 					RB_InstantQuad2(quadVerts, texCoords);
 				}
+				RB_GpuMark( "sunshadowmask" );
 			}
 
 			// codmod: flashlight shadow mask (screen space, sampled by the dlight shaders)
@@ -1682,6 +1691,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 				RB_InstantQuad2(quadVerts, texCoords);
 
 				backEnd.flashShadowReady = qtrue;
+				RB_GpuMark( "flashmask" );
 			}
 
 			if (r_ssao->integer)
@@ -1691,6 +1701,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 				vec4_t ssaoParams;
 				vec2_t invTexRes;
+				vec2_t ssaoMips;
 
 				// the ssao shader wants tan(fov / 2) here, not a texel size
 				viewInfo[2] = tan(backEnd.viewParms.fovX * M_PI / 360.0f);
@@ -1706,6 +1717,27 @@ const void	*RB_DrawSurfs( const void *data ) {
 				// half resolution depth: the AO is half resolution too, and fetching from a
 				// small texture keeps the many random taps in cache (nearest, no invented depths)
 				FBO_FastBlit(tr.hdrDepthFbo, NULL, tr.ssaoDepthFbo, NULL, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+				// point-sampled depth mips: GTAO reads its far taps from these, which keeps
+				// them in the texture cache (per-pixel random directions otherwise miss a lot)
+				ssaoMips[0] = 0.0f;
+				ssaoMips[1] = 3.3f;
+				if (r_ssaoMode->integer && r_ssaoDepthMips->integer && tr.ssaoDepthMips)
+				{
+					int level;
+
+					for (level = 1; level <= tr.ssaoDepthMips; level++)
+					{
+						FBO_t *src = level == 1 ? tr.ssaoDepthFbo : tr.ssaoDepthMipFbo[level - 1];
+						ivec4_t srcMipBox, dstMipBox;
+
+						VectorSet4(srcMipBox, 0, 0, src->width, src->height);
+						VectorSet4(dstMipBox, 0, 0, tr.ssaoDepthMipFbo[level]->width, tr.ssaoDepthMipFbo[level]->height);
+						FBO_FastBlit(src, srcMipBox, tr.ssaoDepthMipFbo[level], dstMipBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+					}
+					ssaoMips[0] = tr.ssaoDepthMips;
+				}
+				RB_GpuMark( "ssao_depth" );
 
 				FBO_Bind(tr.quarterFbo[0]);
 
@@ -1731,8 +1763,10 @@ const void	*RB_DrawSurfs( const void *data ) {
 				GLSL_SetUniformVec4(&tr.ssaoShader[r_ssaoMode->integer ? 1 : 0], UNIFORM_VIEWINFO, viewInfo);
 				GLSL_SetUniformVec4(&tr.ssaoShader[r_ssaoMode->integer ? 1 : 0], UNIFORM_SSAOPARAMS, ssaoParams);
 				GLSL_SetUniformVec2(&tr.ssaoShader[r_ssaoMode->integer ? 1 : 0], UNIFORM_INVTEXRES, invTexRes);
+				GLSL_SetUniformVec2(&tr.ssaoShader[r_ssaoMode->integer ? 1 : 0], UNIFORM_SSAOMIPS, ssaoMips);
 
 				RB_InstantQuad2(quadVerts, texCoords); //, color, shaderProgram, invTexRes);
+				RB_GpuMark( "ssao_ao" );
 
 
 				viewInfo[2] = 1.0f / (float)(tr.quarterImage[0]->width);
@@ -1751,6 +1785,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 				GLSL_SetUniformVec4(&tr.depthBlurShader[0], UNIFORM_VIEWINFO, viewInfo);
 
 				RB_InstantQuad2(quadVerts, texCoords); //, color, shaderProgram, invTexRes);
+				RB_GpuMark( "ssao_blur1" );
 
 
 				FBO_Bind(tr.screenSsaoFbo);
@@ -1767,6 +1802,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 
 				RB_InstantQuad2(quadVerts, texCoords); //, color, shaderProgram, invTexRes);
+				RB_GpuMark( "ssao_blur2" );
 
 				if (r_ssaoAmbient->integer && tr.aoFbo)
 				{
@@ -1793,6 +1829,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 					FBO_Blit(tr.screenSsaoFbo, aoBox, NULL, tr.aoFbo, aoDst, &tr.ssaoUpShader, NULL, 0);
 					backEnd.aoReady = qtrue;
 				}
+				RB_GpuMark( "ssao" );
 			}
 		}
 
@@ -1808,7 +1845,11 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 	if (!isShadowView)
 	{
+		if (!(backEnd.refdef.rdflags & RDF_NOWORLDMODEL))
+			RB_GpuMark3D();
+
 		RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
+		RB_GpuMark( (backEnd.refdef.rdflags & RDF_NOWORLDMODEL) ? "scene_noworld" : "scene" );
 
 		if (r_drawSun->integer)
 		{
@@ -1834,16 +1875,20 @@ const void	*RB_DrawSurfs( const void *data ) {
 			if (glRefConfig.occlusionQuery)
 			{
 				qglEndQuery(GL_SAMPLES_PASSED);
+				tr.sunFlareQueryIndex = (tr.sunFlareQueryIndex + 1) % ARRAY_LEN(tr.sunFlareQuery);
 			}
 
 			FBO_Bind(oldFbo);
 		}
+
+		RB_GpuMark( "sun" );
 
 		// darken down any stencil shadows
 		RB_ShadowFinish();		
 
 		// add light flares on lights that aren't obscured
 		RB_RenderFlares();
+		RB_GpuMark( "flares" );
 	}
 
 	if (glRefConfig.framebufferObject && tr.renderCubeFbo && backEnd.viewParms.targetFbo == tr.renderCubeFbo)
@@ -2038,6 +2083,8 @@ const void	*RB_SwapBuffers( const void *data ) {
 		RB_EndSurface();
 	}
 
+	RB_GpuMark( "2d" );
+
 	// texture swapping test
 	if ( r_showImages->integer ) {
 		RB_ShowImages();
@@ -2080,6 +2127,9 @@ const void	*RB_SwapBuffers( const void *data ) {
 	// stock Q3 waited for the GPU to go idle here every frame, so the next frame's CPU work
 	// ran while the GPU sat idle (~24% idle at 2560x1600). The driver's own frame queue
 	// bounds how far ahead the CPU gets; the frame pacer syncs when a cap is active.
+	RB_GpuMark( "present_blit" );
+	RB_GpuProfEndFrame();
+
 	if ( !glState.finishCalled && r_swapFinish->integer ) {
 		qglFinish();
 	}
@@ -2141,6 +2191,7 @@ const void *RB_PostProcess(const void *data)
 	FBO_t *srcFbo, *dstFbo;
 	ivec4_t srcBox, dstBox;
 	qboolean autoExposure;
+	qboolean tonemapped = qfalse;
 
 	// finish any 2D drawing if needed
 	if(tess.numIndexes)
@@ -2168,6 +2219,7 @@ const void *RB_PostProcess(const void *data)
 		FBO_FastBlit(tr.renderFbo, NULL, tr.msaaResolveFbo, NULL, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 		srcFbo = tr.msaaResolveFbo;
 	}
+	RB_GpuMark( "pre-post" );
 
 	dstBox[0] = backEnd.viewParms.viewportX;
 	dstBox[1] = backEnd.viewParms.viewportY;
@@ -2192,6 +2244,7 @@ const void *RB_PostProcess(const void *data)
 		GL_BindToTMU(tr.ssaoDepthImage, TB_NORMALMAP);
 
 		FBO_Blit(tr.screenSsaoFbo, srcBox, NULL, srcFbo, dstBox, &tr.ssaoUpShader, NULL, GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO);
+		RB_GpuMark( "ssao_apply" );
 	}
 
 	srcBox[0] = backEnd.viewParms.viewportX;
@@ -2208,7 +2261,12 @@ const void *RB_PostProcess(const void *data)
 			// Use an intermediate FBO because it can't blit to the same FBO directly
 			// and can't read from an MSAA dstFbo later.
 			RB_ToneMap(srcFbo, srcBox, tr.screenScratchFbo, srcBox, autoExposure);
-			FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+			// codmod: SMAA reads the tone-mapped scratch image and writes the anti-aliased
+			// result straight back, instead of copying scratch -> srcFbo before and after it
+			if (!(r_smaa->integer && RB_SMAA(tr.screenScratchFbo, srcFbo, srcBox)))
+				FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+			tonemapped = qtrue;
 		}
 		else if (r_cameraExposure->value != 0.0f)
 		{
@@ -2223,12 +2281,16 @@ const void *RB_PostProcess(const void *data)
 		}
 	}
 
+	RB_GpuMark( "tonemap_copy" );
+
 	// anti-alias the tone-mapped 3D scene; 2D is drawn after this and stays unfiltered
-	if (r_smaa->integer && srcFbo)
-		RB_SMAA(srcFbo, srcBox);
+	if (r_smaa->integer && srcFbo && !tonemapped)
+		RB_SMAA(srcFbo, srcFbo, srcBox);
+	RB_GpuMark( "smaa_copy" );
 
 	if (r_drawSunRays->integer)
 		RB_SunRays(srcFbo, srcBox, srcFbo, srcBox);
+	RB_GpuMark( "rays_add" );
 
 	if (1)
 		RB_BokehBlur(srcFbo, srcBox, srcFbo, srcBox, backEnd.refdef.blurFactor);
@@ -2237,6 +2299,7 @@ const void *RB_PostProcess(const void *data)
 
 	if (srcFbo != dstFbo)
 		FBO_FastBlit(srcFbo, srcBox, dstFbo, dstBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	RB_GpuMark( "blur+copy" );
 
 #if 0
 	if (0)
@@ -2448,6 +2511,8 @@ void RB_ExecuteRenderCommands( const void *data ) {
 	int		t1, t2;
 
 	t1 = ri.Milliseconds ();
+
+	RB_GpuMark( "frame_start" );
 
 	while ( 1 ) {
 		data = PADP(data, sizeof(void *));

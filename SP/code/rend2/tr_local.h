@@ -818,9 +818,12 @@ typedef enum
 	UNIFORM_HALFDEPTHMAP, // half resolution depth, same size as the AO image
 	UNIFORM_AOMAP,
 	UNIFORM_AOPARAMS, // x = 1 when the lightall AO map is valid for this draw
+	UNIFORM_SSAOMIPS, // x = deepest depth mip GTAO may use (0 = off), y = mip offset in log2 pixels
 
 	UNIFORM_COUNT
 } uniform_t;
+
+#define SSAO_DEPTH_MIPS 4	// codmod: GTAO depth mip chain levels below the half resolution depth
 
 // shaderProgram_t represents a pair of one
 // GLSL vertex and one GLSL fragment shader
@@ -1710,6 +1713,7 @@ typedef struct {
 	image_t                 *screenSsaoImage;
 	image_t                 *aoImage;        // full resolution AO for ambient only AO
 	image_t                 *ssaoDepthImage; // half resolution copy of the depth for SSAO
+	int                     ssaoDepthMips;   // point-sampled mip levels below it (0 = none)
 	image_t					*hdrDepthImage;
 	image_t                 *renderCubeImage;
 	
@@ -1733,6 +1737,7 @@ typedef struct {
 	FBO_t					*flashShadowMaskFbo;
 	FBO_t					*screenSsaoFbo;
 	FBO_t					*ssaoDepthFbo;
+	FBO_t					*ssaoDepthMipFbo[SSAO_DEPTH_MIPS + 1];	// [0] unused, level n at [n]
 	FBO_t					*aoFbo;
 	FBO_t					*hdrDepthFbo;
 	FBO_t                   *renderCubeFbo;
@@ -1850,9 +1855,9 @@ typedef struct {
 	int						numSkins;
 	skin_t					*skins[MAX_SKINS];
 
-	GLuint					sunFlareQuery[2];
-	int						sunFlareQueryIndex;
-	qboolean				sunFlareQueryActive[2];
+	GLuint					sunFlareQuery[4];	// codmod: ring, read without blocking
+	int						sunFlareQueryIndex;	// next slot to issue
+	qboolean				sunFlareQueryActive[4];
 
 	float					sinTable[FUNCTABLE_SIZE];
 	float					squareTable[FUNCTABLE_SIZE];
@@ -1985,6 +1990,9 @@ extern	cvar_t	*r_picmip;						// controls picmip values
 extern	cvar_t	*r_finish;
 extern	cvar_t	*r_swapFinish;
 extern	cvar_t	*r_flaresAsync;
+extern	cvar_t	*r_gpuProfile;
+extern	cvar_t	*r_smaaStencil;
+extern	cvar_t	*r_ssaoDepthMips;
 extern	cvar_t	*r_textureMode;
 extern	cvar_t	*r_offsetFactor;
 extern	cvar_t	*r_offsetUnits;
@@ -2448,6 +2456,13 @@ FLARES
 
 void R_ClearFlares( void );
 void R_ShutdownFlareQueries( void );
+
+// tr_gpuprof.c
+void RB_GpuMark( const char *name );
+void RB_GpuMark3D( void );
+void RB_GpuProfEndFrame( void );
+void R_GpuProf_f( void );
+void R_ShutdownGpuProf( void );
 
 void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, float scale, vec3_t normal, int id, int flags ); // TTimo updated prototype
 void RB_AddDlightFlares( void );

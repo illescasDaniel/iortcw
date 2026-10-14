@@ -1,3 +1,8 @@
+#if defined(GL_ARB_texture_gather)
+#extension GL_ARB_texture_gather : enable
+#define USE_GATHER
+#endif
+
 uniform sampler2D u_ScreenImageMap; // half resolution AO
 uniform sampler2D u_ScreenDepthMap; // full resolution depth
 uniform sampler2D u_HalfDepthMap;   // half resolution depth, the one the AO was computed with
@@ -16,14 +21,17 @@ varying vec2   var_Tex1;
 #define FADE_START 1500.0
 #define FADE_END   4000.0
 
-float viewDepth(const sampler2D depthMap, const vec2 tex)
+float linearDepth(const float d)
 {
-	float d = texture2D(depthMap, tex).r;
-
 	if (d < VIEWMODEL_DEPTH || d > SKY_DEPTH)
 		return -1.0;
 
 	return u_ViewInfo.y / mix(u_ViewInfo.x, 1.0, d);
+}
+
+float viewDepth(const sampler2D depthMap, const vec2 tex)
+{
+	return linearDepth(texture2D(depthMap, tex).r);
 }
 
 void main()
@@ -48,16 +56,29 @@ void main()
 	float total = 0.0;
 	float plain = 0.0;
 
+#if defined(USE_GATHER)
+	// the same 4 texels with 2 fetches instead of 8; gather order is
+	// (0,1) (1,1) (1,0) (0,0), relative to base
+	vec2 gtc = (base + 1.0) * u_InvTexRes;
+	vec4 aos = textureGather(u_ScreenImageMap, gtc).wzxy;
+	vec4 zs = textureGather(u_HalfDepthMap, gtc).wzxy;
+#endif
+
 	for (int i = 0; i < 4; i++)
 	{
 		vec2 offs = vec2(float(i - (i / 2) * 2), float(i / 2));
-		vec2 tc = (base + offs + 0.5) * u_InvTexRes;
 
 		vec2 b = mix(1.0 - f, f, offs);
 		float bilinear = b.x * b.y;
 
+#if defined(USE_GATHER)
+		float ao = aos[i];
+		float zi = linearDepth(zs[i]);
+#else
+		vec2 tc = (base + offs + 0.5) * u_InvTexRes;
 		float ao = texture2D(u_ScreenImageMap, tc).r;
 		float zi = viewDepth(u_HalfDepthMap, tc);
+#endif
 
 		plain += ao * bilinear;
 

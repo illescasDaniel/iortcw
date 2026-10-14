@@ -322,6 +322,8 @@ void FBO_Init(void)
 	{
 		tr.smaaEdgesFbo = FBO_Create("smaaEdges", tr.smaaEdgesImage->width, tr.smaaEdgesImage->height);
 		FBO_AttachImage(tr.smaaEdgesFbo, tr.smaaEdgesImage, GL_COLOR_ATTACHMENT0, 0);
+		// stencil marks the edge pixels so the weights pass only runs there
+		FBO_CreateBuffer(tr.smaaEdgesFbo, GL_DEPTH24_STENCIL8, 0, 0);
 		R_CheckFBO(tr.smaaEdgesFbo);
 	}
 
@@ -329,6 +331,12 @@ void FBO_Init(void)
 	{
 		tr.smaaBlendFbo = FBO_Create("smaaBlend", tr.smaaBlendImage->width, tr.smaaBlendImage->height);
 		FBO_AttachImage(tr.smaaBlendFbo, tr.smaaBlendImage, GL_COLOR_ATTACHMENT0, 0);
+		// shares the edges FBO's stencil (owned and freed by smaaEdgesFbo)
+		if (tr.smaaEdgesFbo && tr.smaaEdgesFbo->packedDepthStencilBuffer)
+		{
+			qglNamedFramebufferRenderbufferEXT(tr.smaaBlendFbo->frameBuffer, GL_DEPTH_ATTACHMENT,   GL_RENDERBUFFER, tr.smaaEdgesFbo->packedDepthStencilBuffer);
+			qglNamedFramebufferRenderbufferEXT(tr.smaaBlendFbo->frameBuffer, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, tr.smaaEdgesFbo->packedDepthStencilBuffer);
+		}
 		R_CheckFBO(tr.smaaBlendFbo);
 	}
 
@@ -433,6 +441,20 @@ void FBO_Init(void)
 		tr.ssaoDepthFbo = FBO_Create("_ssaoDepth", tr.ssaoDepthImage->width, tr.ssaoDepthImage->height);
 		FBO_AttachImage(tr.ssaoDepthFbo, tr.ssaoDepthImage, GL_COLOR_ATTACHMENT0, 0);
 		R_CheckFBO(tr.ssaoDepthFbo);
+
+		// one FBO per GTAO depth mip level, for the point-sampled downsample blits
+		{
+			int level;
+
+			for (level = 1; level <= tr.ssaoDepthMips; level++)
+			{
+				FBO_t *fbo = FBO_Create(va("_ssaoDepthMip%d", level), tr.ssaoDepthImage->width >> level, tr.ssaoDepthImage->height >> level);
+
+				qglNamedFramebufferTexture2DEXT(fbo->frameBuffer, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tr.ssaoDepthImage->texnum, level);
+				R_CheckFBO(fbo);
+				tr.ssaoDepthMipFbo[level] = fbo;
+			}
+		}
 	}
 
 	if (tr.aoImage)

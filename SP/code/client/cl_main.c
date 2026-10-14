@@ -890,7 +890,7 @@ Frame-time statistics for a cl_benchDemo run (real-time demo playback).
 static void CL_ReportBenchDemo( void ) {
 	static int sorted[MAX_BENCH_FRAMES];
 	int n = clc.benchFrames;
-	int i, slow, hitches = 0;
+	int i, slow, hitches = 0, vsync;
 	double total = 0, slowSum = 0, seconds, avgFps, low1Fps;
 	double median, p95, p99, maxMs;
 	char summary[256], line[512], head[512];
@@ -947,8 +947,10 @@ static void CL_ReportBenchDemo( void ) {
 				 Cvar_VariableString( "com_maxfps" ),
 				 Cvar_VariableString( "cl_renderer" ) );
 	Com_Printf( "codmod bench cfg: %s\n", head );
-	if ( Cvar_VariableIntegerValue( "r_vsync" ) != 0 || Cvar_VariableIntegerValue( "com_maxfps" ) != 0 ) {
-		Com_Printf( S_COLOR_YELLOW "codmod bench: WARNING vsync/fps cap active, FPS is limited (want r_vsync 0, com_maxfps 0)\n" );
+	// r_vsync 3 (triple buffer) never blocks the swap, so it does not cap the FPS
+	vsync = Cvar_VariableIntegerValue( "r_vsync" );
+	if ( ( vsync != 0 && vsync != 3 ) || Cvar_VariableIntegerValue( "com_maxfps" ) != 0 ) {
+		Com_Printf( S_COLOR_YELLOW "codmod bench: WARNING vsync/fps cap active, FPS is limited (want r_vsync 0 or 3, com_maxfps 0)\n" );
 	}
 
 	f = FS_FOpenFileWrite( "benchmarks/last_frametimes.txt" );

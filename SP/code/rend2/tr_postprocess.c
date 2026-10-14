@@ -27,24 +27,31 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 RB_SMAA
 
 Subpixel Morphological Anti-Aliasing, 1x (Jimenez et al., http://www.iryoku.com/smaa/).
-Runs in place on srcFbo's color image after tone mapping and before any 2D, so the HUD stays crisp.
+Runs on the tone-mapped image after tone mapping and before any 2D, so the HUD stays crisp.
   1. luma edge detection        srcFbo   -> smaaEdgesFbo
   2. blending weight calculation edges   -> smaaBlendFbo
-  3. neighborhood blending       srcFbo+weights -> screenScratchFbo, then copied back to srcFbo
+  3. neighborhood blending       srcFbo+weights -> dstFbo
+When srcFbo == dstFbo the blend goes through screenScratchFbo and is copied back. The tone
+mapper already leaves its result in screenScratchFbo, so normally src is that and dst the
+scene FBO, which saves two full-screen copies (~0.37 ms at 2560x1600).
 r_smaa selects the preset (1 low .. 4 ultra); r_smaaDebug 1/2 shows the edges/weights buffer instead.
+Returns qfalse if nothing was written to dstFbo.
 =============
 */
-void RB_SMAA(FBO_t *srcFbo, ivec4_t srcBox)
+qboolean RB_SMAA(FBO_t *srcFbo, FBO_t *dstFbo, ivec4_t srcBox)
 {
 	int preset = r_smaa->integer - 1;
 	vec4_t metrics;
+	qboolean useStencil;
 
 	if (preset < 0 || preset > 3)
-		return;
+		return qfalse;
 
-	if (!tr.smaaAvailable || !srcFbo || !tr.smaaEdgesFbo || !tr.smaaBlendFbo || !tr.screenScratchFbo ||
+	if (!tr.smaaAvailable || !srcFbo || !dstFbo || !tr.smaaEdgesFbo || !tr.smaaBlendFbo || !tr.screenScratchFbo ||
 		srcFbo->width != tr.smaaEdgesFbo->width || srcFbo->height != tr.smaaEdgesFbo->height)
-		return;
+		return qfalse;
+
+	useStencil = tr.smaaEdgesFbo->packedDepthStencilBuffer && r_smaaStencil->integer;
 
 	metrics[0] = 1.0f / srcFbo->width;
 	metrics[1] = 1.0f / srcFbo->height;
@@ -55,38 +62,77 @@ void RB_SMAA(FBO_t *srcFbo, ivec4_t srcBox)
 	FBO_Bind(tr.smaaEdgesFbo);
 	qglScissor(0, 0, tr.smaaEdgesFbo->width, tr.smaaEdgesFbo->height);
 	qglClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-	qglClear(GL_COLOR_BUFFER_BIT);
+	if (useStencil)
+	{
+		// edge pixels get stencil 1 (discarded ones keep 0)
+		qglClearStencil(0);
+		qglStencilMask(0xff);
+		qglClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+		qglEnable(GL_STENCIL_TEST);
+		qglStencilFunc(GL_ALWAYS, 1, 0xff);
+		qglStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+	}
+	else
+		qglClear(GL_COLOR_BUFFER_BIT);
 	qglClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
 	GLSL_BindProgram(&tr.smaaEdgeShader[preset]);
 	GLSL_SetUniformVec4(&tr.smaaEdgeShader[preset], UNIFORM_SMAAMETRICS, metrics);
 	FBO_Blit(srcFbo, srcBox, NULL, tr.smaaEdgesFbo, srcBox, &tr.smaaEdgeShader[preset], NULL, 0);
+	RB_GpuMark( "smaa_edges" );
 
 	if (r_smaaDebug->integer == 1)
 	{
-		FBO_FastBlit(tr.smaaEdgesFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-		return;
+		if (useStencil)
+			qglDisable(GL_STENCIL_TEST);
+		FBO_FastBlit(tr.smaaEdgesFbo, srcBox, dstFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		return qtrue;
 	}
 
 	GL_BindToTMU(tr.smaaAreaImage,   TB_LEVELSMAP);
 	GL_BindToTMU(tr.smaaSearchImage, TB_NORMALMAP);
 
+	if (useStencil)
+	{
+		// the weights are only nonzero on edge pixels: clear to zero and shade just those
+		// (the stencil optimisation from the SMAA reference implementation, same output)
+		FBO_Bind(tr.smaaBlendFbo);
+		qglClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+		qglClear(GL_COLOR_BUFFER_BIT);
+		qglClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		qglStencilFunc(GL_EQUAL, 1, 0xff);
+		qglStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+	}
+
 	GLSL_BindProgram(&tr.smaaWeightsShader[preset]);
 	GLSL_SetUniformVec4(&tr.smaaWeightsShader[preset], UNIFORM_SMAAMETRICS, metrics);
 	FBO_Blit(tr.smaaEdgesFbo, srcBox, NULL, tr.smaaBlendFbo, srcBox, &tr.smaaWeightsShader[preset], NULL, 0);
 
+	if (useStencil)
+		qglDisable(GL_STENCIL_TEST);
+	RB_GpuMark( "smaa_weights" );
+
 	if (r_smaaDebug->integer == 2)
 	{
-		FBO_FastBlit(tr.smaaBlendFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-		return;
+		FBO_FastBlit(tr.smaaBlendFbo, srcBox, dstFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		return qtrue;
 	}
 
 	GL_BindToTMU(tr.smaaBlendImage, TB_LEVELSMAP);
 
 	GLSL_BindProgram(&tr.smaaBlendShader);
 	GLSL_SetUniformVec4(&tr.smaaBlendShader, UNIFORM_SMAAMETRICS, metrics);
+	if (srcFbo != dstFbo)
+	{
+		FBO_Blit(srcFbo, srcBox, NULL, dstFbo, srcBox, &tr.smaaBlendShader, NULL, 0);
+		RB_GpuMark( "smaa_blend" );
+		return qtrue;
+	}
+
 	FBO_Blit(srcFbo, srcBox, NULL, tr.screenScratchFbo, srcBox, &tr.smaaBlendShader, NULL, 0);
+	RB_GpuMark( "smaa_blend" );
 	FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	return qtrue;
 }
 
 void RB_ToneMap(FBO_t *hdrFbo, ivec4_t hdrBox, FBO_t *ldrFbo, ivec4_t ldrBox, int autoExposure)
@@ -146,6 +192,8 @@ void RB_ToneMap(FBO_t *hdrFbo, ivec4_t hdrBox, FBO_t *ldrFbo, ivec4_t ldrBox, in
 		FBO_Blit(tr.targetLevelsFbo, srcBox, NULL, tr.calcLevelsFbo, NULL,  NULL, color, GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA);
 	}
 
+	RB_GpuMark( "tm_exposure" );
+
 	// tonemap
 	color[0] =
 	color[1] =
@@ -158,6 +206,7 @@ void RB_ToneMap(FBO_t *hdrFbo, ivec4_t hdrBox, FBO_t *ldrFbo, ivec4_t ldrBox, in
 		GL_BindToTMU(tr.fixedLevelsImage, TB_LEVELSMAP);
 
 	FBO_Blit(hdrFbo, hdrBox, NULL, ldrFbo, ldrBox, &tr.tonemapShader, color, 0);
+	RB_GpuMark( "tm_apply" );
 }
 
 /*
@@ -332,33 +381,40 @@ static void RB_RadialBlur(FBO_t *srcFbo, FBO_t *dstFbo, int passes, float stretc
 }
 
 
+/*
+codmod: stock code read the previous frame's query with a blocking GL_QUERY_RESULT, so the
+CPU could never get more than about one frame ahead of the GPU. Now the newest finished
+query of a small ring decides (a few frames of latency at most), and the CPU never waits.
+*/
 static qboolean RB_UpdateSunFlareVis(void)
 {
-	GLuint sampleCount = 0;
+	static qboolean visible = qtrue;
+	int n = ARRAY_LEN(tr.sunFlareQuery);
+	int i;
+
 	if (!glRefConfig.occlusionQuery)
 		return qtrue;
 
-	tr.sunFlareQueryIndex ^= 1;
-	if (!tr.sunFlareQueryActive[tr.sunFlareQueryIndex])
-		return qtrue;
-
-	/* debug code */
-	if (0)
+	// oldest first, so the newest available result wins
+	for (i = 0; i < n; i++)
 	{
-		int iter;
-		for (iter=0 ; ; ++iter)
-		{
-			GLint available = 0;
-			qglGetQueryObjectiv(tr.sunFlareQuery[tr.sunFlareQueryIndex], GL_QUERY_RESULT_AVAILABLE, &available);
-			if (available)
-				break;
-		}
+		int slot = (tr.sunFlareQueryIndex + i) % n;
+		GLint available = 0;
+		GLuint sampleCount = 0;
 
-		ri.Printf(PRINT_DEVELOPER, "Waited %d iterations\n", iter);
+		if (!tr.sunFlareQueryActive[slot])
+			continue;
+
+		qglGetQueryObjectiv(tr.sunFlareQuery[slot], GL_QUERY_RESULT_AVAILABLE, &available);
+		if (!available)
+			continue;
+
+		qglGetQueryObjectuiv(tr.sunFlareQuery[slot], GL_QUERY_RESULT, &sampleCount);
+		tr.sunFlareQueryActive[slot] = qfalse;
+		visible = sampleCount > 0;
 	}
-	
-	qglGetQueryObjectuiv(tr.sunFlareQuery[tr.sunFlareQueryIndex], GL_QUERY_RESULT, &sampleCount);
-	return sampleCount > 0;
+
+	return visible;
 }
 
 void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox)
@@ -434,6 +490,8 @@ void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox)
 		}
 	}
 
+	RB_GpuMark( "rays_down" );
+
 	// radial blur passes, ping-ponging between the two quarter-size buffers
 	{
 		const float stretch_add = 2.f/3.f;
@@ -446,6 +504,8 @@ void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox)
 		}
 	}
 	
+	RB_GpuMark( "rays_blur" );
+
 	// add result back on top of the main buffer
 	{
 		float mul = 1.f;
