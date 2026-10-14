@@ -2765,6 +2765,11 @@ typedef struct {
 	long long lastVblankUs;
 	double    vblankPeriodUs;   // measured swap-to-swap interval (vsync lock)
 	int       vblankGood;       // consecutive swap intervals that looked like a real vblank
+	qboolean  gpuBound;         // GPU sync suspended: the GPU cannot hold the cap
+	int       gpuMissed;        // consecutive synced frames that finished after their deadline
+	int       gpuSynced;        // synced frames since the last (re)start of the GPU sync
+	int       gpuBoundFrames;   // frames spent with the sync suspended
+	int       gpuRetryFrames;   // when to try the sync again (doubles after each failed try)
 } pacer_t;
 
 static pacer_t pacer;
@@ -2915,17 +2920,50 @@ Called by the renderer right before it swaps buffers (finish = glFinish).
 */
 void Com_PresentWait( void ( *finish )( void ) ) {
 	long long ready;
+	qboolean sync;
 
 	if ( !pacer.active || pacer.presentedFrame == com_frameNumber + 1 ) {
 		return;     // uncapped, or an extra EndFrame within the same Com_Frame (loading screens)
 	}
 	pacer.presentedFrame = com_frameNumber + 1;
 
-	if ( finish && com_maxfpsGpuSync->integer && ( pacer.mode > 0 || pacer.vblankLock ) ) {
+	sync = finish && com_maxfpsGpuSync->integer && ( pacer.mode > 0 || pacer.vblankLock );
+
+	// glFinish here serializes the CPU and the GPU: fine while the frame fits the cap (it
+	// lowers latency), but when the GPU alone cannot hold the cap it idles the GPU during the
+	// next frame's CPU work (240 cap: 211 FPS vs 239 without the sync, on a GPU that does
+	// ~250 uncapped). After a few frames that miss their deadline the sync is suspended so the
+	// GPU stays busy, and retried later, with a doubling interval while it keeps failing.
+	if ( sync && !pacer.vblankLock && pacer.gpuBound ) {
+		sync = qfalse;
+		if ( ++pacer.gpuBoundFrames >= pacer.gpuRetryFrames ) {
+			pacer.gpuBound = qfalse;
+			pacer.gpuMissed = 0;
+			pacer.gpuSynced = 0;
+		}
+	}
+	if ( sync ) {
 		finish();
 	}
 	ready = Sys_Microseconds();
-	pacer.ring[pacer.ringPos++ % PACE_RING] = (int)( ready - pacer.frameStartUs );
+	if ( sync || !pacer.gpuBound ) {
+		pacer.ring[pacer.ringPos++ % PACE_RING] = (int)( ready - pacer.frameStartUs );
+	}
+
+	if ( sync && !pacer.vblankLock ) {
+		pacer.gpuSynced++;
+		pacer.gpuMissed = ready > pacer.deadlineUs ? pacer.gpuMissed + 1 : 0;
+		if ( pacer.gpuMissed >= 4 ) {
+			// a retry that fails right away backs off; one that held for a while starts over
+			if ( pacer.gpuSynced < 64 && pacer.gpuRetryFrames ) {
+				pacer.gpuRetryFrames = pacer.gpuRetryFrames * 2 < 2048 ? pacer.gpuRetryFrames * 2 : 2048;
+			} else {
+				pacer.gpuRetryFrames = 64;
+			}
+			pacer.gpuBound = qtrue;
+			pacer.gpuBoundFrames = 0;
+		}
+	}
 
 	if ( pacer.vblankLock || pacer.mode == 0 ) {
 		return;
