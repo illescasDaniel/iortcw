@@ -35,6 +35,9 @@ folder, so vanilla RTCW keeps working side by side. The campaign, maps, enemies 
   screen-space mask (`r_flashlightShadow`). Details in [CODMOD.md](CODMOD.md)
 - **SMAA 1x** post-process anti-aliasing (4 quality levels) and a unified `r_aa` setting covering SMAA and MSAA 2/4/8x
 - Wayland-friendly fullscreen and mode switching without recreating the GL context
+- **Keeps the GPU fed (~76% to 97% busy, +35% FPS):** removed stock rend2's per-frame `glFinish` before the swap and
+  replaced the per-flare depth `glReadPixels` (a pipeline drain) with occlusion queries. Details and numbers in
+  [CODMOD.md](CODMOD.md) ("GPU utilisation")
 - Fix for an HD texture `ResampleTexture` stack overflow
 
 **Engine core**

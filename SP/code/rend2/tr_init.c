@@ -235,6 +235,8 @@ cvar_t  *r_showtris;
 cvar_t  *r_showsky;
 cvar_t  *r_shownormals;
 cvar_t  *r_finish;
+cvar_t  *r_swapFinish;
+cvar_t  *r_flaresAsync;
 cvar_t  *r_clear;
 cvar_t  *r_swapInterval;
 cvar_t  *r_textureMode;
@@ -1585,6 +1587,10 @@ void R_Register( void ) {
 	r_dlightSpecular = ri.Cvar_Get( "r_dlightSpecular", "1.0", 0 );
 	r_dlightEntities = ri.Cvar_Get( "r_dlightEntities", "1", 0 );
 	r_finish = ri.Cvar_Get( "r_finish", "0", CVAR_ARCHIVE );
+	// 1 = stock per-frame glFinish before the swap (serializes CPU and GPU: GPU ~76% busy)
+	r_swapFinish = ri.Cvar_Get( "r_swapFinish", "0", 0 );
+	// 1 = flare visibility via occlusion queries; 0 = stock depth readback (stalls the GPU)
+	r_flaresAsync = ri.Cvar_Get( "r_flaresAsync", "1", 0 );
 	r_textureMode = ri.Cvar_Get( "r_textureMode", "GL_LINEAR_MIPMAP_LINEAR", CVAR_ARCHIVE );
 
 	r_swapInterval = ri.Cvar_Get( "r_swapInterval", "0",
@@ -1846,6 +1852,7 @@ void RE_Shutdown( qboolean destroyWindow ) {
 	if ( tr.registered ) {
 		R_IssuePendingRenderCommands();
 		R_ShutDownQueries();
+		R_ShutdownFlareQueries();
 		if (glRefConfig.framebufferObject)
 			FBO_Shutdown();
 		R_DeleteTextures();

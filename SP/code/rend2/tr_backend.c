@@ -2077,7 +2077,10 @@ const void	*RB_SwapBuffers( const void *data ) {
 		}
 	}
 
-	if ( !glState.finishCalled ) {
+	// stock Q3 waited for the GPU to go idle here every frame, so the next frame's CPU work
+	// ran while the GPU sat idle (~24% idle at 2560x1600). The driver's own frame queue
+	// bounds how far ahead the CPU gets; the frame pacer syncs when a cap is active.
+	if ( !glState.finishCalled && r_swapFinish->integer ) {
 		qglFinish();
 	}
 

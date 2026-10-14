@@ -1983,6 +1983,8 @@ extern	cvar_t	*r_roundImagesDown;
 extern	cvar_t	*r_colorMipLevels;				// development aid to see texture mip usage
 extern	cvar_t	*r_picmip;						// controls picmip values
 extern	cvar_t	*r_finish;
+extern	cvar_t	*r_swapFinish;
+extern	cvar_t	*r_flaresAsync;
 extern	cvar_t	*r_textureMode;
 extern	cvar_t	*r_offsetFactor;
 extern	cvar_t	*r_offsetUnits;
@@ -2445,6 +2447,7 @@ FLARES
 */
 
 void R_ClearFlares( void );
+void R_ShutdownFlareQueries( void );
 
 void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, float scale, vec3_t normal, int id, int flags ); // TTimo updated prototype
 void RB_AddDlightFlares( void );

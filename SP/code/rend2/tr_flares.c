@@ -97,6 +97,201 @@ typedef struct flare_s {
 flare_t r_flareStructs[MAX_FLARES];
 flare_t     *r_activeFlares, *r_inactiveFlares;
 
+/*
+Flare visibility via occlusion queries (r_flaresAsync 1).
+
+The stock test reads the depth buffer back with one glReadPixels per flare, which makes
+the GPU drain its pipeline to resolve the depth surface. Measured 2026-10-14: ~3 tests a
+frame cost 10% FPS and left the GPU ~10% idle, even when read asynchronously into a pixel
+pack buffer. Instead each test draws a one-pixel quad, depth-tested at the flare's depth
+pulled 24 units toward the viewer (the stock tolerance), inside a GL_SAMPLES_PASSED query.
+Results are read only once available, so visibility lags a frame or two (the fade hides it).
+Results are keyed by flare identity, not flare_t slot, because a hidden flare's slot is
+freed every frame and a slot-keyed result would never reach the next one.
+*/
+#define FLARE_QUERIES   ( MAX_FLARES * 2 )
+#define FLARE_VIS_MAX_AGE 8     // frames; older results count as missing
+
+typedef struct {
+	int id, sceneNum;
+	qboolean inPortal;
+} flareKey_t;
+
+typedef struct {
+	GLuint query;
+	qboolean pending;
+	flareKey_t key;
+} flareQuery_t;
+
+typedef struct {
+	flareKey_t key;
+	qboolean visible;
+	int frame;      // backEnd.viewParms.frameCount the result arrived
+} flareVis_t;
+
+static struct {
+	qboolean init;
+	flareQuery_t q[FLARE_QUERIES];
+	int next;
+	flareVis_t vis[MAX_FLARES];
+	int numVis;
+	qboolean active;    // queries in use for the view being tested
+} flareOcc;
+
+static qboolean FlareKeyMatch( const flareKey_t *k, int id, int sceneNum, qboolean inPortal ) {
+	return k->id == id && k->sceneNum == sceneNum && k->inPortal == inPortal;
+}
+
+static void R_StoreFlareVis( const flareKey_t *key, qboolean visible ) {
+	flareVis_t *v, *oldest = &flareOcc.vis[0];
+	int i;
+
+	for ( i = 0; i < flareOcc.numVis; i++ ) {
+		v = &flareOcc.vis[i];
+		if ( FlareKeyMatch( &v->key, key->id, key->sceneNum, key->inPortal ) ) {
+			break;
+		}
+		if ( v->frame < oldest->frame ) {
+			oldest = v;
+		}
+	}
+	if ( i < flareOcc.numVis ) {
+		v = &flareOcc.vis[i];
+	} else if ( flareOcc.numVis < MAX_FLARES ) {
+		v = &flareOcc.vis[flareOcc.numVis++];
+	} else {
+		v = oldest;
+	}
+	v->key = *key;
+	v->visible = visible;
+	v->frame = backEnd.viewParms.frameCount;
+}
+
+// newest finished result for this flare; qfalse (hidden) until one has arrived
+static qboolean R_FlareOccVisible( const flare_t *f ) {
+	int i;
+
+	for ( i = 0; i < flareOcc.numVis; i++ ) {
+		flareVis_t *v = &flareOcc.vis[i];
+
+		if ( FlareKeyMatch( &v->key, f->id, f->frameSceneNum, f->inPortal ) ) {
+			return v->visible && backEnd.viewParms.frameCount - v->frame <= FLARE_VIS_MAX_AGE;
+		}
+	}
+	return qfalse;
+}
+
+static void RB_HarvestFlareQueries( void ) {
+	int i;
+
+	for ( i = 0; i < FLARE_QUERIES; i++ ) {
+		flareQuery_t *q = &flareOcc.q[( flareOcc.next + i ) % FLARE_QUERIES];     // oldest first
+		GLint available = 0;
+		GLuint samples = 0;
+
+		if ( !q->pending ) {
+			continue;
+		}
+		qglGetQueryObjectiv( q->query, GL_QUERY_RESULT_AVAILABLE, &available );
+		if ( !available ) {
+			continue;
+		}
+		qglGetQueryObjectuiv( q->query, GL_QUERY_RESULT, &samples );
+		q->pending = qfalse;
+		R_StoreFlareVis( &q->key, samples > 0 );
+	}
+}
+
+/*
+==================
+R_ShutdownFlareQueries
+
+Called before the GL context goes away (RE_Shutdown).
+==================
+*/
+void R_ShutdownFlareQueries( void ) {
+	int i;
+
+	if ( flareOcc.init ) {
+		for ( i = 0; i < FLARE_QUERIES; i++ ) {
+			qglDeleteQueries( 1, &flareOcc.q[i].query );
+		}
+	}
+	Com_Memset( &flareOcc, 0, sizeof( flareOcc ) );
+}
+
+// issue the occlusion query for one flare; the view's projection is in backEnd.viewParms
+static void RB_QueryFlare( flare_t *f ) {
+	flareQuery_t *q = &flareOcc.q[flareOcc.next];
+	const float *p = backEnd.viewParms.projectionMatrix;
+	float x, y, dx, dy, z, zEye;
+	vec4_t quad[4];
+
+	if ( q->pending ) {
+		return;     // GPU is far behind; keep the last result for this flare
+	}
+	flareOcc.next = ( flareOcc.next + 1 ) % FLARE_QUERIES;
+
+	// same tolerance as the readback test: hidden only when the depth buffer is more than
+	// 24 units in front of the flare
+	zEye = f->eyeZ + 24;
+	if ( zEye > -r_znear->value ) {
+		z = -1.0f;
+	} else {
+		z = ( p[10] * zEye + p[14] ) / ( p[11] * zEye );
+	}
+	x = ( f->windowX + 0.5f - backEnd.viewParms.viewportX ) * 2.0f / backEnd.viewParms.viewportWidth - 1.0f;
+	y = ( f->windowY + 0.5f - backEnd.viewParms.viewportY ) * 2.0f / backEnd.viewParms.viewportHeight - 1.0f;
+	dx = 1.0f / backEnd.viewParms.viewportWidth;    // half a pixel: covers exactly this pixel's center
+	dy = 1.0f / backEnd.viewParms.viewportHeight;
+	VectorSet4( quad[0], x - dx, y - dy, z, 1 );
+	VectorSet4( quad[1], x + dx, y - dy, z, 1 );
+	VectorSet4( quad[2], x + dx, y + dy, z, 1 );
+	VectorSet4( quad[3], x - dx, y + dy, z, 1 );
+
+	q->key.id = f->id;
+	q->key.sceneNum = f->frameSceneNum;
+	q->key.inPortal = f->inPortal;
+	q->pending = qtrue;
+	qglBeginQuery( GL_SAMPLES_PASSED, q->query );
+	RB_InstantQuad( quad );
+	qglEndQuery( GL_SAMPLES_PASSED );
+}
+
+static void RB_BeginFlareQueries( mat4_t oldprojection, mat4_t oldmodelview ) {
+	mat4_t identity;
+	int i;
+
+	if ( !flareOcc.init ) {
+		for ( i = 0; i < FLARE_QUERIES; i++ ) {
+			qglGenQueries( 1, &flareOcc.q[i].query );
+		}
+		flareOcc.init = qtrue;
+	}
+	RB_HarvestFlareQueries();
+
+	if ( tess.numIndexes ) {
+		RB_EndSurface();
+	}
+	Mat4Copy( glState.projection, oldprojection );
+	Mat4Copy( glState.modelview, oldmodelview );
+	Mat4Identity( identity );
+	GL_SetModelviewMatrix( identity );
+	GL_SetProjectionMatrix( identity );     // quads are given in NDC
+	GL_BindToTMU( tr.whiteImage, TB_COLORMAP );
+	GL_State( 0 );      // depth test LEQUAL, no depth write, no blend
+	GL_Cull( CT_TWO_SIDED );
+	qglColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+	flareOcc.active = qtrue;
+}
+
+static void RB_EndFlareQueries( mat4_t oldprojection, mat4_t oldmodelview ) {
+	qglColorMask( !backEnd.colorMask[0], !backEnd.colorMask[1], !backEnd.colorMask[2], !backEnd.colorMask[3] );
+	GL_SetProjectionMatrix( oldprojection );
+	GL_SetModelviewMatrix( oldmodelview );
+	flareOcc.active = qfalse;
+}
+
 int flareCoeff;
 
 /*
@@ -350,33 +545,40 @@ void RB_TestFlare( flare_t *f ) {
 
 	backEnd.pc.c_flareTests++;
 
-	// doing a readpixels is as good as doing a glFinish(), so
-	// don't bother with another sync
-	glState.finishCalled = qfalse;
-
-	// if we're doing multisample rendering, read from the correct FBO
-	oldFbo = glState.currentFBO;
-	if (tr.msaaResolveFbo)
-	{
-		FBO_Bind(tr.msaaResolveFbo);
-	}
-
-	// read back the z buffer contents
-	qglReadPixels( f->windowX, f->windowY, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth );
-
-	// if we're doing multisample rendering, switch to the old FBO
-	if (tr.msaaResolveFbo)
-	{
-		FBO_Bind(oldFbo);
-	}
-
-	screenZ = backEnd.viewParms.projectionMatrix[14] / 
-		( ( 2*depth - 1 ) * backEnd.viewParms.projectionMatrix[11] - backEnd.viewParms.projectionMatrix[10] );
-
 	visible = (qboolean)( f->flags & 1 );
 
-	if ( -f->eyeZ - -screenZ  > 24 )
-		visible = qfalse;
+	if ( flareOcc.active ) {
+		RB_QueryFlare( f );
+		if ( !R_FlareOccVisible( f ) ) {
+			visible = qfalse;
+		}
+	} else {
+		// doing a readpixels is as good as doing a glFinish(), so
+		// don't bother with another sync
+		glState.finishCalled = qfalse;
+
+		// if we're doing multisample rendering, read from the correct FBO
+		oldFbo = glState.currentFBO;
+		if (tr.msaaResolveFbo)
+		{
+			FBO_Bind(tr.msaaResolveFbo);
+		}
+
+		// read back the z buffer contents
+		qglReadPixels( f->windowX, f->windowY, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth );
+
+		// if we're doing multisample rendering, switch to the old FBO
+		if (tr.msaaResolveFbo)
+		{
+			FBO_Bind(oldFbo);
+		}
+
+		screenZ = backEnd.viewParms.projectionMatrix[14] /
+			( ( 2*depth - 1 ) * backEnd.viewParms.projectionMatrix[11] - backEnd.viewParms.projectionMatrix[10] );
+
+		if ( -f->eyeZ - -screenZ  > 24 )
+			visible = qfalse;
+	}
 
 	if ( visible ) {
 		if ( !f->visible ) {
@@ -573,6 +775,10 @@ void RB_RenderFlares( void ) {
 	RB_AddDlightFlares();
 	RB_AddCoronaFlares();
 
+	if ( r_flaresAsync->integer && glRefConfig.occlusionQuery ) {
+		RB_BeginFlareQueries( oldprojection, oldmodelview );
+	}
+
 	// perform z buffer readback on each flare in this view
 	draw = qfalse;
 	prev = &r_activeFlares;
@@ -602,6 +808,10 @@ void RB_RenderFlares( void ) {
 		}
 
 		prev = &f->next;
+	}
+
+	if ( flareOcc.active ) {
+		RB_EndFlareQueries( oldprojection, oldmodelview );
 	}
 
 	if ( !draw ) {

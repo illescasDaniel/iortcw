@@ -30,3 +30,30 @@ The same changes are also kept as a patch series in that repo's `patches/` direc
 
   `ForwardDlight` also ignores baked vertex colour (`rgbGen vertex`) as a light modulator, so dark baked surfaces
   reflect the flashlight. Result: the flashlight lights and shadows the whole scene, world and models alike.
+
+## GPU utilisation (2026-10-14)
+
+Uncapped, the game is GPU-bound yet the GPU was only ~76-80% busy: two stock rend2 CPU/GPU sync points left it idle
+each frame. Fixing both brought it to 97% busy and +35% average FPS.
+
+Benchmark (`cl_benchDemo` replay, 2561x1601, SMAA 3, RTX 4070 Laptop, median of measured runs):
+
+| | avg FPS | 1% low | P99 | GPU busy |
+|---|---|---|---|---|
+| Before | 183 | 106 | 7.6 ms | 76% |
+| After | 247 | 163-167 | 5.4 ms | 97% |
+| Flares disabled (ceiling) | 249 | 165 | 5.5 ms | 97% |
+
+1. **Per-frame `glFinish` in `RB_SwapBuffers` (tr_backend.c).** Stock Q3 waits for the GPU to go idle before every
+   swap, so the next frame's CPU work runs while the GPU has nothing queued. Now skipped (`r_swapFinish 0`; `1` is the
+   stock behaviour, ~76% -> ~88% busy on its own). The driver's frame queue bounds the CPU's lead; with a cap or
+   `r_vsync 4` the frame pacer still syncs (`com_maxfpsGpuSync`). Uncapped input latency can be a frame or two higher.
+2. **Flare/corona depth readback (`RB_TestFlare`, tr_flares.c).** One `glReadPixels` of the depth buffer per visible
+   flare per frame (~3 in the bench demo) drains the pipeline. Reading into a pixel pack buffer behind a fence did not
+   help (the depth read itself stalls the driver). Visibility is now a `GL_SAMPLES_PASSED` occlusion query per flare: a
+   one-pixel depth-tested quad at the flare's depth minus the stock 24-unit tolerance, collected once available, so
+   visibility lags 1-2 frames (hidden by the flare fade). Results are keyed by flare id, scene and portal flag, not by
+   `flare_t` slot, because hidden flares are freed every frame. `r_flaresAsync 1`; `0` is the stock readback.
+
+No effect (measured): non-blocking sun-flare query, `__GL_MaxFramesAllowed=3`, XWayland vs native Wayland, reading the
+depth as `GL_UNSIGNED_INT`.
