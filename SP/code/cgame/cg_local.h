@@ -1962,6 +1962,11 @@ extern char teamChat2[256];
 void CG_AddLagometerFrameInfo( void );
 void CG_AddLagometerSnapshotInfo( snapshot_t *snap );
 void CG_CenterPrint( const char *str, int y, int charWidth );
+
+// codmod: cg_subtitles.c
+void CG_SubtitlesInit( void );
+void CG_SubtitleSound( const char *path, int entnum );
+void CG_DrawSubtitles( void );
 void CG_ObjectivePrint( const char *str, int charWidth, int team );     // NERVE - SMF
 void CG_DrawHead( float x, float y, float w, float h, int clientNum, vec3_t headAngles );
 void CG_DrawActive( stereoFrame_t stereoView );

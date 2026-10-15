@@ -2433,6 +2433,7 @@ void Com_Init( char *commandLine ) {
 #ifdef CINEMATICS_INTRO
 	com_introPlayed = Cvar_Get( "com_introplayed", "0", CVAR_ARCHIVE );
 	cod_skipIntro = Cvar_Get( "cod_skipIntro", "0", CVAR_ARCHIVE );
+	Cvar_Get( "cod_subtitles", "1", CVAR_ARCHIVE ); // codmod: Game menu toggle, read by cgame (cg_subtitles.c)
 #endif
 	com_recommendedSet = Cvar_Get( "com_recommendedSet", "0", CVAR_ARCHIVE );
 

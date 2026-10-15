@@ -148,6 +148,7 @@ void CG_SoundPickOldestRandomSound( soundScript_t *sound, vec3_t org, int entnum
 			trap_S_StartLocalSound( oldestSound->sfxHandle, sound->channel );
 		}
 		oldestSound->lastPlayed = cg.time;
+		CG_SubtitleSound( oldestSound->filename, entnum );      // codmod
 		//
 		// shake the view?
 		if ( sound->shakeScale ) {

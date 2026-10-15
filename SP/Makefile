@@ -2524,6 +2524,7 @@ Q3CGOBJ_ = \
   $(B)/$(BASEGAME)/cgame/bg_lib.o \
   $(B)/$(BASEGAME)/cgame/cg_cod.o \
   $(B)/$(BASEGAME)/cgame/cg_cod_menu.o \
+  $(B)/$(BASEGAME)/cgame/cg_subtitles.o \
   $(B)/$(BASEGAME)/cgame/cg_consolecmds.o \
   $(B)/$(BASEGAME)/cgame/cg_draw.o \
   $(B)/$(BASEGAME)/cgame/cg_drawtools.o \

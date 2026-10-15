@@ -2304,6 +2304,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 			//s = tempStr;
 		}
 		// done.
+		CG_SubtitleSound( s, es->number );      // codmod
 		if ( cgs.gameSounds[ es->eventParm ] ) {
 			trap_S_StartSound( NULL, es->number, CHAN_VOICE, cgs.gameSounds[ es->eventParm ] );
 		} else {
@@ -2327,6 +2328,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 			//s = tempStr;
 		}
 		// done.
+		CG_SubtitleSound( s, -1 );      // codmod
 		if ( cgs.gameSounds[ es->eventParm ] ) {
 			trap_S_StartSound( NULL, cg.snap->ps.clientNum, CHAN_AUTO, cgs.gameSounds[ es->eventParm ] );
 		} else {

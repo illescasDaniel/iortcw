@@ -3803,6 +3803,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame) {
 			CG_FillRect( -2000, 0, 4640, bar, black );
 			CG_FillRect( -2000, 480.0f - bar, 4640, bar, black );
 		}
+		CG_DrawSubtitles();     // codmod: cutscene dialogue
 		CG_DrawFlashBlend();    // (for fades)
 		return;
 	}
@@ -3885,6 +3886,8 @@ static void CG_Draw2D(stereoFrame_t stereoFrame) {
 	if ( !CG_DrawFollow() ) {
 		CG_DrawWarmup();
 	}
+
+	CG_DrawSubtitles();     // codmod
 
 	// don't draw center string if scoreboard is up
 	if ( !CG_DrawScoreboard() ) {

@@ -2323,6 +2323,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence ) {
 	cgs.media.charsetPropB      = trap_R_RegisterShaderNoMip( "menu/art/font2_prop.tga" );
 
 	CG_RegisterCvars();
+	CG_SubtitlesInit();     // codmod
 
 	CG_InitConsoleCommands();
 
