@@ -1514,12 +1514,13 @@ AddLean
 ==============
 */
 void AddLean( gentity_t *ent, vec3_t point ) {
-	if ( ent->client ) {
-		if ( ent->client->ps.leanf ) {
-			vec3_t right;
-			AngleVectors( ent->client->ps.viewangles, NULL, right, NULL );
-			VectorMA( point, ent->client->ps.leanf, right, point );
-		}
+	if ( ent->client && ent->client->ps.leanf ) {
+		vec3_t leanOfs;
+
+		// codmod: same offset as the camera (BG_CodLeanOffset), including its lean roll dip,
+		// so shots land on the crosshair while leaning
+		BG_CodLeanOffset( &ent->client->ps, leanOfs );
+		VectorAdd( point, leanOfs, point );
 	}
 }
 
@@ -1600,8 +1601,7 @@ void CalcMuzzlePoint( gentity_t *ent, int weapon, vec3_t forward, vec3_t right, 
 	// done.
 
 	// (SA) actually, this is sort of moot right now since
-	// you're not allowed to fire when leaning.  Leave in
-	// in case we decide to enable some lean-firing.
+	// codmod: lean-firing is allowed (cod_leanAllowFire); shot origin follows the camera
 	AddLean( ent, muzzlePoint );
 
 	// snap to integer coordinates for more efficient network bandwidth usage

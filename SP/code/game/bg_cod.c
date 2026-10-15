@@ -574,3 +574,43 @@ contiguous enum range (bg_public.h WP_BEGINSECONDARY..WP_LASTSECONDARY).
 qboolean BG_CodIsScopeWeapon( int weapon ) {
 	return ( weapon >= WP_BEGINSECONDARY && weapon <= WP_LASTSECONDARY ) ? qtrue : qfalse;
 }
+
+/*
+================
+BG_CodLeanOffset
+
+codmod: eye offset of a lean plus the camera roll that goes with it. Shared by cgame
+(CG_OffsetFirstPersonView) and qagame (AddLean) so the shot leaves from the leaned eye,
+including the dip caused by the roll-tilted right vector. Uses only the lean roll, never
+ps->viewangles[ROLL], so cosmetic bob/kick roll can't move the shot.
+================
+*/
+float BG_CodLeanOffset( const playerState_t *ps, vec3_t offset ) {
+	vec3_t angles, right;
+	float leanf, roll;
+
+	VectorClear( offset );
+	if ( ps->leanf == 0 ) {
+		return 0;
+	}
+
+	leanf = ps->leanf;
+	if ( bg_cod.enable && bg_cod.leanEnable ) {
+		if ( bg_cod.leanEase ) {
+			float leanMax = ( bg_cod.leanMax > 0 ) ? bg_cod.leanMax : 1.0f;
+			float s = BG_CodSmoothstep( fabs( leanf ) / leanMax );
+
+			leanf = ( leanf < 0 ) ? -leanMax * s : leanMax * s;
+		}
+		roll = leanf * bg_cod.leanRollScale;
+	} else {
+		roll = leanf / 2.0f;
+	}
+
+	angles[PITCH] = ps->viewangles[PITCH];
+	angles[YAW] = ps->viewangles[YAW];
+	angles[ROLL] = roll;
+	AngleVectors( angles, NULL, right, NULL );
+	VectorScale( right, leanf, offset );
+	return roll;
+}

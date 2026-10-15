@@ -256,6 +256,10 @@ static ID_INLINE float BG_CodSmoothstep( float x ) {
 	return x * x * ( 3.0f - 2.0f * x );
 }
 
+// codmod: eye offset of a lean, shared by the camera (cg_view.c) and the shot origin (g_weapon.c
+// AddLean) so bullets leave from where the player sees. Returns the lean roll in degrees.
+float BG_CodLeanOffset( const playerState_t *ps, vec3_t offset );
+
 // codmod: one instance per module (qagame and cgame each link their own bg_cod.o).
 extern codTuning_t bg_cod;
 
