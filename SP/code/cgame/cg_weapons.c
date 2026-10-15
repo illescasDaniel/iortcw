@@ -1790,6 +1790,13 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 		vec3_t right, up;
 		qboolean codLean;
 		float rollScale;
+		float leanFade = 1.0f;
+
+		// codmod: in ADS the sights must stay on the view centre (where the bullet goes), so
+		// fade the viewmodel's lean counter-roll and sideways shifts out with the ADS fraction
+		if ( bg_cod.enable && bg_cod.adsEnable ) {
+			leanFade = 1.0f - BG_CodSmoothstep( CG_CodAdsFrac() );
+		}
 
 		// codmod: cod_leanAllowFire/leanRollScale (phase 2.3.2/2.3.4)
 		codLean = ( bg_cod.enable && bg_cod.leanEnable ) ? qtrue : qfalse;
@@ -1823,9 +1830,9 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 
 		// reverse the roll on the weapon so it stays relatively level, scaled to match
 		// cod_leanRollScale so the gun doesn't out-tilt (or under-tilt) the camera (2.3.4)
-		angles[ROLL] -= cg.predictedPlayerState.leanf * rollScale / leanscale;
+		angles[ROLL] -= cg.predictedPlayerState.leanf * rollScale / leanscale * leanFade;
 		AngleVectors( angles, NULL, right, up );
-		VectorMA( origin, angles[ROLL], right, origin );
+		VectorMA( origin, angles[ROLL] * leanFade, right, origin );
 
 		// pitch the gun down a bit to show that firing is not allowed when leaning --
 		// codmod: skip this when cod_leanAllowFire, firing is allowed (phase 2.3.2)
@@ -1836,7 +1843,7 @@ static void CG_CalculateWeaponPosition( vec3_t origin, vec3_t angles ) {
 		// this gives you some impression that the weapon stays in relatively the same
 		// position while you lean, so you appear to 'peek' over the weapon
 		AngleVectors( cg.refdefViewAngles, NULL, right, NULL );
-		VectorMA( origin, -cg.predictedPlayerState.leanf / 4.0f, right, origin );
+		VectorMA( origin, -cg.predictedPlayerState.leanf / 4.0f * leanFade, right, origin );
 	}
 
 
