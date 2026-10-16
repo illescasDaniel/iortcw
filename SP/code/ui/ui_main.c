@@ -146,6 +146,7 @@ extern displayContextDef_t *DC;
 
 //----(SA)	added for savegame sorting
 static int QDECL UI_SavegamesQsortCompare( const void *arg1, const void *arg2 );
+static void UI_LoadSavegames( char *dir );
 //----(SA)	end
 
 void Text_PaintCenter( float x, float y, int font, float scale, vec4_t color, const char *text, float adjust );
@@ -3676,6 +3677,10 @@ UI_DelSavegame
 static void UI_DelSavegame( void ) {
 	int ret, i;
 
+	if ( !uiInfo.savegameCount ) {
+		return;
+	}
+
 	i = UI_SavegameIndexFromName2( ui_savegameName.string );
 
 	ret = trap_FS_Delete( va( "save/%s.svg", uiInfo.savegameList[i].savegameFile ) );
@@ -3687,7 +3692,9 @@ static void UI_DelSavegame( void ) {
 	}
 
 
-	UI_SavegameSort( uiInfo.savegameStatus.sortKey, qtrue );  // re-sort
+	// codmod: reload the list so the deleted entry disappears, and select the first one
+	trap_Cvar_Set( "ui_savegameName", "" );
+	UI_LoadSavegames( NULL );
 }
 
 
