@@ -31,6 +31,7 @@ If you have questions concerning this license or the applicable additional terms
 // cg_event.c -- handle entity events at snapshot or playerstate transitions
 
 #include "cg_local.h"
+#include "../ui/ui_lang.h"
 #include "../ui/ui_shared.h" // for Menus_CloseAll()
 
 extern int hWeaponSnd;
@@ -394,7 +395,7 @@ static void CG_UseItem( centity_t *cent ) {
 					CG_CenterPrint( "drankwine", SCREEN_HEIGHT - ( SCREEN_HEIGHT * 0.25 ), SMALLCHAR_WIDTH );
 					break;
 				default:
-					CG_CenterPrint( va( "Use %s", cgs.itemPrintNames[item - bg_itemlist] ), SCREEN_HEIGHT - ( SCREEN_HEIGHT * 0.25 ), SMALLCHAR_WIDTH );
+					CG_CenterPrint( va( (char *)Lang_Translate( "Use %s" ), cgs.itemPrintNames[item - bg_itemlist] ), SCREEN_HEIGHT - ( SCREEN_HEIGHT * 0.25 ), SMALLCHAR_WIDTH );
 					break;
 				}
 			}

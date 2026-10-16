@@ -28,6 +28,7 @@ If you have questions concerning this license or the applicable additional terms
 
 // cg_drawtools.c -- helper functions called by cg_draw, cg_scoreboard, cg_info, etc
 #include "cg_local.h"
+#include "../ui/ui_lang.h"
 
 static screenPlacement_e cg_horizontalPlacement = PLACE_CENTER;
 static screenPlacement_e cg_verticalPlacement = PLACE_CENTER;
@@ -415,6 +416,8 @@ void CG_DrawStringExt( int x, int y, const char *string, const float *setColor,
 	int xx;
 	int cnt;
 
+	string = Lang_Translate( string );   // codmod: string table (centered callers use CG_DrawStrlen, which translates too)
+
 	if ( maxChars <= 0 ) {
 		maxChars = 32767; // do them all!
 
@@ -478,6 +481,8 @@ void CG_DrawStringExt2( int x, int y, const char *string, const float *setColor,
 	int xx;
 	int cnt;
 
+	string = Lang_Translate( string );   // codmod: string table (centered callers use CG_DrawStrlen, which translates too)
+
 	if ( maxChars <= 0 ) {
 		maxChars = 32767; // do them all!
 
@@ -540,6 +545,8 @@ void CG_DrawStringExt3( int x, int y, const char *string, const float *setColor,
 	const char *s;
 	int xx;
 	int cnt;
+
+	string = Lang_Translate( string );   // codmod: string table (centered callers use CG_DrawStrlen, which translates too)
 
 	if ( maxChars <= 0 ) {
 		maxChars = 32767; // do them all!
@@ -710,8 +717,11 @@ Returns character count, skiping color escape codes
 =================
 */
 int CG_DrawStrlen( const char *str ) {
-	const char *s = str;
+	const char *s;
 	int count = 0;
+
+	str = Lang_Translate( str );    // codmod
+	s = str;
 
 	while ( *s ) {
 		if ( Q_IsColorString( s ) ) {

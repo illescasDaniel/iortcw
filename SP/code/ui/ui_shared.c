@@ -30,6 +30,7 @@ If you have questions concerning this license or the applicable additional terms
 // string allocation/managment
 
 #include "ui_shared.h"
+#include "ui_lang.h"
 
 #define SCROLL_TIME_START                   500
 #define SCROLL_TIME_ADJUST              150
@@ -3703,7 +3704,7 @@ void Item_Text_AutoWrapped_Paint( itemDef_t *item ) {
 			textPtr = text;
 		}
 	} else {
-		textPtr = item->text;
+		textPtr = Lang_Translate( item->text );    // codmod: translate before wrapping
 	}
 	if ( *textPtr == '\0' ) {
 		return;
@@ -3779,7 +3780,7 @@ void Item_Text_Wrapped_Paint( itemDef_t *item ) {
 			textPtr = text;
 		}
 	} else {
-		textPtr = item->text;
+		textPtr = Lang_Translate( item->text );    // codmod: translate before wrapping
 	}
 	if ( *textPtr == '\0' ) {
 		return;
@@ -4694,7 +4695,11 @@ void Item_ListBox_Paint( itemDef_t *item ) {
 					int j;
 					for ( j = 0; j < listPtr->numColumns; j++ ) {
 						text = DC->feederItemText( item->special, i, j, &optionalImage );
-						if ( optionalImage >= 0 ) {
+						if ( optionalImage >= 0 && ( item->special == FEEDER_TEXTLANGS || item->special == FEEDER_AUDIOLANGS ) ) {
+							// codmod: language flags are 8:5, centred in the row (other feeders draw square images)
+							float fw = listPtr->columnInfo[j].width, fh = fw * 5.0f / 8.0f;
+							DC->drawHandlePic( x + 4 + listPtr->columnInfo[j].pos, y + 2 + ( listPtr->elementHeight - fh ) / 2, fw, fh, optionalImage );
+						} else if ( optionalImage >= 0 ) {
 							DC->drawHandlePic( x + 4 + listPtr->columnInfo[j].pos, y - 1 + listPtr->elementHeight / 2, listPtr->columnInfo[j].width, listPtr->columnInfo[j].width, optionalImage );
 						} else if ( text ) {
 							DC->drawText( x + 4 + listPtr->columnInfo[j].pos, y + listPtr->elementHeight, item->font, item->textscale, item->window.foreColor, text, 0, listPtr->columnInfo[j].maxChars, item->textStyle );
@@ -4800,6 +4805,14 @@ void Item_Paint( itemDef_t *item ) {
 	}
 
 	parent = (menuDef_t*)item->parent;
+
+	if ( item->textFile && item->textFileGen != Lang_Generation() && DC->fileText ) {
+		const char *newtext = DC->fileText( (char *)item->textFile );   // codmod: text pack changed, re-read (redirected) file
+		item->textFileGen = Lang_Generation();
+		if ( newtext ) {
+			item->text = String_Alloc( newtext );
+		}
+	}
 
 	if ( item->window.flags & WINDOW_ORBITING ) {
 		if ( DC->realTime > item->window.nextTime ) {
@@ -5377,6 +5390,8 @@ qboolean ItemParse_textfile( itemDef_t *item, int handle ) {
 
 	newtext = DC->fileText( token.string );
 	item->text = String_Alloc( newtext );
+	item->textFile = String_Alloc( token.string );      // codmod: reloaded by Item_Paint on text language change
+	item->textFileGen = Lang_Generation();
 
 	return qtrue;
 }

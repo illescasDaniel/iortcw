@@ -35,6 +35,7 @@ If you have questions concerning this license or the applicable additional terms
 
 
 #include "cg_local.h"
+#include "../ui/ui_lang.h"
 #include "../ui/ui_shared.h"
 
 displayContextDef_t cgDC;
@@ -2167,6 +2168,11 @@ CG_translateString
 */
 const char *CG_translateString( const char *str ) {
 	int i, numStrings;
+	const char *lang = Lang_Translate( str );   // codmod: string table first
+
+	if ( lang != str ) {
+		return lang;
+	}
 
 	numStrings = sizeof( translateStrings ) / sizeof( translateStrings[0] ) - 1;
 
@@ -2323,6 +2329,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence ) {
 	cgs.media.charsetPropB      = trap_R_RegisterShaderNoMip( "menu/art/font2_prop.tga" );
 
 	CG_RegisterCvars();
+	Lang_Init();            // codmod: string table
 	CG_SubtitlesInit();     // codmod
 
 	CG_InitConsoleCommands();

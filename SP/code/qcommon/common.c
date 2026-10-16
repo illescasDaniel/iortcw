@@ -2434,6 +2434,10 @@ void Com_Init( char *commandLine ) {
 	com_introPlayed = Cvar_Get( "com_introplayed", "0", CVAR_ARCHIVE );
 	cod_skipIntro = Cvar_Get( "cod_skipIntro", "0", CVAR_ARCHIVE );
 	Cvar_Get( "cod_subtitles", "1", CVAR_ARCHIVE ); // codmod: Game menu toggle, read by cgame (cg_subtitles.c)
+	// codmod: language packs (docs/languages.md), read by ui, cgame and the sound code; reset values in codmod_binds.cfg
+	Cvar_Get( "cod_textLang", "en", CVAR_ARCHIVE );
+	Cvar_Get( "cod_audioLang", "en", CVAR_ARCHIVE );
+	Cvar_Get( "cod_subtitleScale", "1.0", CVAR_ARCHIVE );
 #endif
 	com_recommendedSet = Cvar_Get( "com_recommendedSet", "0", CVAR_ARCHIVE );
 

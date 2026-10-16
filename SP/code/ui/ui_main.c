@@ -39,6 +39,7 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 #include "ui_local.h"
+#include "ui_lang.h"
 
 uiInfo_t uiInfo;
 
@@ -164,6 +165,8 @@ vmCvar_t ui_initialized;
 vmCvar_t ui_WolfFirstRun;
 
 void _UI_Init( qboolean );
+static void UI_LangRefresh( void );     // codmod: language pack list
+static void UI_DrawLangFlag( rectDef_t *rect, const char *cvarName, qboolean audio, vec4_t color );
 void _UI_Shutdown( void );
 void _UI_KeyEvent( int key, qboolean down );
 void _UI_MouseEvent( int dx, int dy );
@@ -307,6 +310,8 @@ int Text_Width( const char *text, int font, float scale, int limit ) {
 	}
 
 	useScale = scale * fnt->glyphScale;
+	text = Lang_Prepare( fnt, text );     // codmod: string table + glyph fallback
+	s = text;
 	out = 0;
 	if ( text ) {
 		len = strlen( text );
@@ -352,6 +357,8 @@ int Text_Height( const char *text, int font, float scale, int limit ) {
 	}
 
 	useScale = scale * fnt->glyphScale;
+	text = Lang_Prepare( fnt, text );     // codmod: string table + glyph fallback
+	s = text;
 	max = 0;
 	if ( text ) {
 		len = strlen( text );
@@ -406,6 +413,7 @@ void Text_Paint( float x, float y, int font, float scale, vec4_t color, const ch
 	}
 
 	useScale = scale * fnt->glyphScale;
+	text = Lang_Prepare( fnt, text );     // codmod: string table + glyph fallback
 	if ( text ) {
 		const char *s = text;
 		trap_R_SetColor( color );
@@ -677,6 +685,8 @@ void _UI_Refresh( int realtime ) {
 	//if ( !( trap_Key_GetCatcher() & KEYCATCH_UI ) ) {
 	//	return;
 	//}
+
+	Lang_Frame();   // codmod: reload the string table when cod_textLang changed
 
 	uiInfo.uiDC.frameTime = realtime - uiInfo.uiDC.realTime;
 	uiInfo.uiDC.realTime = realtime;
@@ -2663,6 +2673,12 @@ static void UI_OwnerDraw( float x, float y, float w, float h, float text_x, floa
 	case UI_SAVEGAME_SHOT:  // (SA)
 		UI_DrawSaveGameShot( &rect, scale, color );
 		break;
+	case UI_TEXTLANG_FLAG:
+		UI_DrawLangFlag( &rect, "cod_textLang", qfalse, color );
+		break;
+	case UI_AUDIOLANG_FLAG:
+		UI_DrawLangFlag( &rect, "cod_audioLang", qtrue, color );
+		break;
 
 	case UI_CLANLOGO:
 		UI_DrawClanLogo( &rect, scale, color );
@@ -3729,7 +3745,7 @@ void UI_ParseSavegame( int index ) {
 		uiInfo.savegameList[index].time = "(old savegame)";
 
 		memset( &uiInfo.savegameList[index].tm, 0, sizeof( qtime_t ) );
-		uiInfo.savegameList[index].time = String_Alloc( va( "(old savegame ver: %d)", ver ) );
+		uiInfo.savegameList[index].time = String_Alloc( va( (char *)Lang_Translate( "(old savegame ver: %d)" ), ver ) );
 		return;
 	}
 
@@ -3752,7 +3768,7 @@ void UI_ParseSavegame( int index ) {
 		uiInfo.savegameList[index].savegameInfoText = "Gametime: (unknown)\nHealth: (unknown)\n(old savegame)";
 		uiInfo.savegameList[index].date = "temp_date";
 		memset( &uiInfo.savegameList[index].tm, 0, sizeof( qtime_t ) );
-		uiInfo.savegameList[index].time = String_Alloc( va( "(old savegame ver: %d)", ver ) );
+		uiInfo.savegameList[index].time = String_Alloc( va( (char *)Lang_Translate( "(old savegame ver: %d)" ), ver ) );
 		return;
 	}
 
@@ -3776,7 +3792,7 @@ void UI_ParseSavegame( int index ) {
 		trap_FS_Read( &tm->tm_wday, sizeof( tm->tm_wday ), f );
 		trap_FS_Read( &tm->tm_yday, sizeof( tm->tm_yday ), f );        // days since jan1 (0-365)
 		trap_FS_Read( &tm->tm_isdst, sizeof( tm->tm_isdst ), f );
-		uiInfo.savegameList[index].time = String_Alloc( va( "%s %i, %i   %02i:%02i", monthStr[tm->tm_mon], tm->tm_mday, 1900 + tm->tm_year, tm->tm_hour, tm->tm_min ) );
+		uiInfo.savegameList[index].time = String_Alloc( va( "%s %i, %i   %02i:%02i", Lang_Translate( monthStr[tm->tm_mon] ), tm->tm_mday, 1900 + tm->tm_year, tm->tm_hour, tm->tm_min ) );
 	} else {
 		memset( &uiInfo.savegameList[index].tm, 0, sizeof( qtime_t ) );
 		uiInfo.savegameList[index].time = String_Alloc( va( "(old save ver: %d)", ver ) );
@@ -4602,7 +4618,9 @@ static void UI_RunMenuScript( char **args ) {
 
 	if ( String_Parse( args, &name ) ) {
 		//#ifdef MISSIONPACK			// NERVE - SMF - enabled for multiplayer
-		if ( Q_stricmp( name, "StartServer" ) == 0 ) {
+		if ( Q_stricmp( name, "refreshLangPacks" ) == 0 ) {
+			UI_LangRefresh();
+		} else if ( Q_stricmp( name, "StartServer" ) == 0 ) {
 			float skill;
 			int i, clients;
 			trap_Cvar_Set( "cg_thirdPerson", "0" );
@@ -5816,7 +5834,283 @@ static void UI_BuildServerStatus( qboolean force ) {
 UI_FeederCount
 ==================
 */
+
+/*
+==============
+Language packs (codmod, docs/languages.md)
+
+lang/<code>/lang.info in a pk3 or in the mod directory; English is always first.
+==============
+*/
+#define MAX_LANGPACKS   24
+#define LANG_LISTBUF    4096
+
+typedef struct {
+	char code[16];
+	char title[48];
+	char textDesc[128];
+	char audioDesc[128];
+	qboolean text, audio;
+	qhandle_t flag;             // 0: no flag.tga
+} langPack_t;
+
+static langPack_t langPacks[MAX_LANGPACKS];
+static int numLangPacks;
+
+static void UI_LangCopyToken( char *dst, int size, const char *token ) {
+	Q_strncpyz( dst, token, size );
+	Lang_Utf8ToLatin1( dst );
+}
+
+static qboolean UI_LangParseInfo( langPack_t *pack, const char *code ) {
+	char path[MAX_QPATH];
+	char buf[2048];
+	fileHandle_t f;
+	char *p, *key, *val;
+	int len;
+
+	Com_sprintf( path, sizeof( path ), "lang/%s/lang.info", code );
+	len = trap_FS_FOpenFile( path, &f, FS_READ );
+	if ( len <= 0 ) {
+		if ( f ) {
+			trap_FS_FCloseFile( f );
+		}
+		return qfalse;
+	}
+	if ( len >= (int)sizeof( buf ) ) {
+		len = sizeof( buf ) - 1;
+	}
+	trap_FS_Read( buf, len, f );
+	trap_FS_FCloseFile( f );
+	buf[len] = 0;
+
+	p = buf;
+	if ( (unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF ) {
+		p += 3;
+	}
+	while ( 1 ) {
+		char keybuf[64];
+
+		key = COM_ParseExt( &p, qtrue );
+		if ( !key[0] ) {
+			break;
+		}
+		Q_strncpyz( keybuf, key, sizeof( keybuf ) );
+		val = COM_ParseExt( &p, qfalse );
+		if ( !Q_stricmp( keybuf, "title" ) ) {
+			UI_LangCopyToken( pack->title, sizeof( pack->title ), val );
+		} else if ( !Q_stricmp( keybuf, "text" ) ) {
+			pack->text = atoi( val ) != 0;
+		} else if ( !Q_stricmp( keybuf, "textDescription" ) ) {
+			UI_LangCopyToken( pack->textDesc, sizeof( pack->textDesc ), val );
+		} else if ( !Q_stricmp( keybuf, "audio" ) ) {
+			pack->audio = atoi( val ) != 0;
+		} else if ( !Q_stricmp( keybuf, "audioDescription" ) ) {
+			UI_LangCopyToken( pack->audioDesc, sizeof( pack->audioDesc ), val );
+		}
+	}
+	return qtrue;
+}
+
+static void UI_LangAddCode( const char *name ) {
+	char code[16];
+	int i, n = 0;
+	langPack_t *pack;
+
+	while ( name[n] && name[n] != '/' && name[n] != '\\' && n < (int)sizeof( code ) - 1 ) {
+		code[n] = tolower( (unsigned char)name[n] );
+		n++;
+	}
+	code[n] = 0;
+	if ( !n || code[0] == '.' ) {
+		return;
+	}
+	for ( i = 0; i < numLangPacks; i++ ) {
+		if ( !strcmp( langPacks[i].code, code ) ) {
+			return;
+		}
+	}
+	if ( numLangPacks >= MAX_LANGPACKS ) {
+		return;
+	}
+	pack = &langPacks[numLangPacks];
+	memset( pack, 0, sizeof( *pack ) );
+	Q_strncpyz( pack->code, code, sizeof( pack->code ) );
+	if ( !UI_LangParseInfo( pack, code ) ) {
+		return;
+	}
+	if ( !pack->title[0] ) {
+		Q_strncpyz( pack->title, code, sizeof( pack->title ) );
+	}
+	numLangPacks++;
+}
+
+static void UI_LangScanList( const char *ext ) {
+	char list[LANG_LISTBUF];
+	int count = trap_FS_GetFileList( "lang", ext, list, sizeof( list ) );
+	const char *s = list;
+	int i;
+
+	for ( i = 0; i < count; i++ ) {
+		UI_LangAddCode( s );
+		s += strlen( s ) + 1;
+	}
+}
+
+static int UI_LangFindCode( const char *code ) {
+	int i;
+
+	for ( i = 0; i < numLangPacks; i++ ) {
+		if ( !Q_stricmp( langPacks[i].code, code ) ) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+// index into langPacks of the nth pack listed in the text (audio = qfalse) or audio selector
+static int UI_LangListPack( qboolean audio, int n ) {
+	int i;
+
+	for ( i = 0; i < numLangPacks; i++ ) {
+		if ( audio ? langPacks[i].audio : langPacks[i].text ) {
+			if ( n-- == 0 ) {
+				return i;
+			}
+		}
+	}
+	return -1;
+}
+
+static int UI_LangListCount( qboolean audio ) {
+	int i, n = 0;
+
+	for ( i = 0; i < numLangPacks; i++ ) {
+		if ( audio ? langPacks[i].audio : langPacks[i].text ) {
+			n++;
+		}
+	}
+	return n;
+}
+
+static void UI_LangRefresh( void ) {
+	int i, j;
+	char cur[16];
+
+	numLangPacks = 0;
+	// English first, always listed even when the pack has no lang.info
+	Q_strncpyz( langPacks[0].code, "en", sizeof( langPacks[0].code ) );
+	Q_strncpyz( langPacks[0].title, "English", sizeof( langPacks[0].title ) );
+	Q_strncpyz( langPacks[0].textDesc, "Transcribed with AI from audio files", sizeof( langPacks[0].textDesc ) );
+	Q_strncpyz( langPacks[0].audioDesc, "Original game voice recordings", sizeof( langPacks[0].audioDesc ) );
+	langPacks[0].text = langPacks[0].audio = qtrue;
+	numLangPacks = 1;
+	UI_LangParseInfo( &langPacks[0], "en" );
+	langPacks[0].text = langPacks[0].audio = qtrue;     // English is always selectable
+
+	// directories (loose files) and lang.info files inside pk3s (pk3 directory entries may be missing)
+	UI_LangScanList( "/" );
+	UI_LangScanList( "info" );
+
+	// sort by code, English stays first
+	for ( i = 2; i < numLangPacks; i++ ) {
+		langPack_t t = langPacks[i];
+		for ( j = i - 1; j >= 1 && strcmp( langPacks[j].code, t.code ) > 0; j-- ) {
+			langPacks[j + 1] = langPacks[j];
+		}
+		langPacks[j + 1] = t;
+	}
+
+	for ( i = 0; i < numLangPacks; i++ ) {
+		fileHandle_t f;
+		char path[MAX_QPATH];
+
+		Com_sprintf( path, sizeof( path ), "lang/%s/flag.tga", langPacks[i].code );
+		trap_FS_FOpenFile( path, &f, FS_READ );
+		if ( f ) {
+			trap_FS_FCloseFile( f );
+			langPacks[i].flag = trap_R_RegisterShaderNoMip( path );
+		} else {
+			langPacks[i].flag = 0;
+		}
+	}
+
+	// highlight the current packs (the selection callback sets the cvar to the same value)
+	for ( i = 0; i < 2; i++ ) {
+		int sel = 0, n, pack;
+
+		trap_Cvar_VariableStringBuffer( i ? "cod_audioLang" : "cod_textLang", cur, sizeof( cur ) );
+		pack = UI_LangFindCode( cur );
+		for ( n = 0; n < UI_LangListCount( i ); n++ ) {
+			if ( UI_LangListPack( i, n ) == pack ) {
+				sel = n;
+				break;
+			}
+		}
+		Menu_SetFeederSelection( NULL, i ? FEEDER_AUDIOLANGS : FEEDER_TEXTLANGS, sel, i ? "lang_audio_popmenu" : "lang_text_popmenu" );
+	}
+}
+
+static const char *UI_LangFeederText( qboolean audio, int index, int column, qhandle_t *handle ) {
+	int p = UI_LangListPack( audio, index );
+
+	if ( p < 0 ) {
+		return "";
+	}
+	switch ( column ) {
+	case 0:
+		if ( langPacks[p].flag ) {
+			*handle = langPacks[p].flag;
+		}
+		return "";
+	case 1:
+		return langPacks[p].title;
+	case 2:
+		return audio ? langPacks[p].audioDesc : langPacks[p].textDesc;
+	}
+	return "";
+}
+
+static void UI_LangFeederSelect( qboolean audio, int index ) {
+	int p = UI_LangListPack( audio, index );
+	char cur[16];
+	const char *cvar = audio ? "cod_audioLang" : "cod_textLang";
+
+	if ( p < 0 ) {
+		return;
+	}
+	trap_Cvar_VariableStringBuffer( cvar, cur, sizeof( cur ) );
+	if ( Q_stricmp( cur, langPacks[p].code ) ) {        // only on a real change (the cvar's modification count drives reloads)
+		trap_Cvar_Set( cvar, langPacks[p].code );
+	}
+}
+
+static void UI_DrawLangFlag( rectDef_t *rect, const char *cvarName, qboolean audio, vec4_t color ) {
+	char cur[16];
+	int p;
+	qhandle_t flag = 0;
+
+	trap_Cvar_VariableStringBuffer( cvarName, cur, sizeof( cur ) );
+	p = UI_LangFindCode( cur );
+	if ( p >= 0 ) {
+		flag = langPacks[p].flag;
+	}
+	if ( !flag ) {
+		flag = langPacks[0].flag;       // fall back to the English flag
+	}
+	if ( flag ) {
+		trap_R_SetColor( color );
+		UI_DrawHandlePic( rect->x, rect->y, rect->w, rect->h, flag );
+		trap_R_SetColor( NULL );
+	}
+}
+
 static int UI_FeederCount( float feederID ) {
+	if ( feederID == FEEDER_TEXTLANGS ) {
+		return UI_LangListCount( qfalse );
+	} else if ( feederID == FEEDER_AUDIOLANGS ) {
+		return UI_LangListCount( qtrue );
+	}
 	if ( feederID == FEEDER_HEADS ) {
 		return uiInfo.characterCount;
 	} else if ( feederID == FEEDER_Q3HEADS ) {
@@ -5911,16 +6205,24 @@ UI_FileText
 static const char *UI_FileText( char *fileName ) {
 	int len;
 	fileHandle_t f;
-	static char buf[MAX_MENUDEFFILE];
+	static char buf[16384];  // codmod: translations are longer than the 4096 original
+	char langPath[MAX_QPATH];
+	const char *path = Lang_TextPath( fileName, langPath, sizeof( langPath ) );  // codmod: lang/<code>/text/ redirect
 
-	len = trap_FS_FOpenFile( fileName, &f, FS_READ );
+	len = trap_FS_FOpenFile( path, &f, FS_READ );
 	if ( !f ) {
 		return NULL;
+	}
+	if ( len >= (int)sizeof( buf ) ) {
+		len = sizeof( buf ) - 1;
 	}
 
 	trap_FS_Read( buf, len, f );
 	buf[len] = 0;
 	trap_FS_FCloseFile( f );
+	if ( path != fileName ) {
+		Lang_Utf8ToLatin1( buf );
+	}
 	return &buf[0];
 }
 
@@ -5965,6 +6267,9 @@ static const char *UI_FeederItemText( float feederID, int index, int column, qha
 	static int lastServerColumn = -1, lastSaveColumn = -1;
 	static int lastServerTime = 0;
 	*handle = -1;
+	if ( feederID == FEEDER_TEXTLANGS || feederID == FEEDER_AUDIOLANGS ) {
+		return UI_LangFeederText( feederID == FEEDER_AUDIOLANGS, index, column, handle );
+	}
 	if ( feederID == FEEDER_HEADS ) {
 		if ( index >= 0 && index < uiInfo.characterCount ) {
 			return uiInfo.characterList[index].name;
@@ -6126,6 +6431,10 @@ static qhandle_t UI_FeederItemImage( float feederID, int index ) {
 
 static void UI_FeederSelection( float feederID, int index ) {
 	static char info[MAX_STRING_CHARS];
+	if ( feederID == FEEDER_TEXTLANGS || feederID == FEEDER_AUDIOLANGS ) {
+		UI_LangFeederSelect( feederID == FEEDER_AUDIOLANGS, index );
+		return;
+	}
 	if ( feederID == FEEDER_HEADS ) {
 		if ( index >= 0 && index < uiInfo.characterCount ) {
 			trap_Cvar_Set( "team_model", uiInfo.characterList[index].female ? "janet" : "james" );
@@ -6775,6 +7084,7 @@ void _UI_Init( qboolean inGameLoad ) {
 
 	UI_RegisterCvars();
 	UI_InitMemory();
+	Lang_Init();    // codmod: string table + text pack redirect, before the menus are parsed
 
 	// cache redundant calulations
 	trap_GetGlconfig( &uiInfo.uiDC.glconfig );
@@ -6881,6 +7191,7 @@ void _UI_Init( qboolean inGameLoad ) {
 	uiInfo.uiDC.whiteShader = trap_R_RegisterShaderNoMip( "white" );
 
 	AssetCache();
+	UI_LangRefresh();
 
 	uiInfo.teamCount = 0;
 	uiInfo.characterCount = 0;

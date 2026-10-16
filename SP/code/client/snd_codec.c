@@ -34,6 +34,37 @@ Opens/loads a sound, tries codec based on the sound's file extension
 then tries all supported codecs.
 =================
 */
+static void *S_CodecGetSound(const char *filename, snd_info_t *info);
+
+/*
+codmod: with cod_audioLang != en, sound/<rest> is first looked up as
+lang/<code>/sound/<rest>; if the pack lacks the file the original is used.
+Checked once per sound load / stream open.
+*/
+static void *S_CodecGetLangSound(const char *filename, snd_info_t *info)
+{
+	static cvar_t *audioLang;
+	char langName[ MAX_QPATH ];
+	const char *code, *c;
+	void *rtn;
+
+	if( !audioLang )
+		audioLang = Cvar_Get("cod_audioLang", "en", CVAR_ARCHIVE);
+	code = audioLang->string;
+	if( !code[0] || !strcmp(code, "en") || strlen(code) > 15 )
+		return NULL;
+	if( Q_stricmpn(filename, "sound/", 6) )
+		return NULL;
+	for( c = code; *c; c++ )
+	{
+		if( !( ( *c >= 'a' && *c <= 'z' ) || ( *c >= 'A' && *c <= 'Z' ) || ( *c >= '0' && *c <= '9' ) || *c == '_' || *c == '-' ) )
+			return NULL;
+	}
+	Com_sprintf(langName, sizeof (langName), "lang/%s/%s", code, filename);
+	rtn = S_CodecGetSound(langName, info);
+	return rtn;
+}
+
 static void *S_CodecGetSound(const char *filename, snd_info_t *info)
 {
 	snd_codec_t *codec;
@@ -164,7 +195,8 @@ S_CodecLoad
 */
 void *S_CodecLoad(const char *filename, snd_info_t *info)
 {
-	return S_CodecGetSound(filename, info);
+	void *rtn = S_CodecGetLangSound(filename, info);
+	return rtn ? rtn : S_CodecGetSound(filename, info);
 }
 
 /*
@@ -174,7 +206,8 @@ S_CodecOpenStream
 */
 snd_stream_t *S_CodecOpenStream(const char *filename)
 {
-	return S_CodecGetSound(filename, NULL);
+	void *rtn = S_CodecGetLangSound(filename, NULL);
+	return rtn ? rtn : S_CodecGetSound(filename, NULL);
 }
 
 void S_CodecCloseStream(snd_stream_t *stream)

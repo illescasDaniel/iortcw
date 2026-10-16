@@ -31,6 +31,7 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "cg_local.h"
 #include "../ui/ui_shared.h"
+#include "../ui/ui_lang.h"
 
 //----(SA) added to make it easier to raise/lower our statsubar by only changing one thing
 #define STATUSBARHEIGHT 452
@@ -75,6 +76,8 @@ int CG_Text_Width( const char *text, int font, float scale, int limit ) {
 	}
 
 	useScale = scale * fnt->glyphScale;
+	text = Lang_Prepare( fnt, text );     // codmod: string table + glyph fallback
+	s = text;
 	out = 0;
 	if ( text ) {
 		len = strlen( text );
@@ -120,6 +123,8 @@ int CG_Text_Height( const char *text, int font, float scale, int limit ) {
 	}
 
 	useScale = scale * fnt->glyphScale;
+	text = Lang_Prepare( fnt, text );     // codmod: string table + glyph fallback
+	s = text;
 	max = 0;
 	if ( text ) {
 		len = strlen( text );
@@ -175,6 +180,7 @@ void CG_Text_Paint( float x, float y, int font, float scale, vec4_t color, const
 
 	useScale = scale * fnt->glyphScale;
 
+	text = Lang_Prepare( fnt, text );     // codmod: string table + glyph fallback
 	color[3] *= cg_hudAlpha.value;  // (SA) adjust for cg_hudalpha
 
 	if ( text ) {
@@ -1584,16 +1590,16 @@ static void CG_DrawPickupItem( void ) {
 			if ( bg_itemlist[ value ].giType == IT_AMMO || bg_itemlist[ value ].giType == IT_HEALTH || bg_itemlist[value].giType == IT_POWERUP ) {
 				if ( bg_itemlist[ value ].world_model[2] ) {   // this is a multi-stage item
 					// FIXME: print the correct amount for multi-stage
-					Com_sprintf( pickupText, sizeof( pickupText ), "%s", cgs.itemPrintNames[ value ] );
+					Com_sprintf( pickupText, sizeof( pickupText ), "%s", Lang_Translate( cgs.itemPrintNames[ value ] ) );
 				} else {
 					if ( bg_itemlist[ value ].gameskillnumber[cg_gameSkill.integer] > 1 ) {
-						Com_sprintf( pickupText, sizeof( pickupText ), "%i  %s", bg_itemlist[ value ].gameskillnumber[cg_gameSkill.integer], cgs.itemPrintNames[ value ] );
+						Com_sprintf( pickupText, sizeof( pickupText ), "%i  %s", bg_itemlist[ value ].gameskillnumber[cg_gameSkill.integer], Lang_Translate( cgs.itemPrintNames[ value ] ) );
 					} else {
-						Com_sprintf( pickupText, sizeof( pickupText ), "%s", cgs.itemPrintNames[value] );
+						Com_sprintf( pickupText, sizeof( pickupText ), "%s", Lang_Translate( cgs.itemPrintNames[ value ] ) );
 					}
 				}
 			} else {
-				Com_sprintf( pickupText, sizeof( pickupText ), "%s", cgs.itemPrintNames[value] );
+				Com_sprintf( pickupText, sizeof( pickupText ), "%s", Lang_Translate( cgs.itemPrintNames[ value ] ) );
 			}
 
 			color[0] = color[1] = color[2] = 1.0;

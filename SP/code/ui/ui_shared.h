@@ -257,6 +257,8 @@ typedef struct itemDef_s {
 	int textStyle;                  // ( optional ) style, normal and shadowed are it for now
 	const char *text;               // display text
 	qboolean textSavegameInfo;      //----(SA)	added
+	const char *textFile;           // codmod: textfile source path, re-read when the text language changes
+	int textFileGen;                // codmod: Lang_Generation() the text was loaded for
 	void *parent;                   // menu owner
 	qhandle_t asset;                // handle to asset
 	const char *mouseEnterText;     // mouse enter script

@@ -101,6 +101,8 @@ If you have questions concerning this license or the applicable additional terms
 #define FEEDER_CINEMATICS           0x0f    // cinematics
 #define FEEDER_SAVEGAMES            0x10    // savegames
 #define FEEDER_PICKSPAWN            0x11    // NERVE - SMF - wolf mp pick spawn point
+#define FEEDER_TEXTLANGS            0x12    // codmod: installed text language packs (flag, title, description)
+#define FEEDER_AUDIOLANGS           0x13    // codmod: installed audio language packs
 
 // display flags
 #define CG_SHOW_BLUE_TEAM_HAS_REDFLAG       0x00000001
@@ -323,6 +325,10 @@ If you have questions concerning this license or the applicable additional terms
 #define UI_LOADSTATUSBAR            261
 #define UI_SAVEGAMENAME             262
 #define UI_SAVEGAMEINFO             263
+
+// codmod: language pack flag of the current text / audio pack
+#define UI_TEXTLANG_FLAG            264
+#define UI_AUDIOLANG_FLAG           265
 
 #define VOICECHAT_GETFLAG           "getflag"                // command someone to get the flag
 #define VOICECHAT_OFFENSE           "offense"                // command someone to go on offense

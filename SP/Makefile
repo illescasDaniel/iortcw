@@ -2548,6 +2548,7 @@ Q3CGOBJ_ = \
   $(B)/$(BASEGAME)/cgame/cg_view.o \
   $(B)/$(BASEGAME)/cgame/cg_weapons.o \
   $(B)/$(BASEGAME)/ui/ui_shared.o \
+  $(B)/$(BASEGAME)/ui/ui_lang.o \
   \
   $(B)/$(BASEGAME)/qcommon/q_math.o \
   $(B)/$(BASEGAME)/qcommon/q_shared.o
@@ -2655,6 +2656,7 @@ Q3UIOBJ_ = \
   $(B)/$(BASEGAME)/ui/ui_gameinfo.o \
   $(B)/$(BASEGAME)/ui/ui_players.o \
   $(B)/$(BASEGAME)/ui/ui_shared.o \
+  $(B)/$(BASEGAME)/ui/ui_lang.o \
   \
   $(B)/$(BASEGAME)/ui/bg_misc.o \
   $(B)/$(BASEGAME)/ui/bg_cod.o \
