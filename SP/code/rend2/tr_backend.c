@@ -1461,6 +1461,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 	backEnd.aoReady = qfalse;
 	backEnd.flashShadowReady = qfalse;
+	backEnd.ssaoApplied = qfalse;
 
 	RB_GpuMark( "pre-view" );
 
@@ -1845,10 +1846,64 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 	if (!isShadowView)
 	{
+		int firstSoft, i;
+
 		if (!(backEnd.refdef.rdflags & RDF_NOWORLDMODEL))
 			RB_GpuMark3D();
 
-		RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
+		// Apply multiply-AO after opaques and before translucents so curtains/glass
+		// are not darkened by the AO of walls behind them (post-process overlay look).
+		firstSoft = cmd->numDrawSurfs;
+		for ( i = 0; i < cmd->numDrawSurfs; i++ )
+		{
+			shader_t *sh;
+			int entityNum, fogNum, dlighted, pshadowed, atiTess;
+
+			R_DecomposeSort( cmd->drawSurfs[i].sort, &entityNum, &sh, &fogNum, &dlighted, &pshadowed, &atiTess );
+			if ( sh && sh->sort > SS_OPAQUE )
+			{
+				firstSoft = i;
+				break;
+			}
+		}
+
+		if ( firstSoft > 0 )
+			RB_RenderDrawSurfList( cmd->drawSurfs, firstSoft );
+
+		if ( r_ssao->integer && !r_ssaoAmbient->integer
+			&& !R_CutsceneOff( backEnd.refdef.rdflags, CUTSCENE_FX_AO )
+			&& tr.screenSsaoFbo && tr.hdrDepthImage && firstSoft > 0 )
+		{
+			FBO_t *dstFbo = glState.currentFBO;
+			ivec4_t srcBox, dstBox;
+			vec4_t viewInfo;
+
+			dstBox[0] = backEnd.viewParms.viewportX;
+			dstBox[1] = backEnd.viewParms.viewportY;
+			dstBox[2] = backEnd.viewParms.viewportWidth;
+			dstBox[3] = backEnd.viewParms.viewportHeight;
+
+			srcBox[0] = backEnd.viewParms.viewportX      * tr.screenSsaoImage->width  / (float)glConfig.vidWidth;
+			srcBox[1] = backEnd.viewParms.viewportY      * tr.screenSsaoImage->height / (float)glConfig.vidHeight;
+			srcBox[2] = backEnd.viewParms.viewportWidth  * tr.screenSsaoImage->width  / (float)glConfig.vidWidth;
+			srcBox[3] = backEnd.viewParms.viewportHeight * tr.screenSsaoImage->height / (float)glConfig.vidHeight;
+
+			VectorSet4( viewInfo, backEnd.viewParms.zFar / r_znear->value, backEnd.viewParms.zFar, 0.0f, 0.0f );
+
+			GLSL_BindProgram( &tr.ssaoUpShader );
+			GLSL_SetUniformVec4( &tr.ssaoUpShader, UNIFORM_VIEWINFO, viewInfo );
+			GL_BindToTMU( tr.hdrDepthImage, TB_LIGHTMAP );
+			GL_BindToTMU( tr.ssaoDepthImage, TB_NORMALMAP );
+
+			FBO_Blit( tr.screenSsaoFbo, srcBox, NULL, dstFbo, dstBox, &tr.ssaoUpShader, NULL,
+				GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO );
+			backEnd.ssaoApplied = qtrue;
+			RB_GpuMark( "ssao_apply" );
+		}
+
+		if ( firstSoft < cmd->numDrawSurfs )
+			RB_RenderDrawSurfList( cmd->drawSurfs + firstSoft, cmd->numDrawSurfs - firstSoft );
+
 		RB_GpuMark( (backEnd.refdef.rdflags & RDF_NOWORLDMODEL) ? "scene_noworld" : "scene" );
 
 		if (r_drawSun->integer)
@@ -2226,7 +2281,9 @@ const void *RB_PostProcess(const void *data)
 	dstBox[2] = backEnd.viewParms.viewportWidth;
 	dstBox[3] = backEnd.viewParms.viewportHeight;
 
-	if (r_ssao->integer && !r_ssaoAmbient->integer
+	// Multiply AO is applied after opaques in RB_DrawSurfs (backEnd.ssaoApplied).
+	// Fallback here only if that path did not run (e.g. no opaque surfs).
+	if (r_ssao->integer && !r_ssaoAmbient->integer && !backEnd.ssaoApplied
 		&& !R_CutsceneOff( backEnd.refdef.rdflags, CUTSCENE_FX_AO ))
 	{
 		vec4_t viewInfo;
@@ -2236,7 +2293,6 @@ const void *RB_PostProcess(const void *data)
 		srcBox[2] = backEnd.viewParms.viewportWidth  * tr.screenSsaoImage->width  / (float)glConfig.vidWidth;
 		srcBox[3] = backEnd.viewParms.viewportHeight * tr.screenSsaoImage->height / (float)glConfig.vidHeight;
 
-		// depth aware upsample of the half resolution AO, multiplied onto the scene
 		VectorSet4(viewInfo, backEnd.viewParms.zFar / r_znear->value, backEnd.viewParms.zFar, 0.0f, 0.0f);
 
 		GLSL_BindProgram(&tr.ssaoUpShader);

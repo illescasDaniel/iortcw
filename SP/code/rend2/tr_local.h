@@ -1649,6 +1649,7 @@ typedef struct {
 	qboolean    depthFill;
 	qboolean    flashShadowReady;	// tr.flashShadowMaskImage holds this view's flashlight shadow mask
 	qboolean    aoReady;	// tr.aoImage holds the AO of this view (ambient only AO)
+	qboolean    ssaoApplied;	// multiply AO already applied after opaques (skip in post)
 } backEndState_t;
 
 /*
