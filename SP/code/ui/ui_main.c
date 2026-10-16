@@ -727,7 +727,14 @@ void _UI_Refresh( int realtime ) {
 	if (Menu_Count() > 0 && (trap_Key_GetCatcher() & KEYCATCH_UI)) {
 		uiMenuCommand_t mymenu = _UI_GetActiveMenu();
 		if ( mymenu != UIMENU_BRIEFING ) {
-			UI_DrawHandlePic( uiInfo.uiDC.cursorx - 16, uiInfo.uiDC.cursory - 16, 32, 32, uiInfo.uiDC.Assets.cursor );
+			// codmod: the cursor art's tip is its top-left corner, so the hotspot is (0,0)
+			// (was centred). Size it in pixels from the vertical scale so it stays square
+			// on widescreen instead of stretching with the 640-wide virtual screen.
+			float cx = uiInfo.uiDC.cursorx, cy = uiInfo.uiDC.cursory, cw = 0, ch = 0;
+			float size = 24 * uiInfo.uiDC.yscale;
+
+			UI_AdjustFrom640( &cx, &cy, &cw, &ch );
+			trap_R_DrawStretchPic( cx, cy, size, size, 0, 0, 1, 1, uiInfo.uiDC.Assets.cursor );
 		}
 	}
 
