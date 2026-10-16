@@ -171,6 +171,7 @@ static void UI_DrawLangFlag( rectDef_t *rect, const char *cvarName, qboolean aud
 void _UI_Shutdown( void );
 void _UI_KeyEvent( int key, qboolean down );
 void _UI_MouseEvent( int dx, int dy );
+static void UI_DrawBriefingBackdrop( void );
 void _UI_Refresh( int realtime );
 qboolean _UI_IsFullscreen( void );
 
@@ -711,6 +712,18 @@ void _UI_Refresh( int realtime ) {
 
 	UI_UpdateCvars();
 
+	// codmod: briefing/pregame keep their 4:3 layout on widescreen, with a blurred levelshot behind
+	ui_force43 = qfalse;
+	if ( Menu_Count() > 0 && !ui_fixedAspect.integer && uiInfo.uiDC.bias > 0 ) {
+		menuDef_t *bm = Menus_FindByName( "briefing" );
+		menuDef_t *pm = Menus_FindByName( "pregame" );
+
+		if ( ( bm && ( bm->window.flags & WINDOW_VISIBLE ) ) || ( pm && ( pm->window.flags & WINDOW_VISIBLE ) ) ) {
+			UI_DrawBriefingBackdrop();
+			ui_force43 = qtrue;
+		}
+	}
+
 	if ( Menu_Count() > 0 ) {
 		// paint all the menus
 		Menu_PaintAll();
@@ -737,6 +750,8 @@ void _UI_Refresh( int realtime ) {
 			trap_R_DrawStretchPic( cx, cy, size, size, 0, 0, 1, 1, uiInfo.uiDC.Assets.cursor );
 		}
 	}
+
+	ui_force43 = qfalse;
 
 #ifndef NDEBUG
 	if ( uiInfo.uiDC.debug ) {
@@ -1549,7 +1564,7 @@ UI_DrawMapLevelshot
 	Draws the levelshot for the current map.
 ==============
 */
-static void UI_DrawMapLevelshot( rectDef_t *rect ) {
+static qhandle_t UI_MapLevelshot( void ) {
 	char levelname[64];
 	qhandle_t levelshot = 0;
 
@@ -1562,6 +1577,44 @@ static void UI_DrawMapLevelshot( rectDef_t *rect ) {
 	if ( !levelshot ) {
 		levelshot = trap_R_RegisterShaderNoMip( "levelshots/unknownmap.jpg" );
 	}
+	return levelshot;
+}
+
+/*
+==============
+UI_DrawBriefingBackdrop
+
+codmod: on widescreen the briefing/pregame screens stay 4:3; the side areas get the levelshot
+stretched over the whole screen, blurred (jittered taps averaged with alpha 1/(k+1)) and dimmed.
+==============
+*/
+static void UI_DrawBriefingBackdrop( void ) {
+	static const float taps[][2] = {
+		{ 0, 0 }, { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 0.7f, 0.7f },
+		{ -0.7f, 0.7f }, { 0.7f, -0.7f }, { -0.7f, -0.7f }, { 2, 0 }, { -2, 0 }, { 0, 2 }, { 0, -2 }
+	};
+	const int n = sizeof( taps ) / sizeof( taps[0] );
+	float w = uiInfo.uiDC.glconfig.vidWidth, h = uiInfo.uiDC.glconfig.vidHeight;
+	float r = w * 0.006f;
+	qhandle_t shot = UI_MapLevelshot();
+	vec4_t black = { 0, 0, 0, 0.55f };
+	vec4_t c = { 1, 1, 1, 1 };
+	int k;
+
+	trap_R_SetColor( black );
+	trap_R_DrawStretchPic( 0, 0, w, h, 0, 0, 0, 0, uiInfo.uiDC.whiteShader );
+	for ( k = 0; k < n; k++ ) {
+		c[3] = 1.0f / ( k + 1 );
+		trap_R_SetColor( c );
+		trap_R_DrawStretchPic( taps[k][0] * r - r * 2, taps[k][1] * r - r * 2, w + r * 4, h + r * 4, 0, 0, 1, 1, shot );
+	}
+	trap_R_SetColor( black );
+	trap_R_DrawStretchPic( 0, 0, w, h, 0, 0, 0, 0, uiInfo.uiDC.whiteShader );
+	trap_R_SetColor( NULL );
+}
+
+static void UI_DrawMapLevelshot( rectDef_t *rect ) {
+	qhandle_t levelshot = UI_MapLevelshot();
 
 	// HACK Pillarboxing...Copied from ui_shared.c 
 	if ( ui_fixedAspect.integer ) {

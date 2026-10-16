@@ -243,9 +243,8 @@ static void CG_CalcVrect( void ) {
 
 	lbheight = ysize * 0.85;
 
-	if ( cg_letterbox.integer ) {
-		ysize = lbheight;
-	}
+	// codmod: no cutscene letterbox bars; the view keeps the full height
+	( void )lbheight;
 //----(SA)	end
 
 

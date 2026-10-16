@@ -470,6 +470,11 @@ void AICast_CodApplySpeedMode( cast_state_t *cs, int aiCharacter ) {
 	if ( !AICast_CodIsHumanType( aiCharacter ) ) {
 		return;     // never touch zombies, lopers, bosses, etc.
 	}
+	// scripted events (cutscenes, scripted walks) keep the speeds their animations were authored for,
+	// otherwise actors slide and look sped up
+	if ( cs->castScriptStatus.castScriptEventIndex >= 0 ) {
+		return;
+	}
 
 	if ( bg_cod.aiSpeedMode == 1 ) {
 		// match the player's CoD4 speeds

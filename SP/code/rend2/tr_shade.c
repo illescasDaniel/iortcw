@@ -1996,6 +1996,19 @@ void RB_StageIteratorGeneric( void )
 		return;
 	}
 
+	// codmod: second pass over fogged opaque surfaces, after the AO was multiplied in
+	if ( backEnd.fogOnly )
+	{
+		if ( tess.fogNum && tess.shader->fogPass ) {
+			RB_FogPass(0);
+		}
+		if ( input->shader->polygonOffset )
+		{
+			qglDisable( GL_POLYGON_OFFSET_FILL );
+		}
+		return;
+	}
+
 	//
 	//
 	// call shader function
@@ -2030,7 +2043,7 @@ void RB_StageIteratorGeneric( void )
 	//
 	// now do fog
 	//
-	if ( tess.fogNum && tess.shader->fogPass ) {
+	if ( tess.fogNum && tess.shader->fogPass && !backEnd.fogDefer ) {
 		RB_FogPass(0);
 	}
 

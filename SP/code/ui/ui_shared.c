@@ -151,6 +151,7 @@ translateString_t translateStrings[] = {
 
 vmCvar_t ui_fixedAspect;
 vmCvar_t ui_fixedAspectFOV;
+qboolean ui_force43;    // codmod: map the 640x480 space onto a centred 4:3 area (briefing/pregame screens)
 
 static screenPlacement_e ui_horizontalPlacement = PLACE_CENTER;
 static screenPlacement_e ui_verticalPlacement = PLACE_CENTER;
@@ -216,6 +217,12 @@ void UI_AdjustFrom640( float *x, float *y, float *w, float *h ) {
 				*y += DC->yBias*2;
 			}
 		}
+	} else if ( ui_force43 && DC->bias > 0 ) {
+		// codmod: widescreen, keep the original 4:3 proportions and centre them
+		*x = *x * DC->yscale + DC->bias;
+		*y *= DC->yscale;
+		*w *= DC->yscale;
+		*h *= DC->yscale;
 	} else {
 		*x *= DC->xscale;
 		*y *= DC->yscale;

@@ -1650,6 +1650,8 @@ typedef struct {
 	qboolean    flashShadowReady;	// tr.flashShadowMaskImage holds this view's flashlight shadow mask
 	qboolean    aoReady;	// tr.aoImage holds the AO of this view (ambient only AO)
 	qboolean    ssaoApplied;	// multiply AO already applied after opaques (skip in post)
+	qboolean    fogDefer;		// codmod: skip the volume fog pass in the opaque list (drawn after the AO instead)
+	qboolean    fogOnly;		// codmod: drawing only the volume fog pass of already-drawn opaque surfaces
 } backEndState_t;
 
 /*

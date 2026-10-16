@@ -9,6 +9,7 @@ uniform sampler2D u_HalfDepthMap;   // half resolution depth, the one the AO was
 
 uniform vec4   u_ViewInfo;  // zfar / znear, zfar
 uniform vec2   u_InvTexRes; // 1 / size of the AO image
+uniform vec4   u_FogDepth;  // global fog: start, end, density, mode (0 none, 1 linear, 2 exp)
 
 varying vec2   var_Tex1;
 
@@ -93,6 +94,13 @@ void main()
 
 	float ao = total > 0.0 ? sum / total : plain;
 	float fade = 1.0 - smoothstep(FADE_START, FADE_END, z);
+
+	// the fog was already blended into the lit color: AO multiplied over it would darken the fog itself,
+	// so AO is scaled by how much of the surface is still visible through the fog
+	if (u_FogDepth.w > 1.5)
+		fade *= exp(-u_FogDepth.z * z);
+	else if (u_FogDepth.w > 0.5)
+		fade *= clamp((u_FogDepth.y - z) / (u_FogDepth.y - u_FogDepth.x), 0.0, 1.0);
 
 	gl_FragColor = vec4(vec3(mix(1.0, ao, fade)), 1.0);
 }

@@ -77,6 +77,7 @@ extern vmCvar_t ui_emptyswitch;
 
 extern vmCvar_t ui_fixedAspect;
 extern vmCvar_t ui_fixedAspectFOV;
+extern qboolean ui_force43;
 
 extern vmCvar_t ui_server1;
 extern vmCvar_t ui_server2;

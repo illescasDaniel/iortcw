@@ -1847,6 +1847,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 	if (!isShadowView)
 	{
 		int firstSoft, i;
+		qboolean aoApply;
 
 		if (!(backEnd.refdef.rdflags & RDF_NOWORLDMODEL))
 			RB_GpuMark3D();
@@ -1867,12 +1868,18 @@ const void	*RB_DrawSurfs( const void *data ) {
 			}
 		}
 
+		aoApply = ( r_ssao->integer && !r_ssaoAmbient->integer
+			&& !R_CutsceneOff( backEnd.refdef.rdflags, CUTSCENE_FX_AO )
+			&& tr.screenSsaoFbo && tr.hdrDepthImage && firstSoft > 0 );
+
+		// the fog volume pass is blended into the lit color, so the AO multiply would darken the fog itself
+		// (wall corners showing through the haze): draw it after the AO instead
+		backEnd.fogDefer = aoApply;
 		if ( firstSoft > 0 )
 			RB_RenderDrawSurfList( cmd->drawSurfs, firstSoft );
+		backEnd.fogDefer = qfalse;
 
-		if ( r_ssao->integer && !r_ssaoAmbient->integer
-			&& !R_CutsceneOff( backEnd.refdef.rdflags, CUTSCENE_FX_AO )
-			&& tr.screenSsaoFbo && tr.hdrDepthImage && firstSoft > 0 )
+		if ( aoApply )
 		{
 			FBO_t *dstFbo = glState.currentFBO;
 			ivec4_t srcBox, dstBox;
@@ -1892,6 +1899,17 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 			GLSL_BindProgram( &tr.ssaoUpShader );
 			GLSL_SetUniformVec4( &tr.ssaoUpShader, UNIFORM_VIEWINFO, viewInfo );
+			{
+				// global (RTCW) fog, so the AO fades where the fog already covers the surface
+				vec4_t fogInfo = { 0, 0, 0, 0 };
+
+				if ( glfogNum > FOG_NONE && glfogsettings[FOG_CURRENT].registered )
+				{
+					glfog_t *gf = &glfogsettings[FOG_CURRENT];
+					VectorSet4( fogInfo, gf->start, gf->end, gf->density, gf->mode == GL_LINEAR ? 1.0f : 2.0f );
+				}
+				GLSL_SetUniformVec4( &tr.ssaoUpShader, UNIFORM_FOGDEPTH, fogInfo );
+			}
 			GL_BindToTMU( tr.hdrDepthImage, TB_LIGHTMAP );
 			GL_BindToTMU( tr.ssaoDepthImage, TB_NORMALMAP );
 
@@ -1899,6 +1917,33 @@ const void	*RB_DrawSurfs( const void *data ) {
 				GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO );
 			backEnd.ssaoApplied = qtrue;
 			RB_GpuMark( "ssao_apply" );
+
+			// the blit leaves the viewport at full screen; restore the view's own (cutscene letterbox,
+			// splitscreen) or the translucents drawn next (Jack's glasses) land offset from the opaques
+			SetViewportAndScissor();
+		}
+
+		if ( aoApply )
+		{
+			static drawSurf_t fogSurfs[MAX_DRAWSURFS];
+			int numFog = 0;
+
+			for ( i = 0; i < firstSoft; i++ )
+			{
+				shader_t *sh;
+				int entityNum, fogNum, dlighted, pshadowed, atiTess;
+
+				R_DecomposeSort( cmd->drawSurfs[i].sort, &entityNum, &sh, &fogNum, &dlighted, &pshadowed, &atiTess );
+				if ( fogNum && sh && sh->fogPass )
+					fogSurfs[numFog++] = cmd->drawSurfs[i];
+			}
+
+			if ( numFog > 0 )
+			{
+				backEnd.fogOnly = qtrue;
+				RB_RenderDrawSurfList( fogSurfs, numFog );
+				backEnd.fogOnly = qfalse;
+			}
 		}
 
 		if ( firstSoft < cmd->numDrawSurfs )
