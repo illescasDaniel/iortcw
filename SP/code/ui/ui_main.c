@@ -3803,75 +3803,85 @@ void UI_ParseSavegame( int index ) {
 
 /*
 ==============
+UI_AddSavegames
+
+Appends the savegames of save/<dir> (or save/) to uiInfo.savegameList.
+==============
+*/
+static void UI_AddSavegames( const char *dir, qboolean autosaves ) {
+	char sglist[4096];
+	char    *sgname;
+	int i, len, count;
+
+	if ( dir ) {
+		count = trap_FS_GetFileList( va( "save/%s", dir ), "svg", sglist, 4096 );
+	} else {
+		count = trap_FS_GetFileList( "save", "svg", sglist, 4096 );
+	}
+
+	sgname = sglist;
+	for ( i = 0; i < count && uiInfo.savegameCount < MAX_SAVEGAMES; i++ ) {
+		int n = uiInfo.savegameCount;
+
+		len = strlen( sgname );
+
+		if ( !Q_stricmp( sgname, "current.svg" ) ) {    // ignore some savegames that have special uses and shouldn't be loaded by the user directly
+			sgname += len + 1;
+			continue;
+		}
+
+		if ( len > 4 && !Q_stricmp( sgname +  len - 4,".svg" ) ) {
+			sgname[len - 4] = '\0';
+		}
+		if ( dir ) {
+			uiInfo.savegameList[n].savegameFile = String_Alloc( va( "%s/%s", dir, sgname ) );
+		} else {
+			uiInfo.savegameList[n].savegameFile = String_Alloc( sgname );
+		}
+
+		uiInfo.savegameList[n].savegameName = String_Alloc( autosaves ? va( "[Auto] %s", sgname ) : sgname );
+
+		// read savegame and get needed info
+		UI_ParseSavegame( n );
+
+		if ( uiInfo.savegameList[n].episode != -1 ) {
+			uiInfo.savegameList[n].sshotImage = trap_R_RegisterShaderNoMip( va( "levelshots/episodeshots/e%d.tga", uiInfo.savegameList[n].episode + 1 ) );
+		} else {
+			uiInfo.savegameList[n].sshotImage = trap_R_RegisterShaderNoMip( "levelshots/episodeshots/e_unknown.tga" );
+		}
+
+		uiInfo.savegameCount++;
+		sgname += len + 1;
+	}
+}
+
+/*
+==============
 UI_LoadSavegames
 ==============
 */
 static void UI_LoadSavegames( char *dir ) {
-	char sglist[4096];
-	char    *sgname;
-	int i, len;
+	int i;
 
+	uiInfo.savegameCount = 0;
 	if ( dir ) {
-		uiInfo.savegameCount = trap_FS_GetFileList( va( "save/%s", dir ), "svg", sglist, 4096 );
+		UI_AddSavegames( dir, qfalse );
 	} else {
-		uiInfo.savegameCount = trap_FS_GetFileList( "save", "svg", sglist, 4096 );
+		// codmod: one list with the manual saves and the automatic ones (save/autosave/<map>.svg),
+		// so a new game that was never saved by hand can still be reached from Load Game
+		UI_AddSavegames( NULL, qfalse );
+		UI_AddSavegames( "autosave", qtrue );
+	}
+
+	for ( i = 0; i < uiInfo.savegameCount; i++ ) {
+		uiInfo.savegameStatus.displaySavegames[i] = i;
 	}
 
 	if ( uiInfo.savegameCount ) {
-		if ( uiInfo.savegameCount > MAX_SAVEGAMES ) {
-			uiInfo.savegameCount = MAX_SAVEGAMES;
-		}
-		sgname = sglist;
-		for ( i = 0; i < uiInfo.savegameCount; i++ ) {
-
-			len = strlen( sgname );
-
-			if ( !Q_stricmp( sgname, "current.svg" ) ) {    // ignore some savegames that have special uses and shouldn't be loaded by the user directly
-				i--;
-				uiInfo.savegameCount -= 1;
-				sgname += len + 1;
-				continue;
-			}
-
-			if ( !Q_stricmp( sgname +  len - 4,".svg" ) ) {
-				sgname[len - 4] = '\0';
-			}
-//			Q_strupr(sgname);
-			if ( dir ) {
-				uiInfo.savegameList[i].savegameFile = String_Alloc( va( "%s/%s", dir, sgname ) );
-			} else {
-				uiInfo.savegameList[i].savegameFile = String_Alloc( sgname );
-			}
-
-			uiInfo.savegameList[i].savegameName = String_Alloc( sgname );
-
-			// get string into list for sorting too
-			uiInfo.savegameStatus.displaySavegames[i] = i;
-//			qsort( &uiInfo.savegameStatus.displaySavegames[0], uiInfo.savegameCount, sizeof(int), UI_SavegamesQsortCompare);
-
-			// read savegame and get needed info
-			UI_ParseSavegame( i );
-
-			if ( uiInfo.savegameList[i].episode != -1 ) {
-				uiInfo.savegameList[i].sshotImage = trap_R_RegisterShaderNoMip( va( "levelshots/episodeshots/e%d.tga", uiInfo.savegameList[i].episode + 1 ) );
-			} else {
-				uiInfo.savegameList[i].sshotImage = trap_R_RegisterShaderNoMip( "levelshots/episodeshots/e_unknown.tga" );
-			}
-
-
-
-			sgname += len + 1;
-		}
-
 		// sort it
 		UI_SavegameSort( 0, qtrue );
-
-		// set current selection
-//		i = UI_SavegameIndexFromName(ui_savegameName.string);
-//		Menu_SetFeederSelection(NULL, FEEDER_SAVEGAMES, i, NULL);
 	}
 }
-
 
 /*
 ===============
