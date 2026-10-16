@@ -20,6 +20,9 @@
 #define SUB_LINES_PER_SUB   12
 #define SUB_MAX_DISTANCE    1200.0f
 #define SUB_FADE_MS         300
+#define SUB_FONT            UI_FONT_BIG
+#define SUB_FONT_SCALE      0.30f       // x cod_subtitleScale
+#define SUB_WIDTH_SAMPLE    "the quick brown fox jumps over a lazy dog, "
 #define SUB_MARGIN_TOP      40
 #define SUB_MARGIN_BOTTOM   52
 
@@ -234,9 +237,9 @@ static int CG_SubtitleWrap( const char *text, char lines[][SUB_MAX_LINE_CHARS + 
 void CG_DrawSubtitles( void ) {
 	char lines[SUB_MAX_LINES][SUB_MAX_LINE_CHARS + 1];
 	int owner[SUB_MAX_LINES];
-	vec4_t white = { 1, 1, 1, 1 }, box = { 0, 0, 0, 0.55f };
-	int i, j, total = 0, kept = 0, y, cw, ch, lh, maxChars, maxLines;
-	float scale;
+	vec4_t white = { 1, 1, 1, 1 }, black = { 0, 0, 0, 1 };
+	int i, j, total = 0, kept = 0, y, cw, ch, lh, maxChars, maxLines, ofs;
+	float scale, fs;
 
 	trap_Cvar_Update( &cod_subtitles );
 	trap_Cvar_Update( &cod_subtitleScale );
@@ -263,9 +266,13 @@ void CG_DrawSubtitles( void ) {
 	} else if ( scale > 2.5f ) {
 		scale = 2.5f;
 	}
-	cw = (int)( 8 * scale + 0.5f );
-	ch = (int)( 12 * scale + 0.5f );
-	lh = (int)( 14 * scale + 0.5f );
+	fs = SUB_FONT_SCALE * scale;
+	cw = CG_Text_Width( SUB_WIDTH_SAMPLE, SUB_FONT, fs, 0 ) / (int)strlen( SUB_WIDTH_SAMPLE );    // average advance
+	if ( cw < 1 ) {
+		cw = 1;
+	}
+	ch = CG_Text_Height( "Hg", SUB_FONT, fs, 0 );
+	lh = (int)( ch * 1.45f + 0.5f );
 	maxChars = (int)( ( SUB_LINE_CHARS * 8 ) / (float)cw );
 	if ( maxChars > SUB_MAX_LINE_CHARS ) {
 		maxChars = SUB_MAX_LINE_CHARS;
@@ -293,15 +300,27 @@ void CG_DrawSubtitles( void ) {
 		CG_SetScreenPlacement( PLACE_CENTER, PLACE_CENTER );
 	}
 	y = SCREEN_HEIGHT - SUB_MARGIN_BOTTOM - total * lh;
+	ofs = scale > 1.5f ? 2 : 1;
 	for ( i = 0; i < total; i++, y += lh ) {
-		int w = CG_DrawStrlen( lines[i] ) * cw;
+		int w = CG_Text_Width( lines[i], SUB_FONT, fs, 0 );
 		int left = subActive[owner[i]].endTime - cg.time;
 		float a = left < SUB_FADE_MS ? (float)left / SUB_FADE_MS : 1.0f;
 		float x = ( SCREEN_WIDTH - w ) / 2;
+		float by = y + ch;                      // baseline
+		int dx, dy;
 
-		box[3] = 0.55f * a;
-		CG_FillRect( x - 4, y - 1, w + 8, lh, box );
+		// white text with a black outline (8 offset copies underneath)
+		black[3] = a;
+		for ( dx = -ofs; dx <= ofs; dx++ ) {
+			for ( dy = -ofs; dy <= ofs; dy++ ) {
+				if ( dx || dy ) {
+					vec4_t c;
+					Vector4Copy( black, c );
+					CG_Text_Paint( x + dx, by + dy, SUB_FONT, fs, c, lines[i], 0, 0, 0 );
+				}
+			}
+		}
 		white[3] = a;
-		CG_DrawStringExt( x, y, lines[i], white, qfalse, qtrue, cw, ch, 0 );
+		CG_Text_Paint( x, by, SUB_FONT, fs, white, lines[i], 0, 0, 0 );
 	}
 }
