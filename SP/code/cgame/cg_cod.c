@@ -1298,6 +1298,10 @@ void CG_CodAddFlashlight( void ) {
 	if ( !cg.codFlashlightOn ) {
 		return;
 	}
+	// Cutscene eye is the spline camera — do not light from there.
+	if ( cg.cameraMode ) {
+		return;
+	}
 	if ( !( bg_cod.enable && bg_cod.flashlightEnable ) ) {
 		return;
 	}

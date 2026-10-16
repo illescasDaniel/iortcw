@@ -1694,7 +1694,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 				RB_GpuMark( "flashmask" );
 			}
 
-			if (r_ssao->integer)
+			if (r_ssao->integer && !R_CutsceneOff( backEnd.refdef.rdflags, CUTSCENE_FX_AO ))
 			{
 				vec4_t quadVerts[4];
 				vec2_t texCoords[4];
@@ -2226,7 +2226,8 @@ const void *RB_PostProcess(const void *data)
 	dstBox[2] = backEnd.viewParms.viewportWidth;
 	dstBox[3] = backEnd.viewParms.viewportHeight;
 
-	if (r_ssao->integer && !r_ssaoAmbient->integer)
+	if (r_ssao->integer && !r_ssaoAmbient->integer
+		&& !R_CutsceneOff( backEnd.refdef.rdflags, CUTSCENE_FX_AO ))
 	{
 		vec4_t viewInfo;
 
@@ -2257,6 +2258,8 @@ const void *RB_PostProcess(const void *data)
 		if (r_hdr->integer && (r_toneMap->integer || r_forceToneMap->integer))
 		{
 			autoExposure = r_autoExposure->integer || r_forceAutoExposure->integer;
+			if (R_CutsceneOff( backEnd.refdef.rdflags, CUTSCENE_FX_AUTOEXP ))
+				autoExposure = qfalse;
 
 			// Use an intermediate FBO because it can't blit to the same FBO directly
 			// and can't read from an MSAA dstFbo later.
@@ -2271,10 +2274,17 @@ const void *RB_PostProcess(const void *data)
 		else if (r_cameraExposure->value != 0.0f)
 		{
 			vec4_t color;
+			float exposure = r_cameraExposure->value;
+
+			if ( exposure < -2.0f ) {
+				exposure = -2.0f;
+			} else if ( exposure > 4.0f ) {
+				exposure = 4.0f;
+			}
 
 			color[0] =
 			color[1] =
-			color[2] = pow(2, r_cameraExposure->value); //exp2(r_cameraExposure->value);
+			color[2] = pow( 2, exposure ); //exp2(exposure)
 			color[3] = 1.0f;
 
 			FBO_BlitFromTexture(tr.whiteImage, NULL, NULL, srcFbo, srcBox, NULL, color, GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO);
@@ -2288,7 +2298,7 @@ const void *RB_PostProcess(const void *data)
 		RB_SMAA(srcFbo, srcFbo, srcBox);
 	RB_GpuMark( "smaa_copy" );
 
-	if (r_drawSunRays->integer)
+	if (r_drawSunRays->integer && !R_CutsceneOff( backEnd.refdef.rdflags, CUTSCENE_FX_RAYS ))
 		RB_SunRays(srcFbo, srcBox, srcFbo, srcBox);
 	RB_GpuMark( "rays_add" );
 

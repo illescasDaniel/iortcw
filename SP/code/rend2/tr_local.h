@@ -2097,7 +2097,13 @@ extern  cvar_t  *r_genNormalMaps;
 extern  cvar_t  *r_forceSun;
 extern  cvar_t  *r_forceSunLightScale;
 extern  cvar_t  *r_forceSunAmbientScale;
+extern  cvar_t  *r_cutsceneFx;
 extern  cvar_t  *r_sunlightMode;
+
+// RDF_NOSUNLIGHT cutscene: true if this feature bit should stay off (r_cutsceneFx default 0).
+static ID_INLINE qboolean R_CutsceneOff( int rdflags, int fxBit ) {
+	return (rdflags & RDF_NOSUNLIGHT) && !(r_cutsceneFx->integer & fxBit);
+}
 extern  cvar_t  *r_flashlightShadow;
 extern  cvar_t  *r_dlightAlbedoLift;
 extern  cvar_t  *r_flashlightShadowSize;
@@ -2298,6 +2304,7 @@ image_t		*R_CreateImageExt( const char *name, byte *pic, int width, int height, 
 qboolean	R_GetModeInfo( int *width, int *height, float *windowAspect, int mode );
 
 void		R_SetColorMappings( void );
+void		R_UpdateCutsceneGamma( int rdflags ); // HW gamma → 1.0 during lite cams
 void		R_GammaCorrect( byte *buffer, int bufSize );
 
 void	R_ImageList_f( void );

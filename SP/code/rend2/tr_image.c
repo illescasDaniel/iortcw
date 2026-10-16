@@ -3007,9 +3007,14 @@ void R_CreateBuiltinImages( void ) {
 
 /*
 ===============
-R_SetColorMappings
+R_SetColorMappings / R_UpdateCutsceneGamma
+
+Hardware gamma ramp. Cutscene lite mode forces g=1.0 (engine default) without
+touching archived r_gamma (codmod defaults to 3 for gameplay).
 ===============
 */
+static qboolean s_cutsceneGamma;
+
 void R_SetColorMappings( void ) {
 	int		i, j;
 	float	g;
@@ -3044,7 +3049,8 @@ void R_SetColorMappings( void ) {
 		ri.Cvar_Set( "r_gamma", "3.0" );
 	}
 
-	g = r_gamma->value;
+	// cutscene lite: engine default 1.0; never write r_gamma
+	g = s_cutsceneGamma ? 1.0f : r_gamma->value;
 
 	for ( i = 0; i < 256; i++ ) {
 		if ( g == 1 ) {
@@ -3074,6 +3080,22 @@ void R_SetColorMappings( void ) {
 	{
 		GLimp_SetGamma( s_gammatable, s_gammatable, s_gammatable );
 	}
+}
+
+void R_UpdateCutsceneGamma( int rdflags ) {
+	qboolean want;
+
+	// UI / model preview scenes must not flip the ramp mid-cutscene
+	if ( rdflags & RDF_NOWORLDMODEL ) {
+		return;
+	}
+
+	want = R_CutsceneOff( rdflags, CUTSCENE_FX_GAMMA );
+	if ( want == s_cutsceneGamma ) {
+		return;
+	}
+	s_cutsceneGamma = want;
+	R_SetColorMappings();
 }
 
 /*

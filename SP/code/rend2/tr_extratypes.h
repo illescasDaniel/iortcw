@@ -29,6 +29,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define RDF_NOFOG		(1 << 7)		// don't apply fog to polys added using RE_AddPolyToScene
 #define RDF_EXTRA		(1 << 8)		// Makro - refdefex_t to follow after refdef_t
 #define RDF_SUNLIGHT    (1 << 9)      // SmileTheory - render sunlight and shadows
+#ifndef RDF_NOSUNLIGHT
+#define RDF_NOSUNLIGHT  (1 << 10)     // codmod: scripted cutscene — lite lighting mode
+#endif
+
+// r_cutsceneFx bits: features to KEEP during RDF_NOSUNLIGHT.
+// Default 27 = sun+dlights+autoexp+rays. Bits: sun=1 dlight=2 ao=4 autoexp=8 rays=16 gamma=32
+#define CUTSCENE_FX_SUN      1
+#define CUTSCENE_FX_DLIGHT   2
+#define CUTSCENE_FX_AO       4
+#define CUTSCENE_FX_AUTOEXP  8
+#define CUTSCENE_FX_RAYS     16
+#define CUTSCENE_FX_GAMMA    32
 
 typedef struct {
 	float			blurFactor;

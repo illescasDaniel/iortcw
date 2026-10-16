@@ -191,6 +191,7 @@ cvar_t  *r_genNormalMaps;
 cvar_t  *r_forceSun;
 cvar_t  *r_forceSunLightScale;
 cvar_t  *r_forceSunAmbientScale;
+cvar_t  *r_cutsceneFx;
 cvar_t  *r_sunlightMode;
 cvar_t  *r_flashlightShadow;
 cvar_t  *r_dlightAlbedoLift;
@@ -1497,7 +1498,9 @@ void R_Register( void ) {
 	r_forceAutoExposureMin = ri.Cvar_Get( "r_forceAutoExposureMin", "-2.0", CVAR_CHEAT );
 	r_forceAutoExposureMax = ri.Cvar_Get( "r_forceAutoExposureMax", "2.0", CVAR_CHEAT );
 
-	r_cameraExposure = ri.Cvar_Get( "r_cameraExposure", "1", CVAR_CHEAT );
+	// codmod: GRAPHICS "Exposure" (filmic / HDR). No Cvar_CheckRange — editfields
+	// validate every keystroke ("1"+"2"→"12" was clamping to max). Soft-clamp at use.
+	r_cameraExposure = ri.Cvar_Get( "r_cameraExposure", "1.65", CVAR_ARCHIVE );
 
 	r_depthPrepass = ri.Cvar_Get( "r_depthPrepass", "1", CVAR_ARCHIVE );
 	r_ao = ri.Cvar_Get( "r_ao", "2", CVAR_ARCHIVE );
@@ -1544,6 +1547,8 @@ void R_Register( void ) {
 	r_forceSun = ri.Cvar_Get( "r_forceSun", "0", CVAR_ARCHIVE );
 	r_forceSunLightScale = ri.Cvar_Get( "r_forceSunLightScale", "1.0", CVAR_CHEAT );
 	r_forceSunAmbientScale = ri.Cvar_Get( "r_forceSunAmbientScale", "0.5", CVAR_CHEAT );
+	// codmod: cutscene lite — default sun+dlights+autoexp+rays (27). Bits: sun=1 dlight=2 ao=4 autoexp=8 rays=16 gamma=32
+	r_cutsceneFx = ri.Cvar_Get( "r_cutsceneFx", "27", 0 );
 	r_drawSunRays = ri.Cvar_Get( "r_drawSunRays", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_sunlightMode = ri.Cvar_Get( "r_sunlightMode", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	// codmod: flashlight spot shadow map (needs r_depthPrepass); 0 disables

@@ -194,11 +194,21 @@ void RB_ToneMap(FBO_t *hdrFbo, ivec4_t hdrBox, FBO_t *ldrFbo, ivec4_t ldrBox, in
 
 	RB_GpuMark( "tm_exposure" );
 
-	// tonemap
-	color[0] =
-	color[1] =
-	color[2] = pow(2, r_cameraExposure->value - autoExposure); //exp2(r_cameraExposure->value);
-	color[3] = 1.0f;
+	// tonemap (same exposure as gameplay — do not zero this in cutscenes)
+	{
+		float exposure = r_cameraExposure->value;
+
+		if ( exposure < -2.0f ) {
+			exposure = -2.0f;
+		} else if ( exposure > 4.0f ) {
+			exposure = 4.0f;
+		}
+
+		color[0] =
+		color[1] =
+		color[2] = pow( 2, exposure - autoExposure ); //exp2(exposure)
+		color[3] = 1.0f;
+	}
 
 	if (autoExposure)
 		GL_BindToTMU(tr.calcLevelsImage,  TB_LEVELSMAP);

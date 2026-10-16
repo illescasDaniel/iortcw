@@ -1225,6 +1225,9 @@ static int CG_CalcViewValues( void ) {
 			cg.refdef.fov_y = cg.refdef.fov_y * 360 / M_PI;
 			cg.refdef.fov_x = fov;
 
+			// codmod: cutscene lite lighting (sun/dlights/AO/…; see r_cutsceneFx)
+			cg.refdef.rdflags |= RDF_NOSUNLIGHT;
+
 			trap_SendClientCommand( va( "setCameraOrigin %f %f %f", origin[0], origin[1], origin[2] ) );
 			return 0;
 

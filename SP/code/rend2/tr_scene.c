@@ -471,6 +471,9 @@ void RE_BeginScene(const refdef_t *fd)
 	tr.refdef.time = fd->time;
 	tr.refdef.rdflags = fd->rdflags;
 
+	// HW gamma → 1.0 in cutscene lite (does not touch archived r_gamma)
+	R_UpdateCutsceneGamma( fd->rdflags );
+
 	if ( fd->rdflags & RDF_SKYBOXPORTAL ) {
 		skyboxportal = 1;
 	}
@@ -506,7 +509,10 @@ void RE_BeginScene(const refdef_t *fd)
 	tr.refdef.sunAmbCol[3] = 1.0f;
 
 	VectorCopy(tr.sunDirection, tr.refdef.sunDir);
-	if ( (tr.refdef.rdflags & RDF_NOWORLDMODEL) || !(r_depthPrepass->value) ){
+	// Cutscene lite (RDF_NOSUNLIGHT): baked LM only unless r_cutsceneFx keeps sun
+	if ( (tr.refdef.rdflags & RDF_NOWORLDMODEL)
+		|| R_CutsceneOff( tr.refdef.rdflags, CUTSCENE_FX_SUN )
+		|| !(r_depthPrepass->value) ){
 		VectorSet(tr.refdef.sunCol, 0, 0, 0);
 		VectorSet(tr.refdef.sunAmbCol, 0, 0, 0);
 	}
@@ -602,7 +608,8 @@ void RE_BeginScene(const refdef_t *fd)
 	// dlights if it needs to be disabled or if vertex lighting is enabled
 	if ( /*r_dynamiclight->integer == 0 ||*/    // RF, disabled so we can force things like lightning dlights
 		r_vertexLight->integer == 1 ||
-		glConfig.hardwareType == GLHW_PERMEDIA2 ) {
+		glConfig.hardwareType == GLHW_PERMEDIA2 ||
+		R_CutsceneOff( tr.refdef.rdflags, CUTSCENE_FX_DLIGHT ) ) {
 		tr.refdef.num_dlights = 0;
 	}
 
@@ -669,7 +676,10 @@ void RE_RenderScene( const refdef_t *fd ) {
 	}
 
 	// playing with even more shadows
-	if(glRefConfig.framebufferObject && r_sunlightMode->integer && !( fd->rdflags & RDF_NOWORLDMODEL ) && (r_forceSun->integer || tr.sunShadows))
+	if(glRefConfig.framebufferObject && r_sunlightMode->integer
+		&& !( fd->rdflags & RDF_NOWORLDMODEL )
+		&& !R_CutsceneOff( fd->rdflags, CUTSCENE_FX_SUN )
+		&& (r_forceSun->integer || tr.sunShadows))
 	{
 		if (r_shadowCascadeZFar->integer != 0)
 		{
@@ -697,8 +707,8 @@ void RE_RenderScene( const refdef_t *fd ) {
 		}
 	}
 
-	// codmod: flashlight spot shadow
-	if (!( fd->rdflags & ( RDF_NOWORLDMODEL | RDF_SNOOPERVIEW ) ))
+	// codmod: flashlight spot shadow (also off in cutscene lite — no FL adds)
+	if (!( fd->rdflags & ( RDF_NOWORLDMODEL | RDF_SNOOPERVIEW | RDF_NOSUNLIGHT ) ))
 	{
 		R_RenderFlashlightShadowMap(fd);
 	}
@@ -747,7 +757,9 @@ void RE_RenderScene( const refdef_t *fd ) {
 
 	VectorCopy( fd->vieworg, parms.pvsOrigin );
 
-	if(!( fd->rdflags & RDF_NOWORLDMODEL ) && r_depthPrepass->value && ((r_forceSun->integer) || tr.sunShadows))
+	if(!( fd->rdflags & RDF_NOWORLDMODEL )
+		&& !R_CutsceneOff( fd->rdflags, CUTSCENE_FX_SUN )
+		&& r_depthPrepass->value && ((r_forceSun->integer) || tr.sunShadows))
 	{
 		parms.flags = VPF_USESUNLIGHT;
 	}
