@@ -107,6 +107,182 @@ void GLimp_Shutdown( void )
 
 /*
 ===============
+GLimp_SetModeInPlace
+
+Apply r_mode / r_fullscreen / custom size without destroying the GL context.
+Used after a soft vid_restart (RE_Shutdown(qfalse) + R_Init) so overlays like
+MangoHud do not SIGSEGV on context recreate. Latches must already be applied
+(R_Register / Cvar_Get). Returns qfalse only if there is no window.
+===============
+*/
+qboolean GLimp_SetModeInPlace( void )
+{
+	const char *videoDriver;
+	SDL_DisplayMode desktopMode;
+	int display;
+	int mode;
+	int wantFs, haveFs;
+	int width, height;
+	float aspect;
+	int w, h;
+	Uint32 flag = 0;
+	qboolean wayland;
+
+	if( !SDL_window )
+		return qfalse;
+
+	mode = r_mode->integer;
+	wantFs = r_fullscreen->integer ? 1 : 0;
+	haveFs = !!( SDL_GetWindowFlags( SDL_window ) & SDL_WINDOW_FULLSCREEN );
+
+	videoDriver = SDL_GetCurrentVideoDriver();
+	wayland = ( videoDriver && !Q_stricmp( videoDriver, "wayland" ) ) ? qtrue : qfalse;
+
+	display = SDL_GetWindowDisplayIndex( SDL_window );
+	if( display < 0 )
+		display = 0;
+
+	if( SDL_GetDesktopDisplayMode( display, &desktopMode ) != 0 )
+		Com_Memset( &desktopMode, 0, sizeof( desktopMode ) );
+
+	if( mode == -2 )
+	{
+		if( desktopMode.h > 0 )
+		{
+			width = desktopMode.w;
+			height = desktopMode.h;
+		}
+		else
+		{
+			width = glConfig.vidWidth > 0 ? glConfig.vidWidth : 640;
+			height = glConfig.vidHeight > 0 ? glConfig.vidHeight : 480;
+		}
+		aspect = (float)width / (float)height;
+	}
+	else if( !R_GetModeInfo( &width, &height, &aspect, mode ) )
+	{
+		ri.Printf( PRINT_ALL, "GLimp_SetModeInPlace: invalid mode %d\n", mode );
+		width = glConfig.vidWidth;
+		height = glConfig.vidHeight;
+		aspect = glConfig.windowAspect;
+	}
+
+	if( wantFs && ri.Cvar_VariableIntegerValue( "in_nograb" ) )
+	{
+		ri.Printf( PRINT_ALL, "Fullscreen not allowed with in_nograb 1\n" );
+		ri.Cvar_Set( "r_fullscreen", "0" );
+		r_fullscreen->modified = qfalse;
+		wantFs = 0;
+	}
+
+	// Map-load soft reconfigure hits InitOpenGL with glConfig still set — no-op
+	// when mode/FS already match so we do not poke SDL every level change.
+	{
+		int curW = 0, curH = 0;
+		int dw, dh;
+
+		SDL_GetWindowSize( SDL_window, &curW, &curH );
+		dw = curW - width;
+		dh = curH - height;
+		if( dw < 0 ) dw = -dw;
+		if( dh < 0 ) dh = -dh;
+		if( !!wantFs == !!haveFs && dw <= 2 && dh <= 2 )
+		{
+			glConfig.isFullscreen = wantFs ? qtrue : qfalse;
+			r_fullscreen->modified = qfalse;
+			return qtrue;
+		}
+	}
+
+	if( wantFs )
+	{
+		if( wayland )
+			flag = SDL_WINDOW_FULLSCREEN_DESKTOP;
+		else
+			flag = SDL_WINDOW_FULLSCREEN;
+	}
+
+	// Windowed (or leaving FS): set size before clearing exclusive FS.
+	if( !wantFs )
+	{
+		if( haveFs )
+		{
+			if( SDL_SetWindowFullscreen( SDL_window, 0 ) < 0 )
+			{
+				ri.Printf( PRINT_ALL, "GLimp_SetModeInPlace: leave fullscreen failed: %s\n",
+					SDL_GetError() );
+			}
+		}
+		SDL_SetWindowSize( SDL_window, width, height );
+		if( r_noborder->integer )
+			SDL_SetWindowBordered( SDL_window, SDL_FALSE );
+		else
+			SDL_SetWindowBordered( SDL_window, SDL_TRUE );
+	}
+	else if( !wayland )
+	{
+		// Exclusive fullscreen: set display mode, then enter FS if needed.
+		SDL_DisplayMode dm;
+
+		Com_Memset( &dm, 0, sizeof( dm ) );
+		dm.format = SDL_PIXELFORMAT_RGB24;
+		dm.w = width;
+		dm.h = height;
+		dm.refresh_rate = ri.Cvar_VariableIntegerValue( "r_displayRefresh" );
+		if( SDL_SetWindowDisplayMode( SDL_window, &dm ) < 0 )
+		{
+			ri.Printf( PRINT_DEVELOPER, "GLimp_SetModeInPlace: SetWindowDisplayMode: %s\n",
+				SDL_GetError() );
+		}
+		if( !haveFs || !( SDL_GetWindowFlags( SDL_window ) & SDL_WINDOW_FULLSCREEN_DESKTOP ) )
+		{
+			if( SDL_SetWindowFullscreen( SDL_window, flag ) < 0 )
+			{
+				ri.Printf( PRINT_ALL, "GLimp_SetModeInPlace: SetWindowFullscreen failed: %s\n",
+					SDL_GetError() );
+			}
+		}
+	}
+	else
+	{
+		// Wayland desktop FS: toggle in place; compositor owns the size.
+		if( !haveFs )
+		{
+			if( SDL_SetWindowFullscreen( SDL_window, flag ) < 0 )
+			{
+				ri.Printf( PRINT_ALL, "GLimp_SetModeInPlace: SetWindowFullscreen failed: %s\n",
+					SDL_GetError() );
+			}
+		}
+	}
+
+	w = width;
+	h = height;
+	SDL_GetWindowSize( SDL_window, &w, &h );
+	if( w > 0 && h > 0 )
+	{
+		glConfig.vidWidth = w;
+		glConfig.vidHeight = h;
+		glConfig.windowAspect = (float)w / (float)h;
+	}
+	else
+	{
+		glConfig.vidWidth = width;
+		glConfig.vidHeight = height;
+		glConfig.windowAspect = aspect;
+	}
+	glConfig.isFullscreen = wantFs ? qtrue : qfalse;
+	r_fullscreen->modified = qfalse;
+
+	ri.Printf( PRINT_ALL, "GLimp_SetModeInPlace: %dx%d fullscreen=%d (no GL recreate)\n",
+		glConfig.vidWidth, glConfig.vidHeight, wantFs );
+
+	ri.IN_Restart();
+	return qtrue;
+}
+
+/*
+===============
 GLimp_Minimize
 
 Minimize the game so that user is back at the desktop

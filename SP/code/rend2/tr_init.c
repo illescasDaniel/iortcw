@@ -387,6 +387,10 @@ static void InitOpenGL( void ) {
 		if ( glRefConfig.glslMaxAnimatedBones < 12 ) {
 			glRefConfig.glslMaxAnimatedBones = 0;
 		}
+	} else {
+		// Soft vid_restart: keep the GL context, apply mode/FS in place so FBOs
+		// rebuild at the new size (MangoHud crashes on context destroy/recreate).
+		GLimp_SetModeInPlace();
 	}
 
 	// check for GLSL function textureCubeLod()

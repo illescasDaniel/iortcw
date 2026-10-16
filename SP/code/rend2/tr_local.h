@@ -2346,6 +2346,7 @@ IMPLEMENTATION SPECIFIC FUNCTIONS
 
 void	GLimp_Init( qboolean fixedFunction );
 void	GLimp_Shutdown( void );
+qboolean GLimp_SetModeInPlace( void );
 void	GLimp_EndFrame( void );
 
 void	GLimp_LogComment( char *comment );

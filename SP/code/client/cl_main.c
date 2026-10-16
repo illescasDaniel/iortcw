@@ -1988,6 +1988,24 @@ void CL_ResetPureClientAtServer( void ) {
 
 /*
 =================
+CL_Vid_RestartNeedsHardContext
+
+True when a pending latch requires new GL context attributes (window MSAA,
+color/depth/stencil, stereo, or a different renderer .so). Soft in-place
+restart cannot apply these.
+=================
+*/
+static qboolean CL_Vid_RestartNeedsHardContext( void ) {
+	return Cvar_LatchedPending( "r_ext_multisample" ) ||
+		Cvar_LatchedPending( "r_colorbits" ) ||
+		Cvar_LatchedPending( "r_depthbits" ) ||
+		Cvar_LatchedPending( "r_stencilbits" ) ||
+		Cvar_LatchedPending( "r_stereoEnabled" ) ||
+		Cvar_LatchedPending( "cl_renderer" );
+}
+
+/*
+=================
 CL_Vid_Restart_f
 
 Restart the video subsystem
@@ -1999,13 +2017,16 @@ doesn't know what graphics to reload
 void CL_Vid_Restart_f( void ) {
 
 	vmCvar_t musicCvar;
+	qboolean hardContext;
 
-	// Wayland + MangoHud: fullscreen-only applies SIGSEGV if we destroy/recreate GL.
-	// Prefer an in-place SDL fullscreen toggle when nothing else is latched.
+	// Wayland + MangoHud: destroying/recreating the GL context SIGSEGVs.
+	// Fullscreen-only: toggle SDL in place and skip the rest.
 	if( IN_ToggleFullscreenInPlace() )
 	{
 		return;
 	}
+
+	hardContext = CL_Vid_RestartNeedsHardContext();
 
 	// RF, don't show percent bar, since the memory usage will just sit at the same level anyway
 	Cvar_Set( "com_expectedhunkusage", "-1" );
@@ -2039,8 +2060,25 @@ void CL_Vid_Restart_f( void ) {
 		CL_ShutdownUI();
 		// shutdown the CGame
 		CL_ShutdownCGame();
-		// shutdown the renderer and clear the renderer interface
-		CL_ShutdownRef();
+
+		if( hardContext )
+		{
+			// Context-attribute change: destroy window/GL and reload renderer .so
+			CL_ShutdownRef();
+		}
+		else if( re.Shutdown )
+		{
+			// Soft path: free FBOs/shaders/media, keep SDL window + GL context.
+			// R_Init → GLimp_SetModeInPlace applies r_mode / FS without recreate.
+			Com_Printf( "vid_restart: soft (keep GL context)\n" );
+			re.Shutdown( qfalse );
+		}
+		else
+		{
+			CL_ShutdownRef();
+			hardContext = qtrue;
+		}
+
 		// client is no longer pure untill new checksums are sent
 		CL_ResetPureClientAtServer();
 		// clear pak references
@@ -2055,8 +2093,11 @@ void CL_Vid_Restart_f( void ) {
 		// unpause so the cgame definately gets a snapshot and renders a frame
 		Cvar_Set( "cl_paused", "0" );
 
-		// initialize the renderer interface
-		CL_InitRef();
+		if( hardContext )
+		{
+			// initialize the renderer interface
+			CL_InitRef();
+		}
 
 		// startup all the client stuff
 		CL_StartHunkUsers(qfalse);

@@ -290,6 +290,9 @@ static void InitOpenGL( void ) {
 		if ( glConfig.maxTextureSize <= 0 ) {
 			glConfig.maxTextureSize = 0;
 		}
+	} else {
+		// Soft vid_restart: keep the GL context, apply mode/FS in place.
+		GLimp_SetModeInPlace();
 	}
 
 	// set default state
