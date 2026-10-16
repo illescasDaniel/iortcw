@@ -4644,6 +4644,9 @@ static void UI_RunMenuScript( char **args ) {
 		//#ifdef MISSIONPACK			// NERVE - SMF - enabled for multiplayer
 		if ( Q_stricmp( name, "refreshLangPacks" ) == 0 ) {
 			UI_LangRefresh();
+		} else if ( Q_stricmp( name, "refreshVidModes" ) == 0 ) {
+			UI_RefreshVidModeList();
+			Menu_SetFeederSelection( NULL, FEEDER_VIDMODES, UI_VidModeListCurrent(), "vidmode_popmenu" );
 		} else if ( Q_stricmp( name, "StartServer" ) == 0 ) {
 			float skill;
 			int i, clients;
@@ -6134,6 +6137,8 @@ static int UI_FeederCount( float feederID ) {
 		return UI_LangListCount( qfalse );
 	} else if ( feederID == FEEDER_AUDIOLANGS ) {
 		return UI_LangListCount( qtrue );
+	} else if ( feederID == FEEDER_VIDMODES ) {
+		return UI_VidModeListCount();
 	}
 	if ( feederID == FEEDER_HEADS ) {
 		return uiInfo.characterCount;
@@ -6293,6 +6298,8 @@ static const char *UI_FeederItemText( float feederID, int index, int column, qha
 	*handle = -1;
 	if ( feederID == FEEDER_TEXTLANGS || feederID == FEEDER_AUDIOLANGS ) {
 		return UI_LangFeederText( feederID == FEEDER_AUDIOLANGS, index, column, handle );
+	} else if ( feederID == FEEDER_VIDMODES ) {
+		return UI_VidModeListLabel( index );
 	}
 	if ( feederID == FEEDER_HEADS ) {
 		if ( index >= 0 && index < uiInfo.characterCount ) {
@@ -6457,6 +6464,10 @@ static void UI_FeederSelection( float feederID, int index ) {
 	static char info[MAX_STRING_CHARS];
 	if ( feederID == FEEDER_TEXTLANGS || feederID == FEEDER_AUDIOLANGS ) {
 		UI_LangFeederSelect( feederID == FEEDER_AUDIOLANGS, index );
+		return;
+	}
+	if ( feederID == FEEDER_VIDMODES ) {
+		UI_VidModeListSelect( index );
 		return;
 	}
 	if ( feederID == FEEDER_HEADS ) {

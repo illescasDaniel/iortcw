@@ -103,6 +103,7 @@ If you have questions concerning this license or the applicable additional terms
 #define FEEDER_PICKSPAWN            0x11    // NERVE - SMF - wolf mp pick spawn point
 #define FEEDER_TEXTLANGS            0x12    // codmod: installed text language packs (flag, title, description)
 #define FEEDER_AUDIOLANGS           0x13    // codmod: installed audio language packs
+#define FEEDER_VIDMODES             0x14    // codmod: scrollable video-mode list (r_mode)
 
 // display flags
 #define CG_SHOW_BLUE_TEAM_HAS_REDFLAG       0x00000001

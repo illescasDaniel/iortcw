@@ -1319,12 +1319,28 @@ static void Menu_RunCloseScript( menuDef_t *menu ) {
 }
 
 void Menus_CloseByName( const char *p ) {
-	menuDef_t *menu = Menus_FindByName( p );
-	if ( menu != NULL ) {
-		Menu_RunCloseScript( menu );
-		Menu_ClearFocus( menu );
-		menu->cursorItem = -1;
-		menu->window.flags &= ~( WINDOW_VISIBLE | WINDOW_HASFOCUS );
+	int i;
+	qboolean wasPopup = qfalse;
+
+	// Close every instance (duplicate loadMenu entries used to leave a zombie popup).
+	for ( i = 0; i < menuCount; i++ ) {
+		if ( Q_stricmp( Menus[i].window.name, p ) ) {
+			continue;
+		}
+		if ( Menus[i].window.flags & WINDOW_POPUP ) {
+			wasPopup = qtrue;
+		}
+		Menu_RunCloseScript( &Menus[i] );
+		Menu_ClearFocus( &Menus[i] );
+		Menus[i].cursorItem = -1;
+		Menus[i].window.flags &= ~( WINDOW_VISIBLE | WINDOW_HASFOCUS );
+	}
+	// Popups: restore the opener (ActivateByName pushes menuStack).
+	if ( wasPopup && openMenuCount > 0 ) {
+		menuDef_t *prev = menuStack[--openMenuCount];
+		if ( prev && ( prev->window.flags & WINDOW_VISIBLE ) ) {
+			prev->window.flags |= WINDOW_HASFOCUS;
+		}
 	}
 }
 
@@ -2145,8 +2161,12 @@ qboolean Item_ListBox_HandleKey( itemDef_t *item, int key, qboolean down, qboole
 	listBoxDef_t *listPtr = (listBoxDef_t*)item->typeData;
 	int count = DC->feederCount( item->special );
 	int max, viewmax;
+	qboolean mouseKey = ( key == K_MOUSE1 || key == K_MOUSE2 || key == K_MOUSE3
+		|| key == K_MWHEELUP || key == K_MWHEELDOWN );
 
-	if ( force || ( Rect_ContainsPoint( &item->window.rect, DC->cursorx, DC->cursory ) && item->window.flags & WINDOW_HASFOCUS ) ) {
+	// Mouse needs cursor over the box; pad/keys work whenever the listbox has focus.
+	if ( force || ( ( item->window.flags & WINDOW_HASFOCUS )
+		&& ( !mouseKey || Rect_ContainsPoint( &item->window.rect, DC->cursorx, DC->cursory ) ) ) ) {
 		max = Item_ListBox_MaxScroll( item );
 		if ( item->window.flags & WINDOW_HORIZONTAL ) {
 			viewmax = ( item->window.rect.w / listPtr->elementWidth );
@@ -2472,6 +2492,10 @@ qboolean Item_Multi_HandleKey( itemDef_t *item, int key ) {
 	if ( multiPtr ) {
 		if (item->cvar) {
 			int select = 0;
+			// codmod: r_mode opens the scrollable popup via item action (no click-cycle)
+			if ( !Q_stricmp( item->cvar, "r_mode" ) ) {
+				return qfalse;
+			}
 			if (key == K_MOUSE1 || key == K_MOUSE2 || key == K_MOUSE3) {
 				if (Rect_ContainsPoint(&item->window.rect, DC->cursorx, DC->cursory) && item->window.flags & WINDOW_HASFOCUS) {
 					select = (key == K_MOUSE2) ? -1 : 1;
@@ -5087,12 +5111,31 @@ void Menu_SetFeederSelection( menuDef_t *menu, int feeder, int index, const char
 		int i;
 		for ( i = 0; i < menu->itemCount; i++ ) {
 			if ( menu->items[i]->special == feeder ) {
-				if ( index == 0 ) {
-					listBoxDef_t *listPtr = (listBoxDef_t*)menu->items[i]->typeData;
-					listPtr->cursorPos = 0;
+				listBoxDef_t *listPtr = (listBoxDef_t*)menu->items[i]->typeData;
+				int viewmax;
+
+				if ( index < 0 ) {
+					index = 0;
+				}
+				listPtr->cursorPos = index;
+				menu->items[i]->cursorPos = index;
+				// keep the selection in view (long lists like video modes / language packs)
+				if ( menu->items[i]->window.flags & WINDOW_HORIZONTAL ) {
+					viewmax = (int)( menu->items[i]->window.rect.w / listPtr->elementWidth );
+				} else {
+					viewmax = (int)( menu->items[i]->window.rect.h / listPtr->elementHeight );
+				}
+				if ( viewmax < 1 ) {
+					viewmax = 1;
+				}
+				if ( index < listPtr->startPos ) {
+					listPtr->startPos = index;
+				} else if ( index >= listPtr->startPos + viewmax ) {
+					listPtr->startPos = index - viewmax + 1;
+				}
+				if ( listPtr->startPos < 0 ) {
 					listPtr->startPos = 0;
 				}
-				menu->items[i]->cursorPos = index;
 				DC->feederSelection( menu->items[i]->special, menu->items[i]->cursorPos );
 				return;
 			}
@@ -5114,15 +5157,23 @@ menuDef_t *Menus_ActivateByName( const char *p ) {
 	int i;
 	menuDef_t *m = NULL;
 	menuDef_t *focus = Menu_GetFocused();
+
+	// Activate the first match only; hide same-named duplicates and clear others' focus.
 	for ( i = 0; i < menuCount; i++ ) {
-		if ( Q_stricmp( Menus[i].window.name, p ) == 0 ) {
-			m = &Menus[i];
-			Menus_Activate( m );
-			if ( openMenuCount < MAX_OPEN_MENUS && focus != NULL ) {
-				menuStack[openMenuCount++] = focus;
+		if ( !Q_stricmp( Menus[i].window.name, p ) ) {
+			if ( !m ) {
+				m = &Menus[i];
+			} else {
+				Menus[i].window.flags &= ~( WINDOW_HASFOCUS | WINDOW_VISIBLE );
 			}
 		} else {
 			Menus[i].window.flags &= ~WINDOW_HASFOCUS;
+		}
+	}
+	if ( m ) {
+		Menus_Activate( m );
+		if ( openMenuCount < MAX_OPEN_MENUS && focus != NULL && focus != m ) {
+			menuStack[openMenuCount++] = focus;
 		}
 	}
 	Display_CloseCinematics();
@@ -6304,6 +6355,13 @@ vidmode_t r_vidModes[] =
 };
 static int	s_numVidModes = ARRAY_LEN( r_vidModes );
 
+// Shared list backing the r_mode MULTI row label and FEEDER_VIDMODES popup.
+static int uiVidModeCount;
+static const char *uiVidModeLabels[MAX_MULTI_CVARS];
+static float uiVidModeValues[MAX_MULTI_CVARS];
+static int uiVidModeTableIdx[MAX_MULTI_CVARS];
+static char uiVidModeAvailCache[MAX_STRING_CHARS];
+
 /*
 ===============
 UI_FindVidMode
@@ -6327,57 +6385,82 @@ static int UI_FindVidMode( int width, int height ) {
 
 /*
 ===============
-UI_AddVidModeEntry
+UI_AddVidModeListEntry
 
-Append one r_mode multi entry if room remains.
+Append one entry to the shared video-mode list if room remains.
 ===============
 */
-static void UI_AddVidModeEntry( multiDef_t *multiPtr, int tableIndex ) {
-	if ( multiPtr->count >= MAX_MULTI_CVARS ) {
+static void UI_AddVidModeListEntry( int tableIndex ) {
+	if ( uiVidModeCount >= MAX_MULTI_CVARS ) {
 		return;
 	}
-	multiPtr->cvarList[multiPtr->count] = String_Alloc( r_vidModes[tableIndex].description );
-	multiPtr->cvarValue[multiPtr->count] = r_vidModes[tableIndex].mode;
-	multiPtr->count++;
+	uiVidModeLabels[uiVidModeCount] = r_vidModes[tableIndex].description;
+	uiVidModeValues[uiVidModeCount] = (float)r_vidModes[tableIndex].mode;
+	uiVidModeTableIdx[uiVidModeCount] = tableIndex;
+	uiVidModeCount++;
 }
 
 /*
 ===============
-UI_RebuildVidModeMulti
+UI_SortVidModesDescending
 
-Prefer SDL-detected r_availableModes when set so the click-cycle list matches the
-display; otherwise expose the full table. Always ends with Automatic + Custom.
-Skip work once this item's list is already expanded for the current availableModes.
+Sort the fixed-resolution prefix by pixel count (then width), largest first.
 ===============
 */
-static void UI_RebuildVidModeMulti( itemDef_t *item ) {
+static void UI_SortVidModesDescending( int fixedCount ) {
+	int i, j;
+
+	for ( i = 1; i < fixedCount; i++ ) {
+		int ti = uiVidModeTableIdx[i];
+		const char *lab = uiVidModeLabels[i];
+		float val = uiVidModeValues[i];
+		int pixels = r_vidModes[ti].width * r_vidModes[ti].height;
+		int w = r_vidModes[ti].width;
+
+		j = i - 1;
+		while ( j >= 0 ) {
+			int tj = uiVidModeTableIdx[j];
+			int pj = r_vidModes[tj].width * r_vidModes[tj].height;
+
+			if ( pj > pixels || ( pj == pixels && r_vidModes[tj].width >= w ) ) {
+				break;
+			}
+			uiVidModeTableIdx[j + 1] = uiVidModeTableIdx[j];
+			uiVidModeLabels[j + 1] = uiVidModeLabels[j];
+			uiVidModeValues[j + 1] = uiVidModeValues[j];
+			j--;
+		}
+		uiVidModeTableIdx[j + 1] = ti;
+		uiVidModeLabels[j + 1] = lab;
+		uiVidModeValues[j + 1] = val;
+	}
+}
+
+/*
+===============
+UI_RefreshVidModeList
+
+Prefer SDL-detected r_availableModes when set; otherwise the full table.
+Fixed modes are sorted largest-first; Automatic + Custom stay at the end.
+===============
+*/
+void UI_RefreshVidModeList( void ) {
 	int i;
-	multiDef_t *multiPtr;
 	char avail[MAX_STRING_CHARS];
 	qboolean used[ARRAY_LEN( r_vidModes )];
 	int addedFixed = 0;
-	static char ui_vidModeAvailCache[MAX_STRING_CHARS];
 
-	if ( !item || item->type != ITEM_TYPE_MULTI || !item->cvar || !item->typeData ) {
-		return;
-	}
-	if ( Q_stricmp( item->cvar, "r_mode" ) ) {
-		return;
-	}
-
-	multiPtr = (multiDef_t *)item->typeData;
 	avail[0] = '\0';
 	if ( DC && DC->getCVarString ) {
 		DC->getCVarString( "r_availableModes", avail, sizeof( avail ) );
 	}
-	// Seed .menu lists are short (~9). Skip rebuild once expanded for this avail string.
-	if ( multiPtr->count > 12 && !Q_stricmp( avail, ui_vidModeAvailCache ) ) {
+	if ( uiVidModeCount > 12 && !Q_stricmp( avail, uiVidModeAvailCache ) ) {
 		return;
 	}
-	Q_strncpyz( ui_vidModeAvailCache, avail, sizeof( ui_vidModeAvailCache ) );
+	Q_strncpyz( uiVidModeAvailCache, avail, sizeof( uiVidModeAvailCache ) );
 
 	memset( used, 0, sizeof( used ) );
-	multiPtr->count = 0;
+	uiVidModeCount = 0;
 
 	if ( avail[0] ) {
 		const char *p = avail;
@@ -6398,7 +6481,7 @@ static void UI_RebuildVidModeMulti( itemDef_t *item ) {
 
 			idx = UI_FindVidMode( w, h );
 			if ( idx >= 0 && !used[idx] ) {
-				UI_AddVidModeEntry( multiPtr, idx );
+				UI_AddVidModeListEntry( idx );
 				used[idx] = qtrue;
 				addedFixed++;
 			}
@@ -6410,15 +6493,92 @@ static void UI_RebuildVidModeMulti( itemDef_t *item ) {
 			if ( r_vidModes[i].mode < 0 ) {
 				continue;
 			}
-			UI_AddVidModeEntry( multiPtr, i );
+			UI_AddVidModeListEntry( i );
+			addedFixed++;
 		}
 	}
+
+	UI_SortVidModesDescending( addedFixed );
 
 	for ( i = 0; i < s_numVidModes; i++ ) {
 		if ( r_vidModes[i].mode >= 0 ) {
 			continue;
 		}
-		UI_AddVidModeEntry( multiPtr, i );
+		UI_AddVidModeListEntry( i );
+	}
+}
+
+int UI_VidModeListCount( void ) {
+	UI_RefreshVidModeList();
+	return uiVidModeCount;
+}
+
+const char *UI_VidModeListLabel( int index ) {
+	UI_RefreshVidModeList();
+	if ( index < 0 || index >= uiVidModeCount ) {
+		return "";
+	}
+	return uiVidModeLabels[index];
+}
+
+int UI_VidModeListCurrent( void ) {
+	float value;
+	int i;
+
+	UI_RefreshVidModeList();
+	if ( !DC || !DC->getCVarValue ) {
+		return 0;
+	}
+	value = DC->getCVarValue( "r_mode" );
+	for ( i = 0; i < uiVidModeCount; i++ ) {
+		if ( uiVidModeValues[i] == value ) {
+			return i;
+		}
+	}
+	return 0;
+}
+
+void UI_VidModeListSelect( int index ) {
+	float value;
+
+	UI_RefreshVidModeList();
+	if ( index < 0 || index >= uiVidModeCount || !DC || !DC->setCVar ) {
+		return;
+	}
+	value = uiVidModeValues[index];
+	if ( ( (float)( (int)value ) ) == value ) {
+		DC->setCVar( "r_mode", va( "%i", (int)value ) );
+	} else {
+		DC->setCVar( "r_mode", va( "%f", value ) );
+	}
+}
+
+/*
+===============
+UI_RebuildVidModeMulti
+
+Copy the shared video-mode list into the r_mode MULTI item (label source).
+===============
+*/
+static void UI_RebuildVidModeMulti( itemDef_t *item ) {
+	int i;
+	multiDef_t *multiPtr;
+
+	if ( !item || item->type != ITEM_TYPE_MULTI || !item->cvar || !item->typeData ) {
+		return;
+	}
+	if ( Q_stricmp( item->cvar, "r_mode" ) ) {
+		return;
+	}
+
+	UI_RefreshVidModeList();
+	multiPtr = (multiDef_t *)item->typeData;
+	multiPtr->count = 0;
+	multiPtr->strDef = qfalse;
+	for ( i = 0; i < uiVidModeCount && multiPtr->count < MAX_MULTI_CVARS; i++ ) {
+		multiPtr->cvarList[multiPtr->count] = uiVidModeLabels[i];
+		multiPtr->cvarValue[multiPtr->count] = uiVidModeValues[i];
+		multiPtr->count++;
 	}
 }
 
@@ -6986,15 +7146,30 @@ static float captureY;
 
 void *Display_CaptureItem( int x, int y ) {
 	int i;
+	menuDef_t *focus = Menu_GetFocused();
+	menuDef_t *hit = NULL;
 
-	for ( i = 0; i < menuCount; i++ ) {
-		// turn off focus each item
-		// menu->items[i].window.flags &= ~WINDOW_HASFOCUS;
-		if ( Rect_ContainsPoint( &Menus[i].window.rect, x, y ) ) {
-			return &Menus[i];
+	// Focused popup owns input even outside its window.rect (dim overlay);
+	// otherwise fullscreen menus underneath steal Back/list clicks.
+	if ( focus && ( focus->window.flags & WINDOW_VISIBLE ) ) {
+		if ( focus->window.flags & WINDOW_POPUP ) {
+			return focus;
+		}
+		if ( Rect_ContainsPoint( &focus->window.rect, x, y ) ) {
+			return focus;
 		}
 	}
-	return NULL;
+
+	// Top-most visible menu under the cursor (paint order = ascending index).
+	for ( i = 0; i < menuCount; i++ ) {
+		if ( !( Menus[i].window.flags & WINDOW_VISIBLE ) ) {
+			continue;
+		}
+		if ( Rect_ContainsPoint( &Menus[i].window.rect, x, y ) ) {
+			hit = &Menus[i];
+		}
+	}
+	return hit;
 }
 
 

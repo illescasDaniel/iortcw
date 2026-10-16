@@ -496,6 +496,13 @@ void        Menu_Paint( menuDef_t *menu, qboolean forcePaint );
 void        Menu_SetFeederSelection( menuDef_t *menu, int feeder, int index, const char *name );
 void        Display_CacheAll( void );
 
+// codmod: shared r_mode list for the Video Mode multi row and FEEDER_VIDMODES popup
+void        UI_RefreshVidModeList( void );
+int         UI_VidModeListCount( void );
+const char *UI_VidModeListLabel( int index );
+int         UI_VidModeListCurrent( void );
+void        UI_VidModeListSelect( int index );
+
 void        *UI_Alloc( int size );
 void        UI_InitMemory( void );
 qboolean    UI_OutOfMemory( void );
