@@ -1532,7 +1532,7 @@ void R_Register( void ) {
 	r_cubeMapping = ri.Cvar_Get( "r_cubeMapping", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_cubemapSize = ri.Cvar_Get( "r_cubemapSize", "128", CVAR_ARCHIVE | CVAR_LATCH );
 	r_deluxeSpecular = ri.Cvar_Get( "r_deluxeSpecular", "0.1", CVAR_ARCHIVE | CVAR_LATCH );
-	r_codSpecular = ri.Cvar_Get( "r_codSpecular", "0", CVAR_ARCHIVE | CVAR_LATCH );
+	r_codSpecular = ri.Cvar_Get( "r_codSpecular", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_cubemapSpecOnly = ri.Cvar_Get( "r_cubemapSpecOnly", "1", 0 );
 	r_cubemapMergeDist = ri.Cvar_Get( "r_cubemapMergeDist", "384", CVAR_LATCH );
 	r_pbr = ri.Cvar_Get("r_pbr", "0", CVAR_ARCHIVE | CVAR_LATCH);
