@@ -187,7 +187,6 @@ typedef struct {
 	// codmod: player flashlight (phase 5d) — client-local dlight
 	int flashlightEnable;      // master for toggleflashlight + draw
 	float flashlightIntensity; // trap_R_AddLightToScene radius-ish intensity
-	float flashlightMinDist;   // hit distance (u) at which dlights reach full strength (closer = softer, never off)
 	float flashlightR;
 	float flashlightG;
 	float flashlightB;

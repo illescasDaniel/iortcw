@@ -223,12 +223,11 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_hitMarkerSound",     "1",    0,            CODOFS( hitMarkerSound ),     1 },
 
 	// codmod: phase 5d flashlight (client-local view dlight)
-	{ "cod_flashlightEnable",   "1",    0,            CODOFS( flashlightEnable ),   1 },
-	{ "cod_flashlightIntensity","500",  0,            CODOFS( flashlightIntensity ), 0 },
-	{ "cod_flashlightMinDist",  "192",  0,            CODOFS( flashlightMinDist ),   0 },
-	{ "cod_flashlightR",        "1",    0,            CODOFS( flashlightR ),        0 },
-	{ "cod_flashlightG",        "0.95", 0,            CODOFS( flashlightG ),        0 },
-	{ "cod_flashlightB",        "0.85", 0,            CODOFS( flashlightB ),        0 },
+	{ "cod_flashlightEnable",   "1",     CVAR_ARCHIVE,            CODOFS( flashlightEnable ),   1 },
+	{ "cod_flashlightIntensity","500",   CVAR_ARCHIVE,            CODOFS( flashlightIntensity ), 0 },
+	{ "cod_flashlightR",        "0.8",   CVAR_ARCHIVE,            CODOFS( flashlightR ),        0 },
+	{ "cod_flashlightG",        "0.75",  CVAR_ARCHIVE,            CODOFS( flashlightG ),        0 },
+	{ "cod_flashlightB",        "0.65",  CVAR_ARCHIVE,            CODOFS( flashlightB ),        0 },
 
 	// codmod: Phase 6 tactical slide (docs/phase-6-slide.md + reference-values.md)
 	{ "cod_slideEnable",        "1",    0,            CODOFS( slideEnable ),        1 },

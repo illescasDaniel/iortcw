@@ -1325,9 +1325,6 @@ void CG_CodAddFlashlight( void ) {
 		radius = 1800.0f;
 	}
 
-	// MinDist kept for menu/tuning compatibility; spots don't need the old close-wall curve.
-	(void)bg_cod.flashlightMinDist;
-
 	// Origin slightly forward of the eye so the gun mesh / near plane don't bathe the world.
 	VectorCopy( cg.refdef.vieworg, start );
 	VectorMA( start, 10.0f, cg.refdef.viewaxis[0], start );
