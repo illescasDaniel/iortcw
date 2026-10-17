@@ -160,10 +160,17 @@ that is touched by one or more dlights, so try to throw out
 more dlights if possible.
 ====================
 */
+// codmod: set while adding a brush model's surfaces. Their cullinfo is in model space, so the light
+// positions must be the model-space ones (dl->transformed, set by R_DlightBmodel), not the world ones.
+// With world positions every door / crate / func_explosive surface was culled from every dlight
+// (the flashlight lit the walls around them but never the brush objects).
+static qboolean r_dlightModelSpace;
+
 static int R_DlightSurface( msurface_t *surf, int dlightBits ) {
 	float       d;
 	int         i;
 	dlight_t    *dl;
+	vec3_t      lo;
 	
 	if ( surf->cullinfo.type & CULLINFO_PLANE )
 	{
@@ -172,7 +179,8 @@ static int R_DlightSurface( msurface_t *surf, int dlightBits ) {
 				continue;
 			}
 			dl = &tr.refdef.dlights[i];
-			d = DotProduct( dl->origin, surf->cullinfo.plane.normal ) - surf->cullinfo.plane.dist;
+			VectorCopy( r_dlightModelSpace ? dl->transformed : dl->origin, lo );
+			d = DotProduct( lo, surf->cullinfo.plane.normal ) - surf->cullinfo.plane.dist;
 			if ( d < -dl->radius || d > dl->radius ) {
 				// dlight doesn't reach the plane
 				dlightBits &= ~( 1 << i );
@@ -187,12 +195,13 @@ static int R_DlightSurface( msurface_t *surf, int dlightBits ) {
 				continue;
 			}
 			dl = &tr.refdef.dlights[i];
-			if ( dl->origin[0] - dl->radius > surf->cullinfo.bounds[1][0]
-				|| dl->origin[0] + dl->radius < surf->cullinfo.bounds[0][0]
-				|| dl->origin[1] - dl->radius > surf->cullinfo.bounds[1][1]
-				|| dl->origin[1] + dl->radius < surf->cullinfo.bounds[0][1]
-				|| dl->origin[2] - dl->radius > surf->cullinfo.bounds[1][2]
-				|| dl->origin[2] + dl->radius < surf->cullinfo.bounds[0][2] ) {
+			VectorCopy( r_dlightModelSpace ? dl->transformed : dl->origin, lo );
+			if ( lo[0] - dl->radius > surf->cullinfo.bounds[1][0]
+				|| lo[0] + dl->radius < surf->cullinfo.bounds[0][0]
+				|| lo[1] - dl->radius > surf->cullinfo.bounds[1][1]
+				|| lo[1] + dl->radius < surf->cullinfo.bounds[0][1]
+				|| lo[2] - dl->radius > surf->cullinfo.bounds[1][2]
+				|| lo[2] + dl->radius < surf->cullinfo.bounds[0][2] ) {
 				// dlight doesn't reach the bounds
 				dlightBits &= ~( 1 << i );
 			}
@@ -206,7 +215,8 @@ static int R_DlightSurface( msurface_t *surf, int dlightBits ) {
 				continue;
 			}
 			dl = &tr.refdef.dlights[i];
-			if (!SpheresIntersect(dl->origin, dl->radius, surf->cullinfo.localOrigin, surf->cullinfo.radius))
+			VectorCopy( r_dlightModelSpace ? dl->transformed : dl->origin, lo );
+			if (!SpheresIntersect(lo, dl->radius, surf->cullinfo.localOrigin, surf->cullinfo.radius))
 			{
 				// dlight doesn't reach the bounds
 				dlightBits &= ~( 1 << i );
@@ -471,6 +481,7 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 	// determine if in fog
 	fognum = R_BmodelFogNum( ent, bmodel );
 
+	r_dlightModelSpace = qtrue;
 	for ( i = 0 ; i < bmodel->numSurfaces ; i++ ) {
 		int surf = bmodel->firstSurface + i;
 
@@ -481,6 +492,7 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 			R_AddWorldSurface( tr.world->surfaces + surf, tr.currentEntity->needDlights, 0 );
 		}
 	}
+	r_dlightModelSpace = qfalse;
 //----(SA) end
 }
 

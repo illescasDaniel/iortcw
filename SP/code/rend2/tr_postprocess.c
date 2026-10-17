@@ -635,7 +635,7 @@ Returns qfalse when nothing was done.
 
 qboolean RB_PostFx(FBO_t *srcFbo, ivec4_t srcBox)
 {
-	static const float bloomLevel[4] = { 0.0f, 0.5f, 1.0f, 1.6f };
+	static const float bloomLevel[4] = { 0.0f, 1.0f, 1.6f, 2.4f };
 	float bloomMul = bloomLevel[r_bloom->integer < 0 ? 0 : (r_bloom->integer > 3 ? 3 : r_bloom->integer)];
 	qboolean bloom = bloomMul > 0.0f && r_bloomIntensity->value > 0.0f && tr.bloomFbo[BLOOM_LEVELS - 1];
 	qboolean grade = r_grade->integer != 0;

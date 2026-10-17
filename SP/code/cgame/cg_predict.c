@@ -761,8 +761,21 @@ void CG_PredictPlayerState( void ) {
 	}
 
 	cg.predictLagMs = cg.time - cg.predictedPlayerState.commandTime;
-	if ( cg.predictLagMs < 0 || cg.predictLagMs > 33 ) {
-		cg.predictLagMs = 0;
+	// codmod: the lag is about one client frame, so it must not be zeroed past a fixed 33 ms:
+	// at 30 FPS it alternates 33/34 ms and the view extrapolation would switch on and off
+	// every frame. Clamp to a limit that scales with the frame time instead (a stall or
+	// time reset beyond it is not meaningful lag).
+	{
+		int maxLag = cg.frametime * 3;
+
+		if ( maxLag < 100 ) {
+			maxLag = 100;
+		}
+		if ( cg.predictLagMs < 0 ) {
+			cg.predictLagMs = 0;
+		} else if ( cg.predictLagMs > maxLag ) {
+			cg.predictLagMs = maxLag;
+		}
 	}
 
 	if ( !moved ) {

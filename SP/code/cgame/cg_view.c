@@ -1606,7 +1606,7 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 
 	cg.time = serverTime;
 	// codmod: microseconds into this game millisecond (paced frames only); visual-only
-	cg.timeFracUs = ( frameFracUs > -30000 && frameFracUs < 30000 ) ? frameFracUs : 0;
+	cg.timeFracUs = ( frameFracUs > -100000 && frameFracUs < 100000 ) ? frameFracUs : 0;
 	cg.demoPlayback = demoPlayback;
 
 	// update cvars

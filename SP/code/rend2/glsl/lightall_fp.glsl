@@ -345,6 +345,9 @@ void main()
 	L += (texture2D(u_DeluxeMap, var_TexCoords.zw).xyz - vec3(0.5)) * u_EnableTextures.y;
   #endif
 	float sqrLightDist = dot(L, L);
+	// codmod: |L| of the baked/grid light vector encodes directionality (tr_light.c R_LightDirForPoint):
+	// 0.25 = no real direction, 1.0 = fully directional
+	float lightDirectional = clamp((sqrt(sqrLightDist) - 0.25) * (1.0 / 0.75), 0.0, 1.0);
 	L /= sqrt(sqrLightDist);
 
   #if defined(USE_LIGHT_VECTOR)
@@ -467,7 +470,8 @@ void main()
     #if defined(USE_LIGHT_VECTOR)
 	reflectance += CalcSpecular(specular.rgb, NH, EH, roughness) * r_deluxeSpecular;
     #else
-	reflectance += CalcSpecular(specular.rgb, NH, EH, pow(roughness, r_deluxeSpecular));
+	// codmod: only where a real directional light exists, never from the N~L~E degenerate case
+	reflectance += CalcSpecular(specular.rgb, NH, EH, pow(roughness, r_deluxeSpecular)) * lightDirectional;
     #endif
   #endif
 

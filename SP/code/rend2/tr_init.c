@@ -185,6 +185,7 @@ cvar_t  *r_cubeMapping;
 cvar_t  *r_cubemapSize;
 cvar_t  *r_deluxeSpecular;
 cvar_t  *r_codSpecular;
+cvar_t  *r_codSpecDirectional;
 cvar_t  *r_cubemapSpecOnly;
 cvar_t  *r_cubemapMergeDist;
 cvar_t  *r_pbr;
@@ -1521,11 +1522,11 @@ void R_Register( void ) {
 	r_ssaoAmbient = ri.Cvar_Get( "r_ssaoAmbient", "0", 0 );   // 0: multiply the final image (default; covers every surface), 1: AO only dims the baked/ambient light in lightall (misses non-lightall surfaces)
 	// codmod post effects (tr_postprocess.c: RB_PostFx). r_bloom / r_grade are the user-facing menu settings (archived);
 	// the tuning cvars are not archived so the code defaults always apply (console: set r_bloomIntensity ...)
-	r_bloom = ri.Cvar_Get( "r_bloom", "0", CVAR_ARCHIVE );                   // 0 off, 1-3 low/medium/high (scales r_bloomIntensity x0.5/1/1.6)
+	r_bloom = ri.Cvar_Get( "r_bloom", "2", CVAR_ARCHIVE );                   // 0 off, 1-3 low/medium/high (scales r_bloomIntensity x1/1.6/2.4; default 2 = medium)
 	r_bloomIntensity = ri.Cvar_Get( "r_bloomIntensity", "2.5", 0 );
 	r_bloomThreshold = ri.Cvar_Get( "r_bloomThreshold", "0.6", 0 ); // brightness (0..1, after tone mapping) where glow starts
 	r_bloomRadius = ri.Cvar_Get( "r_bloomRadius", "1.0", 0 );     // blur width multiplier
-	r_grade = ri.Cvar_Get( "r_grade", "0", CVAR_ARCHIVE );                   // 0 off, 1 on
+	r_grade = ri.Cvar_Get( "r_grade", "1", CVAR_ARCHIVE );                   // 0 off, 1 on (default on)
 	r_gradeBrightness = ri.Cvar_Get( "r_gradeBrightness", "1.25", 0 );  // gamma lift, 1 = unchanged
 	r_gradeContrast = ri.Cvar_Get( "r_gradeContrast", "1.06", 0 );
 	r_gradeSaturation = ri.Cvar_Get( "r_gradeSaturation", "1.10", 0 );
@@ -1555,6 +1556,8 @@ void R_Register( void ) {
 	r_cubemapSize = ri.Cvar_Get( "r_cubemapSize", "128", CVAR_ARCHIVE | CVAR_LATCH );
 	r_deluxeSpecular = ri.Cvar_Get( "r_deluxeSpecular", "0.1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_codSpecular = ri.Cvar_Get( "r_codSpecular", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	// codmod: baked/grid specular weighted by light directionality (read at map load); 0 = old behaviour
+	r_codSpecDirectional = ri.Cvar_Get( "r_codSpecDirectional", "1", 0 );
 	r_cubemapSpecOnly = ri.Cvar_Get( "r_cubemapSpecOnly", "1", 0 );
 	r_cubemapMergeDist = ri.Cvar_Get( "r_cubemapMergeDist", "384", CVAR_LATCH );
 	r_pbr = ri.Cvar_Get("r_pbr", "0", CVAR_ARCHIVE | CVAR_LATCH);

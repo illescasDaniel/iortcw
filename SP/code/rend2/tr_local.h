@@ -2104,6 +2104,7 @@ extern  cvar_t  *r_cubeMapping;
 extern  cvar_t  *r_cubemapSize;
 extern  cvar_t  *r_deluxeSpecular;
 extern  cvar_t  *r_codSpecular;
+extern  cvar_t  *r_codSpecDirectional;
 extern  cvar_t  *r_cubemapSpecOnly;
 extern  cvar_t  *r_cubemapMergeDist;
 // codmod: master switch for all specular extras (spec maps, light-grid specular, cubemaps); latched

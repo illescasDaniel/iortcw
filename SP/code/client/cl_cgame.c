@@ -1217,7 +1217,7 @@ static void CL_UpdateViewClock( void ) {
 	static double viewUs;
 	static long long prevClockUs;
 	static qboolean valid;
-	double targetUs, err;
+	double targetUs, err, resetUs;
 
 	targetUs = cl.serverTime * 1000.0 + com_frameFracUs;
 	if ( !cl_viewSmooth->integer || clc.demoplaying || !valid || com_frameClockUs <= prevClockUs ) {
@@ -1225,7 +1225,13 @@ static void CL_UpdateViewClock( void ) {
 	} else {
 		viewUs += ( com_frameClockUs - prevClockUs ) * ( com_timescale->value > 0 ? com_timescale->value : 1.0f );
 		err = targetUs - viewUs;
-		if ( fabs( err ) > 15000.0 ) {
+		// reset threshold scales with the frame period so low frame rates (30 FPS = 33 ms
+		// frames, where a whole-ms step of the game clock is a large share) are not treated as hitches
+		resetUs = ( com_frameClockUs - prevClockUs ) * 1.5;
+		if ( resetUs < 15000.0 ) {
+			resetUs = 15000.0;
+		}
+		if ( fabs( err ) > resetUs ) {
 			viewUs = targetUs;      // pause, load, hitch or time reset
 		} else {
 			viewUs += err * 0.04;   // ~25 frame time constant: a 1 ms nudge becomes ~40 us steps

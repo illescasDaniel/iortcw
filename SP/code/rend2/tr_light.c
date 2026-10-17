@@ -584,10 +584,34 @@ int R_LightDirForPoint( vec3_t point, vec3_t lightDir, vec3_t normal, world_t *w
 	VectorCopy( point, ent.e.origin );
 	R_SetupEntityLightingGrid( &ent, world );
 
+	// codmod: the stored vector's LENGTH encodes how directional the light really is, for the
+	// specular term in lightall_fp.glsl (it normalises L, so diffuse is unaffected).
+	//   1.0           r_codSpecDirectional 0 (old behaviour)
+	//   0.25          no usable direction (fell back to the surface normal): no specular
+	//   0.25..1.0     grows with directed / (directed + ambient)
+	// Without this, L == N and the camera-facing hotspot (E ~ N -> H ~ N) shows on every
+	// spec-mapped surface, as if the player carried a flashlight.
 	if (DotProduct(ent.lightDir, normal) > 0.2f)
 		VectorCopy(ent.lightDir, lightDir);
 	else
 		VectorCopy(normal, lightDir);
+
+	if (r_codSpecDirectional && r_codSpecDirectional->value > 0.0f)
+	{
+		float dirScale = 0.0f;
+
+		if (DotProduct(ent.lightDir, normal) > 0.2f)
+		{
+			float dMax = MAX(ent.directedLight[0], MAX(ent.directedLight[1], ent.directedLight[2]));
+			float aMax = MAX(ent.ambientLight[0], MAX(ent.ambientLight[1], ent.ambientLight[2]));
+			float sum = dMax + aMax;
+
+			if (sum > 0.001f)
+				dirScale = powf(dMax / sum, r_codSpecDirectional->value);
+		}
+
+		VectorScale(lightDir, 0.25f + 0.75f * dirScale, lightDir);
+	}
 
 	return qtrue;
 }
