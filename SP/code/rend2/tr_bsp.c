@@ -2679,6 +2679,8 @@ void R_LoadEnvironmentJson(const char *baseName)
 	ri.FS_FreeFile(buffer.v);
 }
 
+#define MAX_CUBEMAPS_CLUSTER 1024
+
 void R_LoadCubemapEntities(char *cubemapEntityName)
 {
 	char spawnVarChars[2048];
@@ -2745,6 +2747,54 @@ void R_LoadCubemapEntities(char *cubemapEntityName)
 			numCubemaps++;
 		}
 	}
+}
+
+/*
+codmod: ai_marker probes are dense (150-220 per map). Greedily merge markers closer than r_cubemapMergeDist
+into one probe at their centroid: fewer probes means fewer draw batches, far less load time (6 renders each)
+and less cubemap memory.
+*/
+static void R_ClusterCubemaps(void)
+{
+	int i, j, n = 0;
+	float dist = r_cubemapMergeDist->value;
+	int count[MAX_CUBEMAPS_CLUSTER];
+
+	if (dist <= 0.0f || tr.numCubemaps < 2 || tr.numCubemaps > MAX_CUBEMAPS_CLUSTER)
+		return;
+
+	for (i = 0; i < tr.numCubemaps; i++)
+	{
+		cubemap_t *src = &tr.cubemaps[i];
+		vec3_t o;
+		VectorCopy(src->origin, o);
+
+		for (j = 0; j < n; j++)
+		{
+			vec3_t d;
+			VectorSubtract(o, tr.cubemaps[j].origin, d);
+			if (DotProduct(d, d) < dist * dist)
+				break;
+		}
+
+		if (j < n)
+		{
+			// running centroid
+			VectorScale(tr.cubemaps[j].origin, (float)count[j], tr.cubemaps[j].origin);
+			VectorAdd(tr.cubemaps[j].origin, o, tr.cubemaps[j].origin);
+			count[j]++;
+			VectorScale(tr.cubemaps[j].origin, 1.0f / count[j], tr.cubemaps[j].origin);
+		}
+		else
+		{
+			tr.cubemaps[n] = *src;
+			count[n] = 1;
+			n++;
+		}
+	}
+
+	ri.Printf(PRINT_ALL, "Cubemaps: merged %d ai_marker probes into %d (r_cubemapMergeDist %g)\n", tr.numCubemaps, n, dist);
+	tr.numCubemaps = n;
 }
 
 void R_AssignCubemapsToWorldSurfaces(void)
@@ -3183,6 +3233,7 @@ void RE_LoadWorldMap( const char *name ) {
 		{
 			// use ai markers as cubemaps
 			R_LoadCubemapEntities("ai_marker");
+			R_ClusterCubemaps();
 		}
 
 		if (tr.numCubemaps)

@@ -2677,6 +2677,7 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 		{
 			//ri.Printf(PRINT_ALL, ", specularmap %s", specular->bundle[0].image[0]->imgName);
 			diffuse->bundle[TB_SPECULARMAP] = specular->bundle[0];
+			shader.hasSpecMap = qtrue;
 			VectorCopy4(specular->specularScale, diffuse->specularScale);
 		}
 		else if ((lightmap || useLightVector || useLightVertex) && (diffuseImg = diffuse->bundle[TB_DIFFUSEMAP].image[0]))
@@ -2695,6 +2696,7 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 				diffuse->bundle[TB_SPECULARMAP] = diffuse->bundle[0];
 				diffuse->bundle[TB_SPECULARMAP].numImageAnimations = 0;
 				diffuse->bundle[TB_SPECULARMAP].image[0] = specularImg;
+				shader.hasSpecMap = qtrue;
 
 				VectorSet4(diffuse->specularScale, 1.0f, 1.0f, 1.0f, 1.0f);
 			}
@@ -3602,6 +3604,17 @@ static shader_t *FinishShader( void ) {
 	// look for multitexture potential
 	//
 	stage = CollapseStagesToGLSL();
+
+	// codmod: only lit lightall stages ever sample a cubemap
+	{
+		int i;
+		for ( i = 0; i < stage; i++ ) {
+			if ( stages[i].active && stages[i].glslShaderGroup == tr.lightallShader
+				&& ( stages[i].glslShaderIndex & LIGHTDEF_LIGHTTYPE_MASK ) ) {
+				shader.useCubemap = qtrue;
+			}
+		}
+	}
 
 	if ( shader.lightmapIndex >= 0 && !hasLightmapStage ) {
 		if (vertexLightmap) {

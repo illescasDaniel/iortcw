@@ -524,6 +524,10 @@ typedef struct shader_s {
 
 	qboolean characterMip;              // use r_picmip2 rather than r_picmip
 
+	// codmod: cubemap eligibility, set in FinishShader (see R_AddDrawSurf)
+	qboolean	useCubemap;				// has a lit lightall stage that can sample a cubemap
+	qboolean	hasSpecMap;				// a lightall stage has an explicit or auto-found _s map
+
 	fogPass_t	fogPass;				// draw a blended pass, possibly with depth test equals
 
 	int         vertexAttribs;          // not all shaders will need all data to be gathered
@@ -2084,6 +2088,8 @@ extern  cvar_t  *r_cubeMapping;
 extern  cvar_t  *r_cubemapSize;
 extern  cvar_t  *r_deluxeSpecular;
 extern  cvar_t  *r_codSpecular;
+extern  cvar_t  *r_cubemapSpecOnly;
+extern  cvar_t  *r_cubemapMergeDist;
 // codmod: master switch for all specular extras (spec maps, light-grid specular, cubemaps); latched
 #define R_CUBEMAPPING (r_cubeMapping->integer && r_codSpecular->integer)
 extern  cvar_t  *r_pbr;

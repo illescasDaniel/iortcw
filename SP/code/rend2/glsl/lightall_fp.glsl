@@ -416,7 +416,8 @@ void main()
 	NH = clamp(dot(N, H), 0.0, 1.0);
 
   #if defined(USE_SPECULARMAP)
-	vec4 specular = texture2D(u_SpecularMap, texCoords);
+	// codmod: uniform branch, surfaces without a spec map skip the fetch (white image * scale otherwise)
+	vec4 specular = (u_EnableTextures.z > 0.0) ? texture2D(u_SpecularMap, texCoords) : vec4(1.0);
   #else
 	vec4 specular = vec4(1.0);
   #endif
@@ -474,6 +475,9 @@ void main()
 	gl_FragColor.rgb += ambientColor * diffuse.rgb;
 
   #if defined(USE_CUBEMAP)
+	// codmod: uniform branch, surfaces without a probe skip the BRDF and the cubemap fetch
+	if (u_EnableTextures.w > 0.0)
+	{
 	reflectance = EnvironmentBRDF(roughness, NE, specular.rgb);
 
 	vec3 R = reflect(E, N);
@@ -502,6 +506,7 @@ void main()
 	//cubeLightColor *= lightColor * (attenuation * NL) + ambientColor;
 
 	gl_FragColor.rgb += cubeLightColor * reflectance;
+	}
   #endif
 
   #if defined(USE_PRIMARY_LIGHT) || defined(SHADOWMAP_MODULATE)

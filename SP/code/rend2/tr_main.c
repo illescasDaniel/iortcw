@@ -1645,6 +1645,31 @@ static ID_INLINE void R_Radix( int byte, int size, drawSurf_t *source, drawSurf_
 
 /*
 ===============
+R_RadixCubemap
+
+codmod: stable counting sort on the cubemap index. The index is not part of the sort key but splits draw
+batches, so grouping equal keys by probe turns "one batch per surface" into "one batch per (shader, probe)".
+===============
+*/
+static void R_RadixCubemap( int size, drawSurf_t *source, drawSurf_t *dest )
+{
+  int count[ 256 ] = { 0 };
+  int i;
+
+  for( i = 0; i < size; ++i )
+    ++count[ source[ i ].cubemapIndex & 255 ];
+  for( i = 0, size = 0; i < 256; ++i )
+  {
+    int c = count[ i ];
+    count[ i ] = size;
+    size += c;
+  }
+  for( i = 0; i < size; ++i )
+    dest[ count[ source[ i ].cubemapIndex & 255 ]++ ] = source[ i ];
+}
+
+/*
+===============
 R_RadixSort
 
 Radix sort with 4 byte size buckets
@@ -1654,6 +1679,17 @@ static void R_RadixSort( drawSurf_t *source, int size )
 {
   static drawSurf_t scratch[ MAX_DRAWSURFS ];
 #ifdef Q3_LITTLE_ENDIAN
+  if ( tr.numCubemaps && R_CUBEMAPPING )
+  {
+    // 5 passes: cubemap (least significant), then the 4 key bytes; result ends in scratch
+    R_RadixCubemap( size, source, scratch );
+    R_Radix( 0, size, scratch, source );
+    R_Radix( 1, size, source, scratch );
+    R_Radix( 2, size, scratch, source );
+    R_Radix( 3, size, source, scratch );
+    memcpy( source, scratch, size * sizeof( drawSurf_t ) );
+    return;
+  }
   R_Radix( 0, size, source, scratch );
   R_Radix( 1, size, scratch, source );
   R_Radix( 2, size, source, scratch );
@@ -1676,6 +1712,15 @@ R_AddDrawSurf
 void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader,
 					int fogIndex, int dlightMap, int pshadowMap, int cubemap, int atiTess ) {
 	int index;
+
+	// codmod: cubemaps only matter for lit surfaces of colour views; dropping the index elsewhere keeps
+	// draw batches from splitting per probe (depth/shadow views never sample one). With
+	// r_cubemapSpecOnly only shaders with a specular map get a probe, so most of the world batches normally.
+	if ( cubemap && ( !shader->useCubemap
+		|| ( tr.viewParms.flags & ( VPF_DEPTHSHADOW | VPF_SHADOWMAP | VPF_NOCUBEMAPS ) )
+		|| ( r_cubemapSpecOnly->integer && !shader->hasSpecMap ) ) ) {
+		cubemap = 0;
+	}
 
 	// instead of checking for overflow, we just mask the index
 	// so it wraps around

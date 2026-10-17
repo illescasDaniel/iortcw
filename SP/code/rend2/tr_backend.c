@@ -891,7 +891,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	backEnd.pc.c_surfaces += numDrawSurfs;
 
 	for (i = 0, drawSurf = drawSurfs ; i < numDrawSurfs ; i++, drawSurf++) {
-		if ( drawSurf->sort == oldSort && drawSurf->cubemapIndex == oldCubemapIndex) {
+		if ( drawSurf->sort == oldSort && ( backEnd.depthFill || drawSurf->cubemapIndex == oldCubemapIndex ) ) {
 			if (backEnd.depthFill && shader && (shader->sort != SS_OPAQUE && shader->sort != SS_PORTAL))
 				continue;
 
@@ -924,7 +924,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		// change the tess parameters if needed
 		// a "entityMergable" shader is a shader that can have surfaces from separate
 		// entities merged into a single batch, like smoke and blood puff sprites
-		if ( shader != NULL && ( shader != oldShader || fogNum != oldFogNum || dlighted != oldDlighted || pshadowed != oldPshadowed || cubemapIndex != oldCubemapIndex
+		if ( shader != NULL && ( shader != oldShader || fogNum != oldFogNum || dlighted != oldDlighted || pshadowed != oldPshadowed || ( !backEnd.depthFill && cubemapIndex != oldCubemapIndex )
 			// GR - force draw on tessellation flag change
 			|| (atiTess != oldAtiTess)
 			|| ( entityNum != oldEntityNum && !shader->entityMergable ) ) ) {
