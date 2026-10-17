@@ -2006,6 +2006,52 @@ static qboolean CL_Vid_RestartNeedsHardContext( void ) {
 
 /*
 =================
+Display mode (windowed / borderless / fullscreen)
+
+r_displayMode is only a menu-facing view of r_fullscreen + r_noborder (the engine cvars stay the truth, so
+Alt+Enter, configs and the in-place fullscreen path keep working). It is re-derived when the renderer starts
+and whenever a vid_restart finds it unchanged; a changed value is pushed into the latched engine cvars.
+=================
+*/
+static cvar_t *r_displayMode;
+static int cl_dispModeApplied = -1;
+
+static int CL_DisplayModeFromCvars( void ) {
+	if ( Cvar_VariableLatchedInteger( "r_fullscreen" ) ) {
+		return 2;
+	}
+	return Cvar_VariableLatchedInteger( "r_noborder" ) ? 1 : 0;
+}
+
+static void CL_SyncDisplayMode( void ) {
+	if ( !r_displayMode ) {
+		r_displayMode = Cvar_Get( "r_displayMode", "2", CVAR_ARCHIVE );
+	}
+	cl_dispModeApplied = CL_DisplayModeFromCvars();
+	Cvar_SetValue( "r_displayMode", cl_dispModeApplied );
+}
+
+static void CL_ApplyDisplayMode( void ) {
+	int want;
+
+	if ( !r_displayMode ) {
+		return;
+	}
+	want = r_displayMode->integer;
+	if ( want < 0 || want > 2 || want == cl_dispModeApplied ) {
+		CL_SyncDisplayMode();
+		return;
+	}
+	Cvar_Set( "r_fullscreen", want == 2 ? "1" : "0" );
+	Cvar_Set( "r_noborder", want == 1 ? "1" : "0" );
+	if ( want == 1 ) {
+		Cvar_Set( "r_mode", "-2" );   // borderless = desktop-sized window
+	}
+	cl_dispModeApplied = want;
+}
+
+/*
+=================
 CL_Vid_Restart_f
 
 Restart the video subsystem
@@ -2021,6 +2067,7 @@ void CL_Vid_Restart_f( void ) {
 
 	// Wayland + MangoHud: destroying/recreating the GL context SIGSEGVs.
 	// Fullscreen-only: toggle SDL in place and skip the rest.
+	CL_ApplyDisplayMode();
 	if( IN_ToggleFullscreenInPlace() )
 	{
 		return;
@@ -3447,6 +3494,7 @@ void CL_InitRenderer( void ) {
 	cls.consoleShader2 = re.RegisterShader( "console2" );
 	g_console_field_width = cls.glconfig.vidWidth / SMALLCHAR_WIDTH - 2;
 	g_consoleField.widthInChars = g_console_field_width;
+	CL_SyncDisplayMode();
 }
 
 /*

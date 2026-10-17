@@ -2670,7 +2670,7 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 		}
 	}
 
-	if (r_specularMapping->integer)
+	if (r_specularMapping->integer && r_codSpecular->integer)
 	{
 		image_t *diffuseImg;
 		if (specular)
@@ -2898,6 +2898,14 @@ static int CollapseStagesToGLSL(void)
 
 			vertexlit = qfalse;
 			if (diffuse->rgbGen == CGEN_VERTEX_LIT || diffuse->rgbGen == CGEN_EXACT_VERTEX_LIT)
+			{
+				vertexlit = qtrue;
+			}
+			// codmod: static models baked into the BSP (chains, props) use plain vertex colours and have
+			// light-grid directions like any world surface, so opaque/alpha-tested ones take specular too
+			else if (r_specularMapping->integer && r_codSpecular->integer && shader.lightmapIndex == LIGHTMAP_BY_VERTEX
+				&& (diffuse->rgbGen == CGEN_VERTEX || diffuse->rgbGen == CGEN_EXACT_VERTEX)
+				&& !(diffuse->stateBits & (GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS)))
 			{
 				vertexlit = qtrue;
 			}

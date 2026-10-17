@@ -2997,7 +2997,7 @@ void R_CreateBuiltinImages( void ) {
 			tr.flashShadowMaskImage = R_CreateImage("*flashShadowMask", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_R8);
 		}
 
-		if (r_cubeMapping->integer)
+		if (R_CUBEMAPPING)
 		{
 			tr.renderCubeImage = R_CreateImage("*renderCube", NULL, r_cubemapSize->integer, r_cubemapSize->integer, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE | IMGFLAG_MIPMAP | IMGFLAG_CUBEMAP, rgbFormat);
 		}

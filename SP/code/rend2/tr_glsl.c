@@ -374,7 +374,7 @@ static void GLSL_GetShaderHeader( GLenum shaderType, const GLchar *extra, char *
 	if (r_pbr->integer)
 		Q_strcat(dest, size, "#define USE_PBR\n");
 
-	if (r_cubeMapping->integer)
+	if (R_CUBEMAPPING)
 	{
 		int cubeMipSize = r_cubemapSize->integer;
 		int numRoughnessMips = 0;
@@ -1179,7 +1179,7 @@ void GLSL_InitGPUShaders(void)
 			if (r_specularMapping->integer)
 				Q_strcat(extradefines, 1024, "#define USE_SPECULARMAP\n");
 
-			if (r_cubeMapping->integer)
+			if (R_CUBEMAPPING)
 			{
 				Q_strcat(extradefines, 1024, "#define USE_CUBEMAP\n");
 				if (r_cubeMapping->integer == 2)
@@ -1187,7 +1187,7 @@ void GLSL_InitGPUShaders(void)
 			}
 
 			// codmod: direct specular from the light-grid direction is independent of cubemaps
-			if (r_deluxeSpecular->value > 0.000001f)
+			if (r_codSpecular->integer && r_deluxeSpecular->value > 0.000001f)
 			{
 				Q_strcat(extradefines, 1024, va("#define r_deluxeSpecular %f\n", r_deluxeSpecular->value));
 			}

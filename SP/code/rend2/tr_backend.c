@@ -2527,7 +2527,7 @@ const void *RB_PostProcess(const void *data)
 	}
 
 #if 0
-	if (r_cubeMapping->integer && tr.numCubemaps)
+	if (R_CUBEMAPPING && tr.numCubemaps)
 	{
 		ivec4_t dstBox;
 		int cubemapIndex = R_CubemapForPoint( backEnd.viewParms.or.origin );

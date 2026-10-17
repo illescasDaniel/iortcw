@@ -186,7 +186,8 @@ qboolean GLimp_SetModeInPlace( void )
 		dh = curH - height;
 		if( dw < 0 ) dw = -dw;
 		if( dh < 0 ) dh = -dh;
-		if( !!wantFs == !!haveFs && dw <= 2 && dh <= 2 )
+		if( !!wantFs == !!haveFs && dw <= 2 && dh <= 2 &&
+			( wantFs || !!( SDL_GetWindowFlags( SDL_window ) & SDL_WINDOW_BORDERLESS ) == !!r_noborder->integer ) )
 		{
 			glConfig.isFullscreen = wantFs ? qtrue : qfalse;
 			r_fullscreen->modified = qfalse;

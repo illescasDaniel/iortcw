@@ -3169,7 +3169,7 @@ void RE_LoadWorldMap( const char *name ) {
 	}
 
 	// load cubemaps
-	if (r_cubeMapping->integer)
+	if (R_CUBEMAPPING)
 	{
 		// Try loading an env.json file first
 		R_LoadEnvironmentJson(s_worldData.baseName);
@@ -3210,7 +3210,7 @@ void RE_LoadWorldMap( const char *name ) {
 	R_BindNullVao();
 
 	// Render or load all cubemaps
-	if (r_cubeMapping->integer && tr.numCubemaps && glRefConfig.framebufferObject)
+	if (R_CUBEMAPPING && tr.numCubemaps && glRefConfig.framebufferObject)
 	{
 		R_LoadCubemaps();
 		R_RenderMissingCubemaps();

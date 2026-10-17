@@ -2083,6 +2083,9 @@ extern  cvar_t  *r_parallaxMapShadows;
 extern  cvar_t  *r_cubeMapping;
 extern  cvar_t  *r_cubemapSize;
 extern  cvar_t  *r_deluxeSpecular;
+extern  cvar_t  *r_codSpecular;
+// codmod: master switch for all specular extras (spec maps, light-grid specular, cubemaps); latched
+#define R_CUBEMAPPING (r_cubeMapping->integer && r_codSpecular->integer)
 extern  cvar_t  *r_pbr;
 extern  cvar_t  *r_baseNormalX;
 extern  cvar_t  *r_baseNormalY;
