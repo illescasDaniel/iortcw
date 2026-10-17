@@ -1896,6 +1896,7 @@ Q3R2OBJ = \
   $(B)/renderer/sdl_glimp.o
 
 Q3R2STRINGOBJ = \
+  $(B)/rend2/glsl/bloombright_fp.o \
   $(B)/rend2/glsl/bokeh_fp.o \
   $(B)/rend2/glsl/bokeh_vp.o \
   $(B)/rend2/glsl/calclevels4x_fp.o \
@@ -1927,6 +1928,7 @@ Q3R2STRINGOBJ = \
   $(B)/rend2/glsl/shadowmask_vp.o \
   $(B)/rend2/glsl/ssao_fp.o \
   $(B)/rend2/glsl/ssao_vp.o \
+  $(B)/rend2/glsl/grade_fp.o \
   $(B)/rend2/glsl/ssaoup_fp.o \
   $(B)/rend2/glsl/texturecolor_fp.o \
   $(B)/rend2/glsl/texturecolor_vp.o \

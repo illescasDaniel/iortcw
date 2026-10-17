@@ -618,3 +618,82 @@ void RB_GaussianBlur(FBO_t *srcFbo, FBO_t *dstFbo, float blur)
 		FBO_Blit(tr.textureScratchFbo[0], srcBox, NULL, dstFbo, dstBox, NULL, color, GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA);
 	}
 }
+
+/*
+=============
+RB_PostFx
+
+codmod: optional bloom (r_bloom) and colour grade (r_grade), run on the tone-mapped, anti-aliased 3D scene.
+Bloom: soft-knee bright pass into a half resolution image, a chain of 2x downsamples (5 levels), then the
+levels are added back up with a 3x3 tent filter, each level weighted down, so the result is a tight glow
+around lights with a wide faint halo. The grade shader then adds it (screen blend) and applies contrast /
+saturation / split tint / vignette in one fullscreen pass (scene -> screenScratch -> scene).
+Returns qfalse when nothing was done.
+=============
+*/
+#define BLOOM_UP_WEIGHT 0.8f
+
+qboolean RB_PostFx(FBO_t *srcFbo, ivec4_t srcBox)
+{
+	static const float bloomLevel[4] = { 0.0f, 0.5f, 1.0f, 1.6f };
+	float bloomMul = bloomLevel[r_bloom->integer < 0 ? 0 : (r_bloom->integer > 3 ? 3 : r_bloom->integer)];
+	qboolean bloom = bloomMul > 0.0f && r_bloomIntensity->value > 0.0f && tr.bloomFbo[BLOOM_LEVELS - 1];
+	qboolean grade = r_grade->integer != 0;
+	vec4_t color, viewInfo;
+	float norm = 0.0f;
+
+	if (!srcFbo || !tr.screenScratchFbo || (!bloom && !grade))
+		return qfalse;
+
+	if (bloom)
+	{
+		float radius = Com_Clamp(0.25f, 4.0f, r_bloomRadius->value);
+		float threshold = Com_Clamp(0.0f, 1.0f, r_bloomThreshold->value);
+		float w;
+		int i;
+
+		// bright pass into mip 0. Whole texture to whole texture: FBO_Blit flips Y when a source box is
+		// paired with a NULL destination box, which put every glow upside down (torches lit the floor).
+		// The grade pass samples the bloom with the scene's texcoords, so the full-texture mapping lines up.
+		VectorSet4(color, threshold, 0.15f, 0.0f, 1.0f);
+		FBO_Blit(srcFbo, NULL, NULL, tr.bloomFbo[0], NULL, &tr.bloomBrightShader, color, 0);
+		RB_GpuMark( "bloom_bright" );
+
+		for (i = 1; i < BLOOM_LEVELS; i++)
+			FBO_FastBlit(tr.bloomFbo[i - 1], NULL, tr.bloomFbo[i], NULL, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		RB_GpuMark( "bloom_down" );
+
+		// each smaller level is tent-filtered onto the next larger one, smallest first. A weight below 1
+		// keeps the glow tight around the light with a faint wide halo; the sum is normalised below.
+		VectorSet4(color, BLOOM_UP_WEIGHT, 0.0f, 0.0f, 1.0f);
+		for (i = BLOOM_LEVELS - 2; i >= 0; i--)
+		{
+			// FBO_Blit sets u_InvTexRes = texScale / source size, so the radius goes in as the scale
+			FBO_Blit(tr.bloomFbo[i + 1], NULL, (vec2_t){ radius, radius }, tr.bloomFbo[i], NULL, &tr.bloomBlurShader, color, GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE);
+		}
+		RB_GpuMark( "bloom_up" );
+
+		for (i = 0, w = 1.0f; i < BLOOM_LEVELS; i++, w *= BLOOM_UP_WEIGHT)
+			norm += w;
+
+		GL_BindToTMU(tr.bloomImage[0], TB_LIGHTMAP);
+	}
+
+	VectorSet4(color, bloom ? r_bloomIntensity->value * bloomMul / norm : 0.0f, grade ? Com_Clamp(0.5f, 2.5f, r_gradeBrightness->value) : 1.0f, 0.0f, 1.0f);
+	if (grade)
+	{
+		VectorSet4(viewInfo, r_gradeContrast->value, r_gradeSaturation->value, Com_Clamp(-1.0f, 1.0f, r_gradeTint->value), r_gradeVignette->value);
+	}
+	else
+	{
+		VectorSet4(viewInfo, 1.0f, 1.0f, 0.0f, 0.0f);
+	}
+
+	GLSL_BindProgram(&tr.gradeShader);
+	GLSL_SetUniformVec4(&tr.gradeShader, UNIFORM_VIEWINFO, viewInfo);
+	FBO_Blit(srcFbo, srcBox, NULL, tr.screenScratchFbo, srcBox, &tr.gradeShader, color, 0);
+	FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	RB_GpuMark( "grade" );
+
+	return qtrue;
+}

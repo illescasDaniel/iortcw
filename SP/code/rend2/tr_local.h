@@ -827,6 +827,7 @@ typedef enum
 	UNIFORM_COUNT
 } uniform_t;
 
+#define BLOOM_LEVELS 5	// codmod bloom mip chain: 1/2, 1/4, 1/8, 1/16, 1/32 of the screen
 #define SSAO_DEPTH_MIPS 4	// codmod: GTAO depth mip chain levels below the half resolution depth
 
 // shaderProgram_t represents a pair of one
@@ -1710,6 +1711,7 @@ typedef struct {
 	image_t					*smaaSearchImage;
 	image_t					*textureScratchImage[2];
 	image_t                 *quarterImage[2];
+	image_t                 *bloomImage[BLOOM_LEVELS];
 	image_t					*calcLevelsImage;
 	image_t					*targetLevelsImage;
 	image_t					*fixedLevelsImage;
@@ -1736,6 +1738,7 @@ typedef struct {
 	FBO_t					*smaaBlendFbo;
 	FBO_t					*textureScratchFbo[2];
 	FBO_t                   *quarterFbo[2];
+	FBO_t                   *bloomFbo[BLOOM_LEVELS];
 	FBO_t					*calcLevelsFbo;
 	FBO_t					*targetLevelsFbo;
 	FBO_t					*sunShadowFbo[4];
@@ -1800,6 +1803,9 @@ typedef struct {
 	shaderProgram_t flashShadowmaskShader;
 	shaderProgram_t ssaoShader[2]; // 0 = hemisphere, 1 = GTAO
 	shaderProgram_t ssaoUpShader;
+	shaderProgram_t bloomBrightShader;
+	shaderProgram_t bloomBlurShader;
+	shaderProgram_t gradeShader;
 	shaderProgram_t depthBlurShader[4];
 	shaderProgram_t testcubeShader;
 
@@ -2070,6 +2076,16 @@ extern  cvar_t  *r_cameraExposure;
 extern  cvar_t  *r_depthPrepass;
 extern  cvar_t  *r_ao;
 extern  cvar_t  *r_ssaoAmbient;
+extern  cvar_t  *r_bloom;
+extern  cvar_t  *r_bloomIntensity;
+extern  cvar_t  *r_bloomThreshold;
+extern  cvar_t  *r_bloomRadius;
+extern  cvar_t  *r_grade;
+extern  cvar_t  *r_gradeContrast;
+extern  cvar_t  *r_gradeBrightness;
+extern  cvar_t  *r_gradeSaturation;
+extern  cvar_t  *r_gradeTint;
+extern  cvar_t  *r_gradeVignette;
 extern  cvar_t  *r_ssao;
 extern  cvar_t  *r_ssaoRadius;
 extern  cvar_t  *r_ssaoStrength;

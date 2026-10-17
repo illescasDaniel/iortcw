@@ -2939,6 +2939,15 @@ void R_CreateBuiltinImages( void ) {
 			tr.quarterImage[x] = R_CreateImage(va("*quarter%d", x), NULL, width / 2, height / 2, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_RGBA8);
 		}
 
+		for (x = 0; x < BLOOM_LEVELS; x++)
+		{
+			int bw = width >> (x + 1), bh = height >> (x + 1);
+
+			if (bw < 1) bw = 1;
+			if (bh < 1) bh = 1;
+			tr.bloomImage[x] = R_CreateImage(va("*bloom%d", x), NULL, bw, bh, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, hdrFormat);
+		}
+
 		{
 			tr.screenSsaoImage = R_CreateImage("*screenSsao", NULL, width / 2, height / 2, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_RGBA8);
 

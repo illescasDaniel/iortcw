@@ -2403,6 +2403,8 @@ const void *RB_PostProcess(const void *data)
 		RB_SunRays(srcFbo, srcBox, srcFbo, srcBox);
 	RB_GpuMark( "rays_add" );
 
+	RB_PostFx(srcFbo, srcBox);
+
 	if (1)
 		RB_BokehBlur(srcFbo, srcBox, srcFbo, srcBox, backEnd.refdef.blurFactor);
 	else

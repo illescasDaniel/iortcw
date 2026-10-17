@@ -49,6 +49,8 @@ extern const char *fallbackShader_shadowmask_fp;
 extern const char *fallbackShader_ssao_vp;
 extern const char *fallbackShader_ssao_fp;
 extern const char *fallbackShader_ssaoup_fp;
+extern const char *fallbackShader_bloombright_fp;
+extern const char *fallbackShader_grade_fp;
 extern const char *fallbackShader_texturecolor_vp;
 extern const char *fallbackShader_texturecolor_fp;
 extern const char *fallbackShader_smaa_lib;
@@ -1574,6 +1576,47 @@ void GLSL_InitGPUShaders(void)
 	numEtcShaders++;
 
 
+	// codmod bloom bright pass and grade/bloom composite (drawn like texturecolor blits)
+	attribs = ATTR_POSITION | ATTR_TEXCOORD;
+	extradefines[0] = '\0';
+
+	if (!GLSL_InitGPUShader(&tr.bloomBrightShader, "bloombright", attribs, qtrue, extradefines, qtrue, fallbackShader_texturecolor_vp, fallbackShader_bloombright_fp))
+	{
+		ri.Error(ERR_FATAL, "Could not load bloombright shader!");
+	}
+
+	GLSL_InitUniforms(&tr.bloomBrightShader);
+	GLSL_SetUniformInt(&tr.bloomBrightShader, UNIFORM_DIFFUSEMAP, TB_DIFFUSEMAP);
+	GLSL_FinishGPUShader(&tr.bloomBrightShader);
+
+	numEtcShaders++;
+
+	Q_strcat(extradefines, 1024, "#define UP_PASS\n");
+	if (!GLSL_InitGPUShader(&tr.bloomBlurShader, "bloomblur", attribs, qtrue, extradefines, qtrue, fallbackShader_texturecolor_vp, fallbackShader_bloombright_fp))
+	{
+		ri.Error(ERR_FATAL, "Could not load bloomblur shader!");
+	}
+
+	GLSL_InitUniforms(&tr.bloomBlurShader);
+	GLSL_SetUniformInt(&tr.bloomBlurShader, UNIFORM_DIFFUSEMAP, TB_DIFFUSEMAP);
+	GLSL_FinishGPUShader(&tr.bloomBlurShader);
+
+	numEtcShaders++;
+
+	extradefines[0] = '\0';
+	if (!GLSL_InitGPUShader(&tr.gradeShader, "grade", attribs, qtrue, extradefines, qtrue, fallbackShader_texturecolor_vp, fallbackShader_grade_fp))
+	{
+		ri.Error(ERR_FATAL, "Could not load grade shader!");
+	}
+
+	GLSL_InitUniforms(&tr.gradeShader);
+	GLSL_SetUniformInt(&tr.gradeShader, UNIFORM_DIFFUSEMAP, TB_DIFFUSEMAP);
+	GLSL_SetUniformInt(&tr.gradeShader, UNIFORM_LIGHTMAP, TB_LIGHTMAP);
+	GLSL_FinishGPUShader(&tr.gradeShader);
+
+	numEtcShaders++;
+
+
 	for (i = 0; i < 4; i++)
 	{
 		attribs = ATTR_POSITION | ATTR_TEXCOORD;
@@ -1661,6 +1704,9 @@ void GLSL_ShutdownGPUShaders(void)
 	GLSL_DeleteGPUShader(&tr.down4xShader);
 	GLSL_DeleteGPUShader(&tr.bokehShader);
 	GLSL_DeleteGPUShader(&tr.tonemapShader);
+	GLSL_DeleteGPUShader(&tr.bloomBrightShader);
+	GLSL_DeleteGPUShader(&tr.bloomBlurShader);
+	GLSL_DeleteGPUShader(&tr.gradeShader);
 
 	for ( i = 0; i < 4; i++)
 	{

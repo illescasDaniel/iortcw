@@ -157,6 +157,16 @@ cvar_t  *r_forceAutoExposureMax;
 cvar_t  *r_depthPrepass;
 cvar_t  *r_ao;
 cvar_t  *r_ssaoAmbient;
+cvar_t  *r_bloom;
+cvar_t  *r_bloomIntensity;
+cvar_t  *r_bloomThreshold;
+cvar_t  *r_bloomRadius;
+cvar_t  *r_grade;
+cvar_t  *r_gradeContrast;
+cvar_t  *r_gradeBrightness;
+cvar_t  *r_gradeSaturation;
+cvar_t  *r_gradeTint;
+cvar_t  *r_gradeVignette;
 cvar_t  *r_ssao;
 cvar_t  *r_ssaoRadius;
 cvar_t  *r_ssaoStrength;
@@ -1509,6 +1519,18 @@ void R_Register( void ) {
 	r_ao = ri.Cvar_Get( "r_ao", "2", CVAR_ARCHIVE );
 	r_ssao = ri.Cvar_Get( "r_ssao", "0", 0 );   // derived from r_ao
 	r_ssaoAmbient = ri.Cvar_Get( "r_ssaoAmbient", "0", 0 );   // 0: multiply the final image (default; covers every surface), 1: AO only dims the baked/ambient light in lightall (misses non-lightall surfaces)
+	// codmod post effects (tr_postprocess.c: RB_PostFx). r_bloom / r_grade are the user-facing menu settings (archived);
+	// the tuning cvars are not archived so the code defaults always apply (console: set r_bloomIntensity ...)
+	r_bloom = ri.Cvar_Get( "r_bloom", "0", CVAR_ARCHIVE );                   // 0 off, 1-3 low/medium/high (scales r_bloomIntensity x0.5/1/1.6)
+	r_bloomIntensity = ri.Cvar_Get( "r_bloomIntensity", "2.5", 0 );
+	r_bloomThreshold = ri.Cvar_Get( "r_bloomThreshold", "0.6", 0 ); // brightness (0..1, after tone mapping) where glow starts
+	r_bloomRadius = ri.Cvar_Get( "r_bloomRadius", "1.0", 0 );     // blur width multiplier
+	r_grade = ri.Cvar_Get( "r_grade", "0", CVAR_ARCHIVE );                   // 0 off, 1 on
+	r_gradeBrightness = ri.Cvar_Get( "r_gradeBrightness", "1.25", 0 );  // gamma lift, 1 = unchanged
+	r_gradeContrast = ri.Cvar_Get( "r_gradeContrast", "1.06", 0 );
+	r_gradeSaturation = ri.Cvar_Get( "r_gradeSaturation", "1.10", 0 );
+	r_gradeTint = ri.Cvar_Get( "r_gradeTint", "0.3", 0 );         // -1 cool highlights .. +1 warm highlights
+	r_gradeVignette = ri.Cvar_Get( "r_gradeVignette", "0.1", 0 );
 	r_ssaoRadius = ri.Cvar_Get( "r_ssaoRadius", "40", 0 );
 	ri.Cvar_CheckRange( r_ssaoRadius, 4, 512, qfalse );
 	r_ssaoStrength = ri.Cvar_Get( "r_ssaoStrength", "1", 0 );
