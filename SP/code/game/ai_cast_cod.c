@@ -244,6 +244,7 @@ void AICast_CodReset( int entNum ) {
 	}
 	CodClear( &codAI[entNum], entNum );
 	AICast_CodSquadForget( entNum );
+	AICast_CodHuntReset( entNum );      // codmod: Phase 4
 }
 
 /*
@@ -274,6 +275,9 @@ qboolean AICast_CodWantsCrouch( cast_state_t *cs ) {
 	ca = &codAI[cs->entityNum];
 	if ( ca->levelStart != level.startTime || ca->lastThink < level.time - 300 || cs->aifunc != AIFunc_CodCombat ) {
 		return qfalse;
+	}
+	if ( AICast_CodHuntCrouch( cs ) ) {
+		return qtrue;       // codmod: Phase 4, crouch-walking up to a corner while hunting
 	}
 	return ( ca->crouchUntil >= level.time ) ? qtrue : qfalse;
 }
@@ -1880,7 +1884,16 @@ static char *CodStatePeek( cast_state_t *cs, codAI_t *ca, qboolean visible ) {
 		return CodStateEndPeek( cs, ca, qfalse, "empty magazine" );
 	}
 	if ( level.time - ca->lastSawEnemy > COD_PEEK_LOST && !ca->suppressPeek && !pushFire ) {
-		// the enemy is not where we looked: let the vanilla chase find them (Phase 4 replaces this)
+		if ( bg_cod.aiHunt ) {
+			// codmod: Phase 4, the enemy is not where we looked: leave the cover state; the next think sees the enemy
+			// as lost and starts the hunt (AIFunc_CodCombat)
+			CodExit( cs, ca, 0 );
+			if ( bg_cod.aiDebug >= 1 ) {
+				G_Printf( "[ai] %s PEEK lost the enemy: hunt\n", CodName( cs ) );
+			}
+			return NULL;
+		}
+		// the enemy is not where we looked: let the vanilla chase find them
 		CodExit( cs, ca, 3000 );
 		return AIFunc_BattleChaseStart( cs );
 	}
@@ -2188,6 +2201,30 @@ char *AIFunc_CodCombat( cast_state_t *cs ) {
 	if ( elig == COD_ELIG_LOST && ( ca->state == COD_HIDE || ca->state == COD_PEEK ) ) {
 		elig = COD_ELIG_OK;
 	}
+	// codmod: Phase 4, a dodge or a retreat in progress is finished before the hunt starts
+	if ( elig == COD_ELIG_LOST && bg_cod.aiHunt && ca->state == COD_MOVE && ( ca->dodging || ca->retreatKind ) ) {
+		elig = COD_ELIG_OK;
+	}
+	if ( elig != COD_ELIG_LOST ) {
+		AICast_CodHuntLeave( cs );      // codmod: Phase 4, contact again (or not tactical any more): the hunt state goes
+	}
+	if ( elig == COD_ELIG_LOST && bg_cod.aiHunt ) {
+		// codmod: Phase 4, lost contact: hunt (hops, held angles, corner clearing, a sweep, then heightened alert)
+		int hr;
+
+		if ( ca->state != COD_OPEN || ca->hasCover || ca->pushMode ) {
+			CodExit( cs, ca, 0 );       // drops cover, token, mover slot and crouch
+		}
+		hr = AICast_CodHuntThink( cs, &rval );
+		if ( hr == COD_HUNT_BUSY ) {
+			return NULL;
+		}
+		if ( hr == COD_HUNT_ALERT ) {
+			CodExit( cs, ca, 0 );
+			return rval;
+		}
+		// COD_HUNT_VANILLA: the old hand-over below
+	}
 	if ( elig == COD_ELIG_LOST ) {
 		// lost contact: the vanilla chase takes over
 		CodExit( cs, ca, 3000 );
@@ -2212,6 +2249,7 @@ char *AIFunc_CodCombat( cast_state_t *cs ) {
 	visible = CodEnemyVisible( cs );
 	if ( visible ) {
 		AICast_CodSquadReportThreat( cs, g_entities[cs->enemyNum].r.currentOrigin );
+		AICast_CodHuntTrack( cs );      // codmod: Phase 4, last seen position and velocity for the hunt
 	}
 	AICast_CodSquadPublish( cs, ( ca->state == COD_HIDE || ca->state == COD_PEEK ) ? qtrue : qfalse );
 	CodThreatPos( cs, threatPos );

@@ -361,6 +361,10 @@ qboolean AICast_EntityVisible( cast_state_t *cs, int enemynum, qboolean directvi
 		// we recently saw them, so we are more "aware" of their presence
 		reactionTime /= 2;
 	}
+	// codmod: Phase 4, a hunting or alerted tactical soldier reacts twice as fast (gated in AICast_CodAlertActive)
+	if ( AICast_CodAlertActive( cs ) ) {
+		reactionTime /= 2;
+	}
 
 	// if they are close, we should react faster
 	if ( cs->bs && enemynum == cs->enemyNum ) {

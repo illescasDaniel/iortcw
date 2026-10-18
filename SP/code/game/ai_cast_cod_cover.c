@@ -325,6 +325,11 @@ static qboolean CodDropToFloor( vec3_t in, vec3_t out ) {
 	return qtrue;
 }
 
+// codmod: Phase 4, for the hunt (predicted position, sweep points)
+qboolean AICast_CodDropToFloor( vec3_t in, vec3_t out ) {
+	return CodDropToFloor( in, out );
+}
+
 /*
 ============
 CodAddCandidate

@@ -74,6 +74,7 @@ void AICast_CodCoverSetTravelCap( int travel );     // Phase 3: cap (1/100 s) fo
 void AICast_CodClaimCover( int entNum, vec3_t pos );
 void AICast_CodReleaseCover( int entNum );
 qboolean AICast_CodLineClear( vec3_t from, vec3_t to );
+qboolean AICast_CodDropToFloor( vec3_t in, vec3_t out );                // Phase 4: hull trace down to walkable ground
 const char *AICast_CodCoverName( int type );
 int AICast_CodBodyPoints( int enemyNum, vec3_t at, vec3_t pts[3] );     // Phase 2b: points on the enemy's current bbox
 qboolean AICast_CodBodyShot( vec3_t eye, vec3_t pts[3], int num );      // clear line from eye to any of them
@@ -128,5 +129,16 @@ qboolean AICast_CodSquadPushActive( cast_state_t *cs );                 // someb
 void AICast_CodSquadOpportunity( cast_state_t *cs, int ms );            // the player is weak: one more attack token for ms
 qboolean AICast_CodSquadMoraleActive( cast_state_t *cs );               // broken: survivors fall back and stay cautious
 qboolean AICast_CodSquadMoraleFresh( cast_state_t *cs );                // qtrue once per soldier per broken morale: retreat now
+
+// ai_cast_cod_hunt.c (Phase 4: search and hunt after contact is lost)
+#define COD_HUNT_BUSY       0       // AICast_CodHuntThink results: the hunt did this think's work
+#define COD_HUNT_ALERT      1       // the hunt is over: handed over to the vanilla alert state (*rval is the new function)
+#define COD_HUNT_VANILLA    2       // the hunt cannot run (no position, no path): the old vanilla hand-over
+int AICast_CodHuntThink( cast_state_t *cs, char **rval );              // enemy lost (COD_ELIG_LOST): one think of the hunt
+void AICast_CodHuntTrack( cast_state_t *cs );                           // the enemy is in sight: remember where and how fast
+void AICast_CodHuntLeave( cast_state_t *cs );                           // contact again (or any other exit): drop the hunt state
+void AICast_CodHuntReset( int entNum );                                 // spawn / death
+qboolean AICast_CodHuntCrouch( cast_state_t *cs );                      // the hunt wants this soldier crouched
+const char *AICast_CodHuntModeName( cast_state_t *cs );                 // debug
 
 #endif // __AI_CAST_COD_H__

@@ -121,6 +121,13 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_aiRetreatHealth",    "35",   0,            CODOFS( aiRetreatHealth ),    0 },
 	{ "cod_aiOpportunity",      "1",    0,            CODOFS( aiOpportunity ),      1 },
 	{ "cod_aiMorale",           "1",    0,            CODOFS( aiMorale ),           1 },
+	{ "cod_aiHunt",             "1",    0,            CODOFS( aiHunt ),             1 },
+	{ "cod_aiHuntTime",         "30000", 0,           CODOFS( aiHuntTime ),         0 },
+	{ "cod_aiSweepTime",        "20000", 0,           CODOFS( aiSweepTime ),        0 },
+	{ "cod_aiSearchRadius",     "700",  0,            CODOFS( aiSearchRadius ),     0 },
+	{ "cod_aiHuntPredict",      "256",  0,            CODOFS( aiHuntPredict ),      0 },
+	{ "cod_aiHoldTime",         "3500", 0,            CODOFS( aiHoldTime ),         0 },
+	{ "cod_aiAlertTime",        "20000", 0,           CODOFS( aiAlertTime ),        0 },
 	// codmod: E5 recoil (docs/phase-7-extras.md). Per-weapon degrees live in PM_CodRecoilKick.
 	{ "cod_recoilEnable",       "1",    0,            CODOFS( recoilEnable ),       1 },
 	{ "cod_recoilScale",        "1",    0,            CODOFS( recoilScale ),        0 },

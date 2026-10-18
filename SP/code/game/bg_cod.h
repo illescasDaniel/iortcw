@@ -98,6 +98,13 @@ typedef struct {
 	float aiRetreatHealth;  // Phase 3: percent of max health below which a hit soldier retreats
 	int aiOpportunity;      // Phase 3: push / peek at once while the player reloads, switches weapons, slides or goes prone
 	int aiMorale;           // Phase 3: a squad that lost half its members falls back
+	int aiHunt;             // Phase 4: a soldier that lost the enemy hunts (hops, holds angles, sweeps) instead of the vanilla chase
+	float aiHuntTime;       // Phase 4: ms of hunting toward the predicted position before the sweep starts anyway
+	float aiSweepTime;      // Phase 4: ms of searching nearby areas before the soldiers go to heightened alert
+	float aiSearchRadius;   // Phase 4: u; sweep points are areas the player could have reached within about this far
+	float aiHuntPredict;    // Phase 4: u; the predicted position is at most this far from where the player was last seen
+	float aiHoldTime;       // Phase 4: ms a soldier holds an angle before it may take its own hop
+	float aiAlertTime;      // Phase 4: ms of heightened alert (half the reaction time) after the search found nothing
 	float recoilEnable;     // E5: real view-angle kick per shot (player only)
 	float recoilScale;      // global multiplier on the per-weapon kick table
 	float recoilAdsScale;   // kick multiplier at full ADS
