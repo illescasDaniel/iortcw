@@ -85,6 +85,34 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_aiSprintTime",       "2500", 0,            CODOFS( aiSprintTime ),       0 },
 	{ "cod_aiSprintCooldown",   "4000", 0,            CODOFS( aiSprintCooldown ),   0 },
 	{ "cod_aiSprintMinDist",    "350",  0,            CODOFS( aiSprintMinDist ),    0 },
+	// codmod: tactical AI (docs/ai-overhaul-plan.md, ai_cast_cod*.c). cod_aiTactics is the internal master,
+	// cod_optTactics (below) the player-facing toggle that clears it.
+	{ "cod_aiTactics",          "1",    0,            CODOFS( aiTactics ),          1 },
+	{ "cod_aiDebug",            "0",    0,            CODOFS( aiDebug ),            1 },
+	{ "cod_aiMemoryTime",       "4000", 0,            CODOFS( aiMemoryTime ),       0 },
+	{ "cod_aiCoverRadius",      "768",  0,            CODOFS( aiCoverRadius ),      0 },
+	{ "cod_aiCoverMaxTravel",   "300",  0,            CODOFS( aiCoverMaxTravel ),   0 },
+	{ "cod_aiCoverSearchesPerFrame", "1", 0,          CODOFS( aiCoverSearches ),    1 },
+	{ "cod_aiPeekMin",          "1000", 0,            CODOFS( aiPeekMin ),          0 },
+	{ "cod_aiPeekMax",          "2500", 0,            CODOFS( aiPeekMax ),          0 },
+	{ "cod_aiHideMin",          "600",  0,            CODOFS( aiHideMin ),          0 },
+	{ "cod_aiHideMax",          "1800", 0,            CODOFS( aiHideMax ),          0 },
+	{ "cod_aiStrafeMin",        "600",  0,            CODOFS( aiStrafeMin ),        0 },
+	{ "cod_aiStrafeMax",        "1400", 0,            CODOFS( aiStrafeMax ),        0 },
+	// codmod: tactical AI Phase 2, squads (ai_cast_cod_squad.c)
+	{ "cod_aiSquad",            "1",    0,            CODOFS( aiSquad ),            1 },
+	{ "cod_aiAttackTokens",     "0",    0,            CODOFS( aiAttackTokens ),     1 },
+	{ "cod_aiTokenTime",        "3500", 0,            CODOFS( aiTokenTime ),        0 },
+	{ "cod_aiSquadRange",       "1200", 0,            CODOFS( aiSquadRange ),       0 },
+	{ "cod_aiFlankHold",        "6000", 0,            CODOFS( aiFlankHold ),        0 },
+	{ "cod_aiFlankMove",        "128",  0,            CODOFS( aiFlankMove ),        0 },
+	{ "cod_aiAdvanceMinDist",   "400",  0,            CODOFS( aiAdvanceMinDist ),   0 },
+	{ "cod_aiSuppressMs",       "1500", 0,            CODOFS( aiSuppressMs ),       0 },
+	{ "cod_aiBarkMs",           "5000", 0,            CODOFS( aiBarkMs ),           0 },
+	// codmod: tactical AI Phase 2b, push for an angle (ai_cast_cod_squad.c / ai_cast_cod.c)
+	{ "cod_aiPush",             "1",    0,            CODOFS( aiPush ),             1 },
+	{ "cod_aiNoShotTime",       "4000", 0,            CODOFS( aiNoShotTime ),       0 },
+	{ "cod_aiPushCooldown",     "9000", 0,            CODOFS( aiPushCooldown ),     0 },
 	// codmod: E5 recoil (docs/phase-7-extras.md). Per-weapon degrees live in PM_CodRecoilKick.
 	{ "cod_recoilEnable",       "1",    0,            CODOFS( recoilEnable ),       1 },
 	{ "cod_recoilScale",        "1",    0,            CODOFS( recoilScale ),        0 },
@@ -286,6 +314,7 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_optAmmo",            "0",    CVAR_ARCHIVE, CODOFS( optAmmo ),            1 },
 	{ "cod_optHitMarkers",      "0",    CVAR_ARCHIVE, CODOFS( optHitMarkers ),      1 },
 	{ "cod_optEnemy",           "0",    CVAR_ARCHIVE, CODOFS( optEnemy ),           1 },
+	{ "cod_optTactics",         "0",    CVAR_ARCHIVE, CODOFS( optTactics ),         1 },
 
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
@@ -347,6 +376,9 @@ static void BG_CodApplyOptions( void ) {
 	if ( !bg_cod.optEnemy ) {
 		bg_cod.aiSpeedMode = 0;
 		bg_cod.aiSprint = 0;
+	}
+	if ( !bg_cod.optTactics ) {
+		bg_cod.aiTactics = 0;
 	}
 }
 

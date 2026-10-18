@@ -169,6 +169,8 @@ void AICast_Die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	cs = AICast_GetCastState( self->s.number );
 
+	AICast_CodReset( self->s.number );    // codmod: release tactical-AI cover claim
+
 	if ( attacker ) {
 		killer = attacker->s.number;
 	} else {

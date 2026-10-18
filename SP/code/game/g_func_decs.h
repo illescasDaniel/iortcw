@@ -1348,6 +1348,8 @@ extern char * AIFunc_BattleChaseStart ( cast_state_t * cs ) ;
 extern char * AIFunc_BattleChase ( cast_state_t * cs ) ;
 extern char * AIFunc_BattleAmbushStart ( cast_state_t * cs ) ;
 extern char * AIFunc_BattleAmbush ( cast_state_t * cs ) ;
+extern char * AIFunc_CodCombatStart ( cast_state_t * cs ) ;
+extern char * AIFunc_CodCombat ( cast_state_t * cs ) ;
 extern char * AIFunc_BattleHuntStart ( cast_state_t * cs ) ;
 extern char * AIFunc_BattleHunt ( cast_state_t * cs ) ;
 extern char * AIFunc_FlipMoveStart ( cast_state_t * cs , vec3_t vec ) ;

@@ -821,7 +821,8 @@ void AICast_Think( int client, float thinktime ) {
 	if (    ( cs->attackcrouch_time >= level.time ) /*&&
 			((cs->lastAttackCrouch > level.time - 500) || (cs->thinkFuncChangeTime < level.time - 1000))*/) {
 		// if we are not moving, and we are firing, always stand, unless we are allowed to crouch + fire
-		if ( ( cs->lastucmd.forwardmove || cs->lastucmd.rightmove ) || ( cs->lastWeaponFired < level.time - 2000 ) || ( cs->aiFlags & AIFL_ATTACK_CROUCH ) ) {
+		if ( ( cs->lastucmd.forwardmove || cs->lastucmd.rightmove ) || ( cs->lastWeaponFired < level.time - 2000 ) || ( cs->aiFlags & AIFL_ATTACK_CROUCH )
+			 || AICast_CodWantsCrouch( cs ) ) {    // codmod: tactical AI crouches behind low cover / while firing on purpose
 			cs->lastAttackCrouch = level.time;
 			trap_EA_Crouch( cs->bs->client );
 		}

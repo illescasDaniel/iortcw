@@ -67,6 +67,30 @@ typedef struct {
 	float aiSprintTime;     // ms per sprint burst
 	float aiSprintCooldown; // ms after a burst before the next one
 	float aiSprintMinDist;  // only chase-sprint when the target is farther than this
+	int aiTactics;          // tactical AI master switch (cover, peek, strafe); cleared by cod_optTactics 0
+	int aiDebug;            // 1 = console line per tactical state change, 2 = also draw cover/peek spots
+	float aiMemoryTime;     // ms the enemy counts as "recently seen" for tactical eligibility
+	float aiCoverRadius;    // u, how far the cover finder looks around the AI
+	float aiCoverMaxTravel; // AAS travel time (1/100 s) cap for a cover spot
+	int aiCoverSearches;    // cover searches allowed per server frame (global ration)
+	float aiPeekMin;        // ms, shortest peek burst
+	float aiPeekMax;        // ms, longest peek burst
+	float aiHideMin;        // ms, shortest stay behind cover
+	float aiHideMax;        // ms, longest stay behind cover
+	float aiStrafeMin;      // ms, shortest open-ground strafe leg
+	float aiStrafeMax;      // ms, longest open-ground strafe leg
+	int aiSquad;            // squad tactics switch (tokens, fire and move, flanking, suppression)
+	int aiAttackTokens;     // soldiers allowed to shoot at once per squad; 0 = by skill (2/3/4)
+	float aiTokenTime;      // ms, longest continuous token hold when others are waiting
+	float aiSquadRange;     // u, max distance between squad members
+	float aiFlankHold;      // ms the player must hold one spot before a flanker is sent
+	float aiFlankMove;      // u, the player counts as holding while he stays within this of the anchor
+	float aiAdvanceMinDist; // u, only advance (bounding overwatch) while the threat is farther than this
+	float aiSuppressMs;     // ms of suppressive fire when a teammate starts moving
+	float aiBarkMs;         // ms between callouts per squad
+	int aiPush;             // Phase 2b: push for an angle when the player sits behind cover nobody can hit
+	float aiNoShotTime;     // ms of trying without a real shot before a soldier / squad pushes
+	float aiPushCooldown;   // ms between pushes per squad (or soldier)
 	float recoilEnable;     // E5: real view-angle kick per shot (player only)
 	float recoilScale;      // global multiplier on the per-weapon kick table
 	float recoilAdsScale;   // kick multiplier at full ADS
@@ -244,6 +268,7 @@ typedef struct {
 	int optAmmo;             // more ammo (pickups and carry limit)
 	int optHitMarkers;       // hit-marker flash and sounds
 	int optEnemy;            // enemy soldiers run at CoD speeds and sprint
+	int optTactics;          // enemy soldiers use cover, peek and strafe (tactical AI)
 	int staminaEnable;       // derived from optStamina, read by PM_Sprint
 
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed

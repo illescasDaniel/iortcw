@@ -654,6 +654,8 @@ char    *AIFunc_InspectBulletImpactStart( cast_state_t *cs );
 char    *AIFunc_InspectAudibleEventStart( cast_state_t *cs, int entnum );
 char    *AIFunc_BattleAmbushStart( cast_state_t *cs );
 char    *AIFunc_BattleHuntStart( cast_state_t *cs );
+char    *AIFunc_CodCombatStart( cast_state_t *cs );     // codmod: tactical AI (ai_cast_cod.c)
+char    *AIFunc_CodCombat( cast_state_t *cs );          // codmod: tactical AI (ai_cast_cod.c)
 //
 // ai_cast_func_attack.c
 char    *AIFunc_ZombieFlameAttackStart( cast_state_t *cs );
@@ -686,6 +688,7 @@ int     AICast_ScanForEnemies( cast_state_t *cs, int *enemies );
 void    AICast_UpdateBattleInventory( cast_state_t *cs, int enemy );
 float   AICast_Aggression( cast_state_t *cs );
 int     AICast_WantsToChase( cast_state_t *cs );
+qboolean AICast_WantsGrenadeFlush( cast_state_t *cs, qboolean enemyHidden );   // codmod: ai_cast_funcs.c, shared by AIFunc_Battle and AIFunc_CodCombat
 int     AICast_WantsToTakeCover( cast_state_t *cs, qboolean attacking );
 qboolean AICast_EntityVisible( cast_state_t *cs, int enemynum, qboolean directview );
 bot_moveresult_t AICast_CombatMove( cast_state_t *cs, int tfl );
@@ -730,6 +733,11 @@ void AICast_IdleReload( cast_state_t *cs );
 void AICast_CodApplySpeedMode( cast_state_t *cs, int aiCharacter );   // codmod: phase 2.4
 void AICast_CodTrySprint( cast_state_t *cs );                         // codmod: E13
 float AICast_CodSprintMul( cast_state_t *cs );                        // codmod: E13
+qboolean AICast_CodWantsCrouch( cast_state_t *cs );                 // codmod: tactical AI, see ai_cast_cod.c
+//
+// ai_cast_cod.c (tactical AI, docs/ai-overhaul-plan.md)
+qboolean AICast_CodTacticsActive( cast_state_t *cs );
+void AICast_CodReset( int entNum );
 //
 // ai_cast_script.c
 qboolean AICast_ScriptRun( cast_state_t *cs, qboolean force );

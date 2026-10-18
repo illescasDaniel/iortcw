@@ -380,6 +380,7 @@ gentity_t *AICast_CreateCharacter( gentity_t *ent, float *attributes, cast_weapo
 	//
 	cs->aiCharacter = ent->aiCharacter;
 	client->ps.aiChar = ent->aiCharacter;
+	AICast_CodReset( newent->s.number );  // codmod: fresh tactical-AI state for this slot
 	// setup the attributes
 	memcpy( cs->attributes, attributes, sizeof( cs->attributes ) );
 	ppStr = &ent->aiAttributes;

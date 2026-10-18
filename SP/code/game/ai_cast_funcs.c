@@ -2636,6 +2636,11 @@ char *AIFunc_BattleChase( cast_state_t *cs ) {
 	if ( cs->doorMarkerTime > level.time - 100 ) {
 		return AIFunc_DoorMarkerStart( cs, cs->doorMarkerDoor, cs->doorMarkerNum );
 	}
+	//
+	// codmod: tactical AI takes over the fight when eligible (ai_cast_cod.c)
+	if ( AICast_CodTacticsActive( cs ) ) {
+		return AIFunc_CodCombatStart( cs );
+	}
 
 	bs = cs->bs;
 	//
@@ -3327,6 +3332,11 @@ char *AIFunc_BattleTakeCover( cast_state_t *cs ) {
 	// are we waiting for a door?
 	if ( cs->doorMarkerTime > level.time - 100 ) {
 		return AIFunc_DoorMarkerStart( cs, cs->doorMarkerDoor, cs->doorMarkerNum );
+	}
+	//
+	// codmod: tactical AI takes over the fight when eligible (ai_cast_cod.c)
+	if ( AICast_CodTacticsActive( cs ) ) {
+		return AIFunc_CodCombatStart( cs );
 	}
 
 	// we need to move towards it
@@ -4619,6 +4629,68 @@ char *AIFunc_GrenadeKickStart( cast_state_t *cs ) {
 
 /*
 ============
+AICast_WantsGrenadeFlush
+
+codmod: the vanilla grenade-flush conditions from AIFunc_Battle, moved here unchanged so both the vanilla
+AIFunc_Battle and AIFunc_CodCombat use one copy (lastGrenadeFlush is file-static, hence the helper lives
+here). enemyHidden qtrue is the "enemy not visible" block (also requires AICast_WantsToChase), qfalse the
+"enemy visible, lob one anyway" blocks. Pure query, the caller starts AIFunc_GrenadeFlushStart.
+============
+*/
+qboolean AICast_WantsGrenadeFlush( cast_state_t *cs, qboolean enemyHidden ) {
+	float dist;
+	qboolean haveLauncher, havePineapple;
+
+	if ( !( lastGrenadeFlush > level.time || lastGrenadeFlush < level.time - 7000 ) ) {
+		return qfalse;
+	}
+	if ( cs->aiState < AISTATE_COMBAT ) {
+		return qfalse;
+	}
+	if ( cs->castScriptStatus.castScriptEventIndex >= 0 ) {
+		return qfalse;
+	}
+
+	if ( enemyHidden ) {
+		haveLauncher = ( COM_BitCheck( cs->bs->cur_ps.weapons, WP_GRENADE_LAUNCHER ) &&
+						 AICast_GotEnoughAmmoForWeapon( cs, WP_GRENADE_LAUNCHER ) &&
+						 cs->weaponFireTimes[WP_GRENADE_LAUNCHER] < level.time - (int)( aicast_skillscale * 3000 ) );
+		havePineapple = ( COM_BitCheck( cs->bs->cur_ps.weapons, WP_GRENADE_PINEAPPLE ) &&
+						  AICast_GotEnoughAmmoForWeapon( cs, WP_GRENADE_PINEAPPLE ) &&
+						  cs->weaponFireTimes[WP_GRENADE_PINEAPPLE] < level.time - (int)( aicast_skillscale * 3000 ) );
+		if ( !haveLauncher && !havePineapple ) {
+			return qfalse;
+		}
+		if ( cs->weaponNum && ( cs->castScriptStatus.scriptFlags & SFL_NOCHANGEWEAPON ) ) {
+			return qfalse;
+		}
+		dist = Distance( cs->bs->origin, cs->vislist[cs->enemyNum].real_visible_pos );
+		if ( dist <= 100 || dist >= 1200 ) {
+			return qfalse;
+		}
+		return AICast_WantsToChase( cs );
+	}
+
+	if ( cs->startGrenadeFlushTime >= level.time - 3000 ) {
+		return qfalse;
+	}
+	haveLauncher = ( COM_BitCheck( cs->bs->cur_ps.weapons, WP_GRENADE_LAUNCHER ) &&
+					 AICast_GotEnoughAmmoForWeapon( cs, WP_GRENADE_LAUNCHER ) &&
+					 cs->weaponFireTimes[WP_GRENADE_LAUNCHER] < level.time - (int)( aicast_skillscale * 3000 ) &&
+					 ( cs->weaponNum == WP_GRENADE_LAUNCHER || !( cs->castScriptStatus.scriptFlags & SFL_NOCHANGEWEAPON ) ) );
+	havePineapple = ( COM_BitCheck( cs->bs->cur_ps.weapons, WP_GRENADE_PINEAPPLE ) &&
+					  AICast_GotEnoughAmmoForWeapon( cs, WP_GRENADE_PINEAPPLE ) &&
+					  cs->weaponFireTimes[WP_GRENADE_PINEAPPLE] < level.time - (int)( aicast_skillscale * 3000 ) &&
+					  ( cs->weaponNum == WP_GRENADE_PINEAPPLE || !( cs->castScriptStatus.scriptFlags & SFL_NOCHANGEWEAPON ) ) );
+	if ( !haveLauncher && !havePineapple ) {
+		return qfalse;
+	}
+	dist = Distance( cs->bs->origin, cs->vislist[cs->enemyNum].real_visible_pos );
+	return ( dist > 100 && dist < 2000 );
+}
+
+/*
+============
 AIFunc_Battle()
 ============
 */
@@ -4649,6 +4721,11 @@ char *AIFunc_Battle( cast_state_t *cs ) {
 	// are we waiting for a door?
 	if ( cs->doorMarkerTime > level.time - 100 ) {
 		return AIFunc_DoorMarkerStart( cs, cs->doorMarkerDoor, cs->doorMarkerNum );
+	}
+	//
+	// codmod: tactical AI takes over the fight when eligible (ai_cast_cod.c)
+	if ( AICast_CodTacticsActive( cs ) ) {
+		return AIFunc_CodCombatStart( cs );
 	}
 	//
 	// do we need to go to our leader?
@@ -4719,19 +4796,7 @@ char *AIFunc_Battle( cast_state_t *cs ) {
 			return AIFunc_BattleTakeCoverStart( cs );
 		} else
 		// if we haven't thrown a grenade in a bit, go into "grenade flush mode"
-		if ( ( lastGrenadeFlush > level.time || lastGrenadeFlush < level.time - 7000 ) &&
-			 ( cs->aiState >= AISTATE_COMBAT ) &&
-			 ( cs->castScriptStatus.castScriptEventIndex < 0 ) &&
-			 (   (   ( COM_BitCheck( cs->bs->cur_ps.weapons, WP_GRENADE_LAUNCHER ) ) &&
-					 ( AICast_GotEnoughAmmoForWeapon( cs, WP_GRENADE_LAUNCHER ) ) &&
-					 ( cs->weaponFireTimes[WP_GRENADE_LAUNCHER] < level.time - (int)( aicast_skillscale * 3000 ) ) ) ||
-				 (   ( COM_BitCheck( cs->bs->cur_ps.weapons, WP_GRENADE_PINEAPPLE ) ) &&
-					( AICast_GotEnoughAmmoForWeapon( cs, WP_GRENADE_PINEAPPLE ) ) &&
-					( cs->weaponFireTimes[WP_GRENADE_PINEAPPLE] < level.time - (int)( aicast_skillscale * 3000 ) ) ) ) &&
-			 !( cs->weaponNum && ( cs->castScriptStatus.scriptFlags & SFL_NOCHANGEWEAPON ) ) &&
-			 ( Distance( cs->bs->origin, cs->vislist[cs->enemyNum].real_visible_pos ) > 100 ) &&
-			 ( Distance( cs->bs->origin, cs->vislist[cs->enemyNum].real_visible_pos ) < 1200 ) &&
-			 ( AICast_WantsToChase( cs ) ) ) {
+		if ( AICast_WantsGrenadeFlush( cs, qtrue ) ) {    // codmod: shared with AIFunc_CodCombat
 			// try and flush them out with a grenade
 			//G_Printf("get outta there..\n");
 			return AIFunc_GrenadeFlushStart( cs );
@@ -4812,32 +4877,8 @@ char *AIFunc_Battle( cast_state_t *cs ) {
 	//
 	// Lob a Grenade?
 	// if we haven't thrown a grenade in a bit, go into "grenade flush mode"
-	if ( ( lastGrenadeFlush > level.time || lastGrenadeFlush < level.time - 7000 ) &&
-		 ( cs->aiState >= AISTATE_COMBAT ) &&
-		 ( cs->castScriptStatus.castScriptEventIndex < 0 ) &&
-		 ( cs->startGrenadeFlushTime < level.time - 3000 ) &&
-		 ( COM_BitCheck( cs->bs->cur_ps.weapons, WP_GRENADE_LAUNCHER ) ) &&
-		 ( AICast_GotEnoughAmmoForWeapon( cs, WP_GRENADE_LAUNCHER ) ) &&
-		 ( cs->weaponFireTimes[WP_GRENADE_LAUNCHER] < level.time - (int)( aicast_skillscale * 3000 ) ) &&
-		 ( ( cs->weaponNum == WP_GRENADE_LAUNCHER ) || !( cs->castScriptStatus.scriptFlags & SFL_NOCHANGEWEAPON ) ) &&
-		 ( Distance( cs->bs->origin, cs->vislist[cs->enemyNum].real_visible_pos ) > 100 ) &&
-		 ( Distance( cs->bs->origin, cs->vislist[cs->enemyNum].real_visible_pos ) < 2000 ) ) {
+	if ( AICast_WantsGrenadeFlush( cs, qfalse ) ) {    // codmod: shared with AIFunc_CodCombat
 		// try and flush them out with a grenade
-		//G_Printf("pineapple?\n");
-		return AIFunc_GrenadeFlushStart( cs );
-	}
-	if ( ( lastGrenadeFlush > level.time || lastGrenadeFlush < level.time - 7000 ) &&
-		 ( cs->aiState >= AISTATE_COMBAT ) &&
-		 ( cs->castScriptStatus.castScriptEventIndex < 0 ) &&
-		 ( cs->startGrenadeFlushTime < level.time - 3000 ) &&
-		 ( COM_BitCheck( cs->bs->cur_ps.weapons, WP_GRENADE_PINEAPPLE ) ) &&
-		 ( AICast_GotEnoughAmmoForWeapon( cs, WP_GRENADE_PINEAPPLE ) ) &&
-		 ( cs->weaponFireTimes[WP_GRENADE_PINEAPPLE] < level.time - (int)( aicast_skillscale * 3000 ) ) &&
-		 ( ( cs->weaponNum == WP_GRENADE_PINEAPPLE ) || !( cs->castScriptStatus.scriptFlags & SFL_NOCHANGEWEAPON ) ) &&
-		 ( Distance( cs->bs->origin, cs->vislist[cs->enemyNum].real_visible_pos ) > 100 ) &&
-		 ( Distance( cs->bs->origin, cs->vislist[cs->enemyNum].real_visible_pos ) < 2000 ) ) {
-		// try and flush them out with a grenade
-		//G_Printf("pineapple?\n");
 		return AIFunc_GrenadeFlushStart( cs );
 	}
 	//

@@ -1348,6 +1348,8 @@ If you have questions concerning this license or the applicable additional terms
 {"AIFunc_BattleChase", (byte *)AIFunc_BattleChase},
 {"AIFunc_BattleAmbushStart", (byte *)AIFunc_BattleAmbushStart},
 {"AIFunc_BattleAmbush", (byte *)AIFunc_BattleAmbush},
+{"AIFunc_CodCombatStart", (byte *)AIFunc_CodCombatStart},
+{"AIFunc_CodCombat", (byte *)AIFunc_CodCombat},
 {"AIFunc_BattleHuntStart", (byte *)AIFunc_BattleHuntStart},
 {"AIFunc_BattleHunt", (byte *)AIFunc_BattleHunt},
 {"AIFunc_FlipMoveStart", (byte *)AIFunc_FlipMoveStart},
