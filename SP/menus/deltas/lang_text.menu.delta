@@ -1,0 +1,77 @@
+#menu-delta v2 base=ui/system.menu sha256=fe28a0c578e2569bc374f20ba969f3711deef4bf2b219904d1b743cf78698acb
+#src ui/briefing.menu sha256=a7fae3125a9b966c56c0481a8f92c1960030deb5e344776397d3df47ee1606f5
+#src ui/error.menu sha256=d8082e15dc125112689b431f799d17958025389efe435cb8f64a39e68cf4223c
+#src ui/ingame_load.menu sha256=97a6ae9352abc90425549a392e04a0275a8f6f973d69c8908820ddc71e2439df
+#src ui/load.menu sha256=bae9e6f84b8912f5c0b093c13701171591047af887fdac23989af21cc1fbf48a
+@@ 3 7
++\\ TEXTS LANGUAGE POPUP MENU \\
+@@ 9 10
++	name "lang_text_popmenu"
+@@ 12 13
++	rect 110 110 420 260
+@@ 16 18
++	popup
++	onOpen { uiScript refreshLangPacks }
++	onESC { close lang_text_popmenu }
+@@ 19 19
+=ui/system.menu 93 94
++		name dim
++		rect -110 -110 640 480
+=ui/system.menu 27 28
++		backcolor 0 0 0 .6
+=ui/error.menu 219 223
+@@ 20 24
+=ui/system.menu 93 94
+@@ 25 27
+=ui/system.menu 63 64
++		rect 0 0 420 260
+@@ 31 32
++		backcolor .06 .06 .06 .92
+@@ 36 63
+=ui/system.menu 93 94
++		name titlebar
+@@ 64 65
++		rect 2 4 416 20
+@@ 74 93
+@@ 94 102
++		name title
++		text "Texts"
+=ui/ingame_load.menu 468 471
++		rect 210 4 0 20
+@@ 103 105
+=ui/system.menu 562 563
+=ui/system.menu 476 477
+@@ 106 107
+@@ 108 204
+=ui/system.menu 33 34
+@@ 207 218
++		name langlist
++		rect 10 34 400 182
+=ui/ingame_load.menu 116 117
+@@ 219 223
++		elementwidth 380
++		elementheight 30
+=ui/briefing.menu 63 64
+=ui/ingame_load.menu 125 126
++		feeder FEEDER_TEXTLANGS
++		columns 3  0 24 0   36 24 14   130 24 42
+=ui/system.menu 28 31
++		backcolor 0.08 0.25 0.05 0.15
++		outlinecolor .25 .45 .15 .20
+=ui/system.menu 32 33
++		action { play "sound/misc/kcaction.wav" }
+@@ 226 470
+=ui/load.menu 423 424
++		text "Back"
++		type 1
+@@ 472 474
++		rect 160 226 100 20
+@@ 478 480
++		backcolor .1 .1 .1 .1
+@@ 482 551
+=ui/system.menu 32 33
++		action { play "sound/misc/kcaction.wav" ; close lang_text_popmenu }
++		mouseEnter { setitemcolor back backcolor .3 .5 .2 .25 }
++		mouseExit { setitemcolor back backcolor .1 .1 .1 .1 }
+@@ 552 706
+@@ 709 710

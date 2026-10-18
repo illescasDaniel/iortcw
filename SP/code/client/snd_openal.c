@@ -2789,7 +2789,7 @@ qboolean S_AL_Init( soundInterface_t *si )
 	s_alTalkAnims = Cvar_Get("s_alTalkAnims", "160", CVAR_ARCHIVE);
 
 	// 0 = off, 1 = on (binaural stereo). OpenAL's own "auto" mode never triggers reliably, so it is not offered.
-	s_alHRTF = Cvar_Get( "s_alHRTF", "1", CVAR_ARCHIVE );
+	s_alHRTF = Cvar_Get( "s_alHRTF", "0", CVAR_ARCHIVE ); // codmod: off like vanilla; the mod defaults file turns it on
 	s_alHRTFProfile = Cvar_Get( "s_alHRTFProfile", "", CVAR_ARCHIVE );
 
 	s_alDriver = Cvar_Get( "s_alDriver", ALDRIVER_DEFAULT, CVAR_LATCH | CVAR_PROTECTED );

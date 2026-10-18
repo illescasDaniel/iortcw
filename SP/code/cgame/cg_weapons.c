@@ -1611,22 +1611,24 @@ static void CG_RunWeapLerpFrame( clientInfo_t *ci, weaponInfo_t *wi, lerpFrame_t
 		// codmod: prediction replays the reload-start command every frame until the
 		// snapshot acks it, flipping only the toggle bit each time. Don't restart a
 		// reload that is still playing, or it sticks on frame 0 for a few frames.
-		if ( ( animId == WEAP_RELOAD1 || animId == WEAP_RELOAD2 || animId == WEAP_RELOAD3 )
+		if ( bg_cod.enable
+			 && ( animId == WEAP_RELOAD1 || animId == WEAP_RELOAD2 || animId == WEAP_RELOAD3 )
 			 && animId == ( lf->animationNumber & ~ANIM_TOGGLEBIT )
 			 && cg.time < lf->animationTime + lf->animation->numFrames * lf->animation->frameLerp ) {
 			lf->animationNumber = newAnimation;
 		} else
-		// clear on raise/alt (vanilla) and on attack — otherwise a same-bit
-		// restart can blend from the held last frame and look like no kick
+		// clear on raise/alt (vanilla); codmod also clears on attack/reload (below) —
+		// otherwise a same-bit restart can blend from the held last frame and look like no kick
 		if ( animId == WEAP_RAISE ||
 			 animId == WEAP_ALTSWITCHFROM ||
 			 animId == WEAP_ALTSWITCHTO ||
+			 ( bg_cod.enable && (
 			 animId == WEAP_ATTACK1 ||
 			 animId == WEAP_ATTACK2 ||
 			 animId == WEAP_ATTACK_LASTSHOT ||
 			 animId == WEAP_RELOAD1 ||
 			 animId == WEAP_RELOAD2 ||
-			 animId == WEAP_RELOAD3 ) {
+			 animId == WEAP_RELOAD3 ) ) ) {
 			// codmod: also clear on reload (phase 5d) so auto-reload after fire
 			// does not blend from a held attack pose into a silent skip.
 			CG_ClearWeapLerpFrame( wi, lf, newAnimation );

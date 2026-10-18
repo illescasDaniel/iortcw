@@ -1,0 +1,44 @@
+#menu-delta v2 base=ui/options.menu sha256=b33b7f4a1186399f52986fa9e56f200bf8c2e516433cb394645186569a035c1b
+#src ui/cdkey.menu sha256=96745cb143d3a0d91da1fe5f1b7ac2db26addce0ec675e919ea7ed0050b33bda
+#src ui/ingame_system.menu sha256=f652269329ca270062eb23c24696bd61dbcb4b20d29518d6dd872fb60a661491
+@@ 557 557
+=ui/options.menu 356 358
+=ui/options.menu 129 130
++		text "Subtitles:"
++		cvar "cod_subtitles"
++		rect 82 232 290 12
+=ui/options.menu 341 351
+=ui/options.menu 355 358
+=ui/cdkey.menu 276 277
++		text "Subtitle Size (0.5-2.5):"
++		cvar "cod_subtitleScale"
++		maxChars 6
++		maxPaintChars 6
++		rect 82 247 290 12
+=ui/options.menu 341 351
+=ui/options.menu 355 358
++		text "Text Language..."
++		type 1
++		rect 82 262 290 12
+=ui/options.menu 434 435
+=ui/ingame_system.menu 81 82
+=ui/options.menu 343 349
++		action { play "sound/misc/kcaction.wav" ; open lang_text_popmenu }
+=ui/options.menu 176 179
+=ui/options.menu 356 358
++		ownerdraw UI_TEXTLANG_FLAG
++		rect 338 262 24 12
+=ui/ingame_system.menu 486 492
+=ui/options.menu 356 358
++		text "Audio Language..."
++		type 1
++		rect 82 277 290 12
+=ui/options.menu 434 435
+=ui/ingame_system.menu 81 82
+=ui/options.menu 343 349
++		action { play "sound/misc/kcaction.wav" ; open lang_audio_popmenu }
+=ui/options.menu 176 179
+=ui/options.menu 356 358
++		ownerdraw UI_AUDIOLANG_FLAG
++		rect 338 277 24 12
+=ui/ingame_system.menu 486 492

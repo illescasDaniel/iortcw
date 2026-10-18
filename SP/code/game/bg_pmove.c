@@ -3064,7 +3064,7 @@ static void PM_Weapon( void ) {
 	// codmod: track attack release for click-fire weapons (and pistol tap-fire).
 	// Vanilla only set releasedFire inside pistol-specific blocks; bolt/semi need it too.
 	// Runs before the respawn gate so the first post-spawn click is allowed.
-	if ( !pm->ps->aiChar && !( pm->cmd.buttons & BUTTON_ATTACK ) ) {
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable && !( pm->cmd.buttons & BUTTON_ATTACK ) ) {
 		pm->ps->releasedFire = qtrue;
 	}
 
@@ -3624,9 +3624,14 @@ static void PM_Weapon( void ) {
 			}
 
 			if ( reloadingW ) {
-				// codmod: full reload start (phase 5d follow-up) — ContinueWeaponAnim alone
-				// could skip/skim the FP reload when the attack weapAnimTimer was still set.
-				PM_BeginWeaponReload( pm->ps->weapon );
+				if ( bg_cod.enable ) {
+					// codmod: full reload start (phase 5d follow-up) — ContinueWeaponAnim alone
+					// could skip/skim the FP reload when the attack weapAnimTimer was still set.
+					// Gated: vanilla keeps the original anim-only path.
+					PM_BeginWeaponReload( pm->ps->weapon );
+				} else {
+					PM_ContinueWeaponAnim( WEAP_RELOAD1 );      //----(SA)
+				}
 			} else {
 				PM_ContinueWeaponAnim( WEAP_IDLE1 );
 				pm->ps->weaponTime += 500;

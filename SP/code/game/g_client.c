@@ -27,6 +27,7 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 #include "g_local.h"
+#include "bg_cod.h"     // codmod: weapon fire modes (releasedFire at spawn)
 
 // g_client.c -- client functions that don't happen every frame
 
@@ -1817,7 +1818,7 @@ void ClientSpawn( gentity_t *ent ) {
 	client->ps.clientNum = index;
 
 	// codmod: allow the first click after spawn (ps memset leaves releasedFire false).
-	if ( !( ent->r.svFlags & SVF_CASTAI ) ) {
+	if ( bg_cod.enable && bg_cod.weaponEnable && !( ent->r.svFlags & SVF_CASTAI ) ) {
 		client->ps.releasedFire = qtrue;
 	}
 

@@ -151,6 +151,8 @@ translateString_t translateStrings[] = {
 
 vmCvar_t ui_fixedAspect;
 vmCvar_t ui_fixedAspectFOV;
+vmCvar_t ui_cursorTipHotspot;    // codmod
+vmCvar_t ui_briefing43;          // codmod
 qboolean ui_force43;    // codmod: map the 640x480 space onto a centred 4:3 area (briefing/pregame screens)
 
 static screenPlacement_e ui_horizontalPlacement = PLACE_CENTER;

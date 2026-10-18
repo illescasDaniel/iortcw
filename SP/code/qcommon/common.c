@@ -1954,6 +1954,50 @@ void Com_Setenv_f(void)
 
 /*
 ==================
+Com_ExecModCfg
+
+codmod: generic mod config hooks. Executes "<fs_game><suffix>.cfg" (e.g. codmod_defaults.cfg, codmod.cfg)
+when a mod is loaded (fs_game set and not the base game). Missing files are skipped silently.
+==================
+*/
+static void Com_ExecModCfg( const char *suffix ) {
+	char game[MAX_QPATH];
+	char name[MAX_QPATH];
+	const char *p;
+
+	Q_strncpyz( game, Cvar_VariableString( "fs_game" ), sizeof( game ) );
+	if ( !game[0] || !Q_stricmp( game, BASEGAME ) || strlen( game ) > 32 ) {
+		return;
+	}
+	// plain directory names only, so the name cannot inject commands or leave the mod directory
+	for ( p = game; *p; p++ ) {
+		if ( !( ( *p >= 'a' && *p <= 'z' ) || ( *p >= 'A' && *p <= 'Z' ) || ( *p >= '0' && *p <= '9' ) || *p == '_' || *p == '-' ) ) {
+			return;
+		}
+	}
+
+	Com_sprintf( name, sizeof( name ), "%s%s.cfg", game, suffix );
+	if ( FS_ReadFile( name, NULL ) > 0 ) {
+		Cbuf_ExecuteText( EXEC_NOW, va( "exec %s\n", name ) );
+		Cbuf_Execute();
+	}
+}
+
+/*
+==================
+Com_ExecModCfg_f
+
+codmod: "execmodcfg" re-runs the mod config hooks (<fs_game>_defaults.cfg, then <fs_game>.cfg). Used by the
+menu Reset action after cvar_restart, so a mod's defaults and pinned values come back.
+==================
+*/
+static void Com_ExecModCfg_f( void ) {
+	Com_ExecModCfg( "_defaults" );
+	Com_ExecModCfg( "" );
+}
+
+/*
+==================
 Com_ExecuteCfg
 
 For controlling environment variables
@@ -1970,6 +2014,10 @@ void Com_ExecuteCfg(void)
 	}
 	Cbuf_Execute(); // Always execute after exec to prevent text buffer overflowing
 
+	// codmod: mod defaults (first launch values and menu Reset), before the user config so saved choices win.
+	// Mod data, not user data, so it also runs in safe mode.
+	Com_ExecModCfg( "_defaults" );
+
 	if(!Com_SafeMode())
 	{
 		// skip the wolfconfig.cfg and autoexec.cfg if "safe" is on the command line
@@ -1978,6 +2026,9 @@ void Com_ExecuteCfg(void)
 		Cbuf_ExecuteText(EXEC_NOW, "exec autoexec.cfg\n");
 		Cbuf_Execute();
 	}
+
+	// codmod: mod pinned/internal config, after the user config so it always applies (also in safe mode)
+	Com_ExecModCfg( "" );
 }
 
 /*
@@ -2363,6 +2414,7 @@ void Com_Init( char *commandLine ) {
 	Cmd_AddCommand ("writeconfig", Com_WriteConfig_f );
 	Cmd_SetCommandCompletionFunc( "writeconfig", Cmd_CompleteCfgName );
 	Cmd_AddCommand("game_restart", Com_GameRestart_f);
+	Cmd_AddCommand( "execmodcfg", Com_ExecModCfg_f );
 
 	Com_ExecuteCfg();
 
@@ -2433,7 +2485,8 @@ void Com_Init( char *commandLine ) {
 #ifdef CINEMATICS_INTRO
 	com_introPlayed = Cvar_Get( "com_introplayed", "0", CVAR_ARCHIVE );
 	cod_skipIntro = Cvar_Get( "cod_skipIntro", "0", CVAR_ARCHIVE );
-	Cvar_Get( "cod_subtitles", "1", CVAR_ARCHIVE ); // codmod: Game menu toggle, read by cgame (cg_subtitles.c)
+	Cvar_Get( "cl_introAlways", "0", 0 ); // codmod: 1 = intro plays on every start (ignores com_introplayed, and +set/+exec launch args do not suppress it); 0 = vanilla
+	Cvar_Get( "cod_subtitles", "0", CVAR_ARCHIVE ); // codmod: Game menu toggle, read by cgame (cg_subtitles.c)
 	// codmod: language packs (docs/languages.md), read by ui, cgame and the sound code; reset values in codmod_binds.cfg
 	Cvar_Get( "cod_textLang", "en", CVAR_ARCHIVE );
 	Cvar_Get( "cod_audioLang", "en", CVAR_ARCHIVE );
@@ -2488,14 +2541,17 @@ void Com_Init( char *commandLine ) {
 	// add + commands from command line
 	// codmod: launchers pass +set/+exec only, which must not suppress the intro; any other command
 	// (map, loadgame, cinematic, ...) still does.
-	if ( !Com_AddStartupCommands() || !Com_StartupHasGameCommand() ) {
+	// codmod: cl_introAlways 0 = vanilla (any startup command suppresses the demoloop/intro)
+	if ( !Com_AddStartupCommands() || ( Cvar_VariableIntegerValue( "cl_introAlways" ) && !Com_StartupHasGameCommand() ) ) {
 		// if the user didn't give any commands, run default action
 		if ( !com_dedicated->integer ) {
 #ifdef CINEMATICS_LOGO
 			//Cbuf_AddText ("cinematic " CINEMATICS_LOGO "\n");
 #endif
 #ifdef CINEMATICS_INTRO
-			if ( !cod_skipIntro->integer ) { // codmod: play unless the Skip Intro setting is on; the archived com_introPlayed is ignored
+			// codmod: vanilla plays the intro once (com_introplayed); cl_introAlways 1 plays it on every start
+			// unless the Skip Intro setting (cod_skipIntro) is on, ignoring the archived com_introplayed
+			if ( Cvar_VariableIntegerValue( "cl_introAlways" ) ? !cod_skipIntro->integer : ( !com_introPlayed->integer && !cod_skipIntro->integer ) ) {
 				//Cvar_Set( com_introPlayed->name, "1" );		//----(SA)	force this to get played every time (but leave cvar for override)
 				Cbuf_AddText( "cinematic " CINEMATICS_INTRO " 3\n" );
 				//Cvar_Set( "nextmap", "cinematic " CINEMATICS_INTRO );

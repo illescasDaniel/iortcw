@@ -2129,7 +2129,7 @@ extern  cvar_t  *r_forceSunAmbientScale;
 extern  cvar_t  *r_cutsceneFx;
 extern  cvar_t  *r_sunlightMode;
 
-// RDF_NOSUNLIGHT cutscene: true if this feature bit should stay off (r_cutsceneFx default 0).
+// RDF_NOSUNLIGHT cutscene: true if this feature bit should stay off (r_cutsceneFx default 63 keeps all).
 static ID_INLINE qboolean R_CutsceneOff( int rdflags, int fxBit ) {
 	return (rdflags & RDF_NOSUNLIGHT) && !(r_cutsceneFx->integer & fxBit);
 }

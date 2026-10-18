@@ -1809,8 +1809,19 @@ void CIN_DrawCinematic( int handle ) {
 	SCR_AdjustFrom640( &x, &y, &w, &h );
 
 
-	if ( cinTable[handle].letterBox ) {
-		// Fixed 640:270 picture (the design letterbox on a 4:3 screen) fitted to the real
+	if ( cinTable[handle].letterBox && !Cvar_VariableIntegerValue( "cl_cinLetterbox" ) ) {
+		// vanilla: bars scaled with the 640x480 virtual screen
+		float barheight;
+		float vh;
+		vh = (float)cls.glconfig.vidHeight;
+
+		barheight = ( (float)LETTERBOX_OFFSET / 480.0f ) * vh;  //----(SA)	added
+
+		re.SetColor( &colorBlack[0] );
+		re.DrawStretchPic( 0, 0, w, barheight, 0, 0, 0, 0, cls.whiteShader );
+		re.DrawStretchPic( 0, vh - barheight - 1, w, barheight + 1, 0, 0, 0, 0, cls.whiteShader );
+	} else if ( cinTable[handle].letterBox ) {
+		// codmod (cl_cinLetterbox 1): fixed 640:270 picture (the design letterbox on a 4:3 screen) fitted to the real
 		// window instead of being stretched with the 640x480 virtual screen, so widescreen
 		// displays keep the film aspect ratio. Black bars fill the rest.
 		float vw = (float)cls.glconfig.vidWidth;

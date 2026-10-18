@@ -1,0 +1,64 @@
+#menu-delta v2 base=ui/ingame_controls.menu sha256=012cb5b0b443e10d28bfc8d0c0d564a1b45f0f923660fe05a936c7040fbc6150
+#src ui/cdkey.menu sha256=96745cb143d3a0d91da1fe5f1b7ac2db26addce0ec675e919ea7ed0050b33bda
+#src ui/controls.menu sha256=988fa4ecc3b5152f3291a3c83b427fd971bd8bb5b8b1ab42cf81e8d6b29f724d
+#src ui/ingame_options.menu sha256=7ab9261b77f5b5ea07c43efdac9ffce6a9b15edb01910621f3e24dce5f0fd7a8
+@@ 1225 1225
++	name ctr_pad
++	text "Pad"
+=ui/ingame_controls.menu 70 73
++	rect 316 3.5 45 20
+=ui/ingame_controls.menu 74 80
+=ui/ingame_controls.menu 296 298
++	action { hide grpControls ; show pad }
++	mouseEnter { setitemcolor ctr_pad backcolor .1 .37 .1 1 }
++	mouseExit { setitemcolor ctr_pad backcolor .37 .1 .1 1 }
+=ui/ingame_controls.menu 84 87
++		name pad
+=ui/ingame_controls.menu 306 308
++		text "Gamepad (restart):"
++		cvar "in_joystick"
+=ui/ingame_options.menu 320 329
+=ui/ingame_controls.menu 319 321
+=ui/ingame_controls.menu 84 87
++		name pad
+=ui/ingame_controls.menu 88 89
+=ui/cdkey.menu 276 277
++		text "Look X Sensitivity:"
++		cvar "cod_padSensX"
++		maxChars 8
++		maxPaintChars 8
+=ui/ingame_options.menu 116 124
+=ui/ingame_controls.menu 408 409
+=ui/controls.menu 1371 1373
+=ui/ingame_controls.menu 84 87
++		name pad
+=ui/ingame_controls.menu 88 89
+=ui/cdkey.menu 276 277
++		text "Look Y Sensitivity:"
++		cvar "cod_padSensY"
++		maxChars 8
++		maxPaintChars 8
+=ui/ingame_options.menu 133 141
+=ui/ingame_controls.menu 408 409
+=ui/controls.menu 1371 1373
+=ui/ingame_controls.menu 84 87
++		name pad
+=ui/ingame_controls.menu 742 744
++		text "Gyro Aiming:"
++		cvar "cod_padGyro"
++		cvarFloatList { "Off" 0 "Aiming" 1 "Always" 2 }
+=ui/ingame_options.menu 150 158
+=ui/ingame_controls.menu 408 409
+=ui/controls.menu 1371 1373
+=ui/ingame_controls.menu 84 87
++		name pad
+=ui/ingame_controls.menu 88 89
+=ui/cdkey.menu 276 277
++		text "Gyro Sensitivity:"
++		cvar "cod_padGyroSens"
++		maxChars 8
++		maxPaintChars 8
+=ui/ingame_options.menu 167 175
+=ui/ingame_controls.menu 408 409
+=ui/controls.menu 1371 1373
+=ui/ingame_controls.menu 160 163

@@ -1359,7 +1359,8 @@ R_ApplyAA
 r_aa is the single user-facing anti-aliasing setting:
 0 off, 1-4 SMAA low/medium/high/ultra, 5-7 MSAA 2x/4x/8x.
 It drives r_smaa (live) and r_ext_framebuffer_multisample (latched, needs
-vid_restart). Default 3 (SMAA High). -1 leaves both cvars alone.
+vid_restart). Default 0 (no AA, same as stock rend2 with r_ext_framebuffer_multisample 0;
+the mod turns it on). -1 leaves both cvars alone.
 ==================
 */
 void R_ApplyAA( void ) {
@@ -1499,7 +1500,7 @@ void R_Register( void ) {
 	ri.Cvar_CheckRange( r_smaa, 0, 4, qtrue );
 	r_smaaDebug = ri.Cvar_Get( "r_smaaDebug", "0", 0 );
 	ri.Cvar_CheckRange( r_smaaDebug, 0, 2, qtrue );
-	r_aa = ri.Cvar_Get( "r_aa", "3", CVAR_ARCHIVE );
+	r_aa = ri.Cvar_Get( "r_aa", "0", CVAR_ARCHIVE );   // codmod: off = stock rend2; the mod sets 3 (SMAA High)
 	ri.Cvar_CheckRange( r_aa, -1, 7, qtrue );
 	R_ApplyAA();
 	r_forceToneMap = ri.Cvar_Get( "r_forceToneMap", "0", CVAR_CHEAT );
@@ -1514,19 +1515,19 @@ void R_Register( void ) {
 
 	// codmod: GRAPHICS "Exposure" (filmic / HDR). No Cvar_CheckRange — editfields
 	// validate every keystroke ("1"+"2"→"12" was clamping to max). Soft-clamp at use.
-	r_cameraExposure = ri.Cvar_Get( "r_cameraExposure", "1.65", CVAR_ARCHIVE );
+	r_cameraExposure = ri.Cvar_Get( "r_cameraExposure", "1", CVAR_ARCHIVE );   // codmod: stock value (stock flag was CVAR_CHEAT, archived here for the menu); the mod sets 1.65
 
 	r_depthPrepass = ri.Cvar_Get( "r_depthPrepass", "1", CVAR_ARCHIVE );
-	r_ao = ri.Cvar_Get( "r_ao", "2", CVAR_ARCHIVE );
+	r_ao = ri.Cvar_Get( "r_ao", "0", CVAR_ARCHIVE );   // codmod: off = stock (stock r_ssao 0); the mod sets 2 (GTAO low)
 	r_ssao = ri.Cvar_Get( "r_ssao", "0", 0 );   // derived from r_ao
 	r_ssaoAmbient = ri.Cvar_Get( "r_ssaoAmbient", "0", 0 );   // 0: multiply the final image (default; covers every surface), 1: AO only dims the baked/ambient light in lightall (misses non-lightall surfaces)
 	// codmod post effects (tr_postprocess.c: RB_PostFx). r_bloom / r_grade are the user-facing menu settings (archived);
 	// the tuning cvars are not archived so the code defaults always apply (console: set r_bloomIntensity ...)
-	r_bloom = ri.Cvar_Get( "r_bloom", "2", CVAR_ARCHIVE );                   // 0 off, 1-3 low/medium/high (scales r_bloomIntensity x1/1.6/2.4; default 2 = medium)
+	r_bloom = ri.Cvar_Get( "r_bloom", "0", CVAR_ARCHIVE );                   // 0 off (default, stock look), 1-3 low/medium/high (scales r_bloomIntensity x1/1.6/2.4; the mod sets 2 = medium)
 	r_bloomIntensity = ri.Cvar_Get( "r_bloomIntensity", "2.5", 0 );
 	r_bloomThreshold = ri.Cvar_Get( "r_bloomThreshold", "0.6", 0 ); // brightness (0..1, after tone mapping) where glow starts
 	r_bloomRadius = ri.Cvar_Get( "r_bloomRadius", "1.0", 0 );     // blur width multiplier
-	r_grade = ri.Cvar_Get( "r_grade", "1", CVAR_ARCHIVE );                   // 0 off, 1 on (default on)
+	r_grade = ri.Cvar_Get( "r_grade", "0", CVAR_ARCHIVE );                   // 0 off (default, stock look), 1 on (the mod sets 1)
 	r_gradeBrightness = ri.Cvar_Get( "r_gradeBrightness", "1.25", 0 );  // gamma lift, 1 = unchanged
 	r_gradeContrast = ri.Cvar_Get( "r_gradeContrast", "1.06", 0 );
 	r_gradeSaturation = ri.Cvar_Get( "r_gradeSaturation", "1.10", 0 );
@@ -1555,7 +1556,7 @@ void R_Register( void ) {
 	r_cubeMapping = ri.Cvar_Get( "r_cubeMapping", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_cubemapSize = ri.Cvar_Get( "r_cubemapSize", "128", CVAR_ARCHIVE | CVAR_LATCH );
 	r_deluxeSpecular = ri.Cvar_Get( "r_deluxeSpecular", "0.1", CVAR_ARCHIVE | CVAR_LATCH );
-	r_codSpecular = ri.Cvar_Get( "r_codSpecular", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	r_codSpecular = ri.Cvar_Get( "r_codSpecular", "0", CVAR_ARCHIVE | CVAR_LATCH );   // codmod: 0 = no spec maps / light-grid specular / cubemaps (cheap); the mod sets 1
 	// codmod: baked/grid specular weighted by light directionality (read at map load); 0 = old behaviour
 	r_codSpecDirectional = ri.Cvar_Get( "r_codSpecDirectional", "1", 0 );
 	r_cubemapSpecOnly = ri.Cvar_Get( "r_cubemapSpecOnly", "1", 0 );
@@ -1578,14 +1579,16 @@ void R_Register( void ) {
 	r_forceSun = ri.Cvar_Get( "r_forceSun", "0", CVAR_ARCHIVE );
 	r_forceSunLightScale = ri.Cvar_Get( "r_forceSunLightScale", "1.0", CVAR_CHEAT );
 	r_forceSunAmbientScale = ri.Cvar_Get( "r_forceSunAmbientScale", "0.5", CVAR_CHEAT );
-	// codmod: cutscene lite — default sun+dlights+ao+autoexp+rays (31). Bits: sun=1 dlight=2 ao=4 autoexp=8 rays=16 gamma=32
-	r_cutsceneFx = ri.Cvar_Get( "r_cutsceneFx", "31", 0 );
+	// codmod: cutscene lite (RDF_NOSUNLIGHT, set only by a game that asks for it). Bits = features KEPT during a cutscene:
+	// sun=1 dlight=2 ao=4 autoexp=8 rays=16 gamma=32. 63 keeps everything, i.e. no restriction (default, stock look).
+	// The mod pins 31 (gamma ramp reset to 1.0 during cutscenes).
+	r_cutsceneFx = ri.Cvar_Get( "r_cutsceneFx", "63", 0 );
 	r_drawSunRays = ri.Cvar_Get( "r_drawSunRays", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_sunlightMode = ri.Cvar_Get( "r_sunlightMode", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	// codmod: flashlight spot shadow map (needs r_depthPrepass); 0 disables
 	// codmod: exponent applied to surface albedo for dynamic light (<1 lifts near-black materials); 1 or 0 = off (default: little visible gain)
 	r_dlightAlbedoLift = ri.Cvar_Get( "r_dlightAlbedoLift", "1", CVAR_ARCHIVE );
-	r_flashlightShadow = ri.Cvar_Get( "r_flashlightShadow", "1", CVAR_ARCHIVE );
+	r_flashlightShadow = ri.Cvar_Get( "r_flashlightShadow", "0", CVAR_ARCHIVE );   // codmod: off by default; the mod sets 1
 	r_flashlightShadowSize = ri.Cvar_Get( "r_flashlightShadowSize", "1024", CVAR_ARCHIVE | CVAR_LATCH );
 
 	r_sunShadows = ri.Cvar_Get( "r_sunShadows", "1", CVAR_ARCHIVE | CVAR_LATCH );
@@ -1627,8 +1630,8 @@ void R_Register( void ) {
 	r_dynamiclight = ri.Cvar_Get( "r_dynamiclight", "1", CVAR_ARCHIVE );
 	r_dlightScale = ri.Cvar_Get( "r_dlightScale", "1.0", CVAR_ARCHIVE );   //----(SA)	added
 	r_dlightBacks = ri.Cvar_Get( "r_dlightBacks", "1", CVAR_ARCHIVE );
-	r_dlightSpecular = ri.Cvar_Get( "r_dlightSpecular", "1.0", 0 );
-	r_dlightEntities = ri.Cvar_Get( "r_dlightEntities", "1", 0 );
+	r_dlightSpecular = ri.Cvar_Get( "r_dlightSpecular", "0", 0 );   // codmod: 0 = stock (also hits brush models lit by dlights); the mod pins 1.0
+	r_dlightEntities = ri.Cvar_Get( "r_dlightEntities", "0", 0 );   // codmod: 0 = stock; the mod pins 1
 	r_finish = ri.Cvar_Get( "r_finish", "0", CVAR_ARCHIVE );
 	// 1 = stock per-frame glFinish before the swap (serializes CPU and GPU: GPU ~76% busy)
 	r_swapFinish = ri.Cvar_Get( "r_swapFinish", "0", 0 );

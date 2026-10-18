@@ -1,0 +1,66 @@
+#menu-delta v2 base=ui/controls.menu sha256=988fa4ecc3b5152f3291a3c83b427fd971bd8bb5b8b1ab42cf81e8d6b29f724d
+#src ui/bookp.menu sha256=dc708a0c6d09dddca120d7664d2a905c5cb7269128447fa81956bdc9051dc994
+#src ui/cdkey.menu sha256=96745cb143d3a0d91da1fe5f1b7ac2db26addce0ec675e919ea7ed0050b33bda
+#src ui/ingame_options.menu sha256=7ab9261b77f5b5ea07c43efdac9ffce6a9b15edb01910621f3e24dce5f0fd7a8
+@@ 1386 1386
+=ui/controls.menu 99 100
++	name ctr_pad
++	text "Pad"
+=ui/controls.menu 102 107
++	rect 316 3.5 45 20
+=ui/controls.menu 108 115
++	action { play "sound/misc/kcaction.wav" ;
++	hide grpControls ; show pad }
++	mouseEnter { setitemcolor ctr_pad backcolor .3 .6 .3 .0 }
++	mouseExit { setitemcolor ctr_pad backcolor .1 .1 .1 0 }
+=ui/bookp.menu 48 51
++		name pad
+=ui/controls.menu 276 278
++		text "Gamepad (restart):"
++		cvar "in_joystick"
+=ui/ingame_options.menu 320 329
+=ui/controls.menu 289 291
+=ui/bookp.menu 48 51
++		name pad
+=ui/controls.menu 33 34
+=ui/cdkey.menu 276 277
++		text "Look X Sensitivity:"
++		cvar "cod_padSensX"
++		maxChars 8
++		maxPaintChars 8
+=ui/ingame_options.menu 116 124
+=ui/controls.menu 36 37
+=ui/controls.menu 1371 1373
+=ui/bookp.menu 48 51
++		name pad
+=ui/controls.menu 33 34
+=ui/cdkey.menu 276 277
++		text "Look Y Sensitivity:"
++		cvar "cod_padSensY"
++		maxChars 8
++		maxPaintChars 8
+=ui/ingame_options.menu 133 141
+=ui/controls.menu 36 37
+=ui/controls.menu 1371 1373
+=ui/bookp.menu 48 51
++		name pad
+=ui/controls.menu 719 721
++		text "Gyro Aiming:"
++		cvar "cod_padGyro"
++		cvarFloatList { "Off" 0 "Aiming" 1 "Always" 2 }
+=ui/ingame_options.menu 150 158
+=ui/controls.menu 36 37
+=ui/controls.menu 1371 1373
+=ui/bookp.menu 48 51
++		name pad
+=ui/controls.menu 33 34
+=ui/cdkey.menu 276 277
++		text "Gyro Sensitivity:"
++		cvar "cod_padGyroSens"
++		maxChars 8
++		maxPaintChars 8
+=ui/ingame_options.menu 167 175
+=ui/controls.menu 36 37
+=ui/controls.menu 1371 1373
++	}
++

@@ -1,0 +1,5 @@
+#menu-delta v2 base=ui/setup.menu sha256=4f53b1b18c372134948cd75574a4e9883752e98d7a1210d2b42d271ccb2b5c9c
+@@ 20 21
++	onEsc { close control_menu ; close system_menu ; close options_menu ; close cdkey_menu ; close default_menu ; close resetscore_menu ; close mods_menu ; close setup_menu ; open main }
+@@ 385 385
+=ui/setup.menu 170 171

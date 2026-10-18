@@ -882,7 +882,7 @@ static void ForwardDlight( void ) {
 
 			// codmod: baked vertex colour (rgbGen vertex) must not modulate dynamic light, or surfaces
 			// with dark baked vertex lighting (fences, gates, props) barely reflect the flashlight
-			if (vertColor[0] != 0.0f || vertColor[1] != 0.0f || vertColor[2] != 0.0f)
+			if (r_dlightEntities->integer && (vertColor[0] != 0.0f || vertColor[1] != 0.0f || vertColor[2] != 0.0f))   // codmod: gated with the flashlight/model dlight feature
 			{
 				baseColor[0] = baseColor[1] = baseColor[2] = 1.0f;
 				vertColor[0] = vertColor[1] = vertColor[2] = 0.0f;

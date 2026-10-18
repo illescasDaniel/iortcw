@@ -1,0 +1,188 @@
+#menu-delta v2 base=ui/ingame_system.menu sha256=f652269329ca270062eb23c24696bd61dbcb4b20d29518d6dd872fb60a661491
+#src ui/controls.menu sha256=988fa4ecc3b5152f3291a3c83b427fd971bd8bb5b8b1ab42cf81e8d6b29f724d
+#src ui/credit.menu sha256=81fe8de5ee0a324483378209b9a9f3f64697f1cce563d1dad60bfdc5eee77b1e
+#src ui/ingame_options.menu sha256=7ab9261b77f5b5ea07c43efdac9ffce6a9b15edb01910621f3e24dce5f0fd7a8
+#src ui/options.menu sha256=b33b7f4a1186399f52986fa9e56f200bf8c2e516433cb394645186569a035c1b
+#src ui/system.menu sha256=fe28a0c578e2569bc374f20ba969f3711deef4bf2b219904d1b743cf78698acb
+@@ 60 61
++		rect 6 10 84 12
+@@ 62 63
++		textalignx 42
+@@ 466 467
++		rect 264 10 84 12
+@@ 468 469
++		textalignx 42
+@@ 497 498
++		rect 350 10 84 12
+@@ 499 500
++		textalignx 42
+@@ 587 587
+=ui/ingame_system.menu 511 513
+=ui/ingame_system.menu 143 144
++		text "3D Audio (HRTF):"
++		cvar "s_alHRTF"
++		rect 82 140 290 12
+=ui/ingame_options.menu 321 329
+=ui/ingame_system.menu 560 561
+=ui/ingame_system.menu 489 492
++		name ctr_display
++		text "Display"
+=ui/ingame_system.menu 463 466
++		rect 92 10 84 12
+=ui/ingame_system.menu 61 62
++		textalignx 42
+=ui/ingame_system.menu 63 65
++		backcolor .1 .1 .1 0
+=ui/ingame_system.menu 47 48
++		action { hide grpSystem ; show display ; show graphicsapply }
++		mouseEnter { setitemcolor ctr_display backcolor .1 .37 .1 1 }
++		mouseExit { setitemcolor ctr_display backcolor .37 .1 .1 1 }
+=ui/ingame_system.menu 489 492
++		name ctr_effects
++		text "Effects"
+=ui/ingame_system.menu 463 466
++		rect 178 10 84 12
+=ui/ingame_system.menu 61 62
++		textalignx 42
+=ui/ingame_system.menu 63 65
++		backcolor .1 .1 .1 0
+=ui/ingame_system.menu 47 48
++		action { hide grpSystem ; show effects ; show graphicsapply }
++		mouseEnter { setitemcolor ctr_effects backcolor .1 .37 .1 1 }
++		mouseExit { setitemcolor ctr_effects backcolor .37 .1 .1 1 }
+=ui/ingame_system.menu 489 492
++		name display
+=ui/ingame_system.menu 160 164
++		cvarFloatList { "640*480" 3 "800*600" 4 "960*720" 5 "1024*768" 6 "1152*864" 7 "1280*1024" 8 "1600*1200" 9 "2048*1536" 10 "856*480 Wide Screen" 11 }
++		rect 82 40 290 12
+=ui/options.menu 97 104
+=ui/ingame_system.menu 134 135
++		action { play "sound/misc/kcaction.wav" ; open vidmode_popmenu }
+=ui/ingame_system.menu 489 492
++		name display
+=ui/ingame_system.menu 94 96
++		text "Display Mode:"
++		cvar "r_displayMode"
++		cvarFloatList { "Windowed" 0 "Borderless Windowed" 1 "Fullscreen" 2 }
+=ui/options.menu 132 140
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
++		name display
+=ui/ingame_system.menu 94 96
++		text "Vertical Sync:"
++		cvar "r_vsync"
++		cvarFloatList { "Off" 0 "On" 1 "Adaptive" 2 "Triple Buffer" 3 "Low Latency" 4 }
+=ui/ingame_system.menu 533 537
+=ui/ingame_system.menu 130 135
+=ui/ingame_system.menu 489 492
++		name display
+=ui/ingame_system.menu 94 96
++		text "Frame Rate Limit:"
++		cvar "com_maxfps"
++		cvarFloatList { "Off" 0 "Auto (%hz)" -1 "30" 30 "60" 60 "75" 75 "90" 90 "120" 120 "144" 144 "165" 165 "240" 240 "360" 360 }
+=ui/ingame_system.menu 185 186
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
++		name display
+=ui/ingame_system.menu 94 96
++		text "Menu Frame Rate Limit:"
++		cvar "com_maxfpsMenu"
++		cvarFloatList { "Auto (%hz)" -1 "Off" 0 "30" 30 "60" 60 "75" 75 "90" 90 "120" 120 "144" 144 "165" 165 "240" 240 "360" 360 }
+=ui/controls.menu 259 263
+=ui/ingame_system.menu 130 135
+=ui/ingame_system.menu 489 492
++		name display
+=ui/ingame_system.menu 360 363
+=ui/system.menu 386 387
++		rect 82 140 290 12
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
++		name display
+=ui/ingame_system.menu 360 362
++		text "Exposure:"
++		cvarfloat "r_cameraExposure" 1 0.25 4
+=ui/ingame_system.menu 260 261
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Anti-Aliasing:"
++		cvar "r_aa"
++		cvarFloatList { "Off" 0 "SMAA Low" 1 "SMAA Medium" 2 "SMAA High" 3 "SMAA Ultra" 4 "MSAA 2x" 5 "MSAA 4x" 6 "MSAA 8x" 7 }
++		rect 82 40 290 12
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Ambient Occlusion:"
++		cvar "r_ao"
++		cvarFloatList { "Off" 0 "SSAO" 1 "GTAO Low" 2 "GTAO Medium" 3 "GTAO High" 4 }
+=ui/options.menu 132 140
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Bloom:"
++		cvar "r_bloom"
++		cvarFloatList { "Off" 0 "Low" 1 "Medium" 2 "High" 3 }
+=ui/ingame_system.menu 533 537
+=ui/ingame_system.menu 130 135
+=ui/ingame_system.menu 489 492
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Color Grade:"
++		cvar "r_grade"
++		cvarFloatList { "Off" 0 "On" 1 }
+=ui/ingame_system.menu 185 186
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Specular Highlights:"
++		cvar "r_codSpecular"
++		cvarFloatList { "Off" 0 "On" 1 }
+=ui/controls.menu 259 263
+=ui/ingame_system.menu 130 135
+=ui/ingame_system.menu 489 492
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Flashlight Shadows:"
++		cvar "r_flashlightShadow"
++		cvarFloatList { "Off" 0 "On" 1 }
++		rect 82 140 290 12
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Shadow Map Size:"
++		cvar "r_shadowMapSize"
++		cvarFloatList { "512" 512 "1024" 1024 "2048" 2048 }
+=ui/ingame_system.menu 260 261
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Soft Shadows:"
++		cvar "r_shadowFilter"
++		cvarFloatList { "Off" 0 "Soft" 1 "Softer" 2 }
+=ui/controls.menu 518 522
+=ui/ingame_system.menu 130 135
+=ui/ingame_system.menu 489 492
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Anisotropic Filter:"
++		cvar "r_ext_texture_filter_anisotropic"
++		cvarFloatList { "Off" 0 "2x" 2 "4x" 4 "8x" 8 "16x" 16 }
++		rect 82 200 290 12
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
+@@ 593 594
++		rect 181 170 100 20

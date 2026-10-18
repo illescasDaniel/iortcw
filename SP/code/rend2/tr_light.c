@@ -596,7 +596,7 @@ int R_LightDirForPoint( vec3_t point, vec3_t lightDir, vec3_t normal, world_t *w
 	else
 		VectorCopy(normal, lightDir);
 
-	if (r_codSpecDirectional && r_codSpecDirectional->value > 0.0f)
+	if (r_codSpecular->integer && r_codSpecDirectional && r_codSpecDirectional->value > 0.0f)   // codmod: only with codmod specular
 	{
 		float dirScale = 0.0f;
 

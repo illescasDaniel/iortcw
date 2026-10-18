@@ -6,6 +6,14 @@ applied on top of ioRTCW `438e7d413b5f7277187c35b032eb0ef9093ae778`.
 
 The same changes are also kept as a patch series in that repo's `patches/` directory.
 
+## Running this fork on its own
+
+`SP/run-sp.sh [--windowed 1280x720]` runs the `make` build as plain RTCW (`fs_game` main, no mod) from this repo
+alone: it links the build and an installed RTCW's paks (Steam auto-detected, or `RTCW_DATA`) into `SP/build/run/` and
+keeps config and saves in `SP/build/home/`. It also builds and loads the engine menus (`SP/menus/`: deltas on
+RTCW's own menus plus `menudelta.py`; RTCW's menus are not redistributable, so only deltas are in git). Use it to check that the engine works with vanilla defaults and needs
+nothing from a mod.
+
 ## rend2 additions
 
 - **Per-pixel dynamic lights on models:** `R_DlightEntity` (tr_light.c) feeds MD3/MDS entities into the dlight passes

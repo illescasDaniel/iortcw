@@ -3563,14 +3563,17 @@ void CL_InitRef( void ) {
 	Com_Printf( "----- Initializing Renderer ----\n" );
 
 #ifdef USE_RENDERER_DLOPEN
-	cl_renderer = Cvar_Get("cl_renderer", "opengl1", CVAR_ARCHIVE | CVAR_LATCH);
+	cl_renderer = Cvar_Get("cl_renderer", "rend2", CVAR_ARCHIVE | CVAR_LATCH);
 
 	Com_sprintf(dllName, sizeof(dllName), "renderer_sp_%s_" ARCH_STRING DLL_EXT, cl_renderer->string);
 
-	if(!(rendererLib = Sys_LoadDll(dllName, qfalse)) && strcmp(cl_renderer->string, cl_renderer->resetString))
+	// codmod: the default is rend2, so the fallback must not depend on the value differing from the
+	// default; opengl1 is hard-coded as the last resort (and not retried when it is the one that failed)
+	if(!(rendererLib = Sys_LoadDll(dllName, qfalse)) && Q_stricmp(cl_renderer->string, "opengl1"))
 	{
 		Com_Printf("failed:\n\"%s\"\n", Sys_LibraryError());
-		Cvar_ForceReset("cl_renderer");
+		if(strcmp(cl_renderer->string, cl_renderer->resetString))
+			Cvar_ForceReset("cl_renderer");
 
 		Com_sprintf(dllName, sizeof(dllName), "renderer_sp_opengl1_" ARCH_STRING DLL_EXT);
 		rendererLib = Sys_LoadDll(dllName, qfalse);
@@ -3870,6 +3873,9 @@ void CL_Init( void ) {
 	cl_showSend = Cvar_Get( "cl_showSend", "0", CVAR_TEMP );
 	cl_showTimeDelta = Cvar_Get( "cl_showTimeDelta", "0", CVAR_TEMP );
 	cl_viewSmooth = Cvar_Get( "cl_viewSmooth", "1", 0 );     // codmod: smooth view clock (CL_UpdateViewClock)
+	// codmod: opinionated cinematic behaviour, off = vanilla RTCW (read with Cvar_VariableIntegerValue)
+	Cvar_Get( "cl_cinematicAnyKeySkip", "0", 0 ); // 1 = any key skips a cinematic (vanilla: ESC/mouse1/ascii keys)
+	Cvar_Get( "cl_cinLetterbox", "0", 0 );        // 1 = fixed 640:270 letterbox fitted to the window (vanilla: bars scaled to the screen)
 	cl_freezeDemo = Cvar_Get( "cl_freezeDemo", "0", CVAR_TEMP );
 	rcon_client_password = Cvar_Get( "rconPassword", "", CVAR_TEMP );
 	cl_activeAction = Cvar_Get( "activeAction", "", CVAR_TEMP );

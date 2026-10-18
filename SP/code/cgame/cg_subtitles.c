@@ -130,7 +130,7 @@ static void CG_SubtitlesLoadLang( void ) {
 
 void CG_SubtitlesInit( void ) {
 	subNumActive = 0;
-	trap_Cvar_Register( &cod_subtitles, "cod_subtitles", "1", CVAR_ARCHIVE );
+	trap_Cvar_Register( &cod_subtitles, "cod_subtitles", "0", CVAR_ARCHIVE );
 	trap_Cvar_Register( &cod_subtitleScale, "cod_subtitleScale", "1.0", CVAR_ARCHIVE );
 
 	CG_SubtitleLoadFile( "text/subtitles.txt", subPool, sizeof( subPool ), &subEnglish );

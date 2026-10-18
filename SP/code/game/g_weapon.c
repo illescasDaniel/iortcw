@@ -1517,10 +1517,16 @@ void AddLean( gentity_t *ent, vec3_t point ) {
 	if ( ent->client && ent->client->ps.leanf ) {
 		vec3_t leanOfs;
 
-		// codmod: same offset as the camera (BG_CodLeanOffset), including its lean roll dip,
-		// so shots land on the crosshair while leaning
-		BG_CodLeanOffset( &ent->client->ps, leanOfs );
-		VectorAdd( point, leanOfs, point );
+		if ( bg_cod.enable && bg_cod.leanEnable ) {
+			// codmod: same offset as the camera (BG_CodLeanOffset), including its lean roll dip,
+			// so shots land on the crosshair while leaning
+			BG_CodLeanOffset( &ent->client->ps, leanOfs );
+			VectorAdd( point, leanOfs, point );
+		} else {
+			// vanilla (cod_enable 0): sideways offset along the view right vector, no roll dip
+			AngleVectors( ent->client->ps.viewangles, NULL, leanOfs, NULL );
+			VectorMA( point, ent->client->ps.leanf, leanOfs, point );
+		}
 	}
 }
 

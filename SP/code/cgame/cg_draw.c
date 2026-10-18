@@ -2400,6 +2400,11 @@ static void CG_DrawCrosshair( void ) {
 	switch ( weapnum ) {
 
 		// weapons that get no reticle
+	case WP_GARAND:     // codmod: vanilla has no reticle for Garand; mod draws the hip crosshair
+		if ( bg_cod.enable ) {
+			goto codHipCrosshair;
+		}
+		// fall through (vanilla)
 	case WP_NONE:       // no weapon, no crosshair
 		if ( cg.zoomedBinoc ) {
 			CG_DrawBinocReticle();
@@ -2462,6 +2467,12 @@ static void CG_DrawCrosshair( void ) {
 	// codmod: show hip crosshair on Mauser/Garand even when the scope is owned
 	// (vanilla hid Mauser; Garand was in the no-reticle list). Scoped alts still use
 	// CG_DrawWeapReticle above.
+codHipCrosshair:
+	if ( !bg_cod.enable && cg.weaponSelect == WP_MAUSER ) {
+		if ( COM_BitCheck( cg.predictedPlayerState.weapons, WP_SNIPERRIFLE ) ) {
+			return;
+		}
+	}
 
 	if ( !cg_drawCrosshair.integer ) {	//----(SA)	moved down so it doesn't keep the scoped weaps from drawing reticles
 		return;
@@ -2621,6 +2632,11 @@ static void CG_DrawCrosshair3D( void ) {
 	switch ( weapnum ) {
 
 		// weapons that get no reticle
+	case WP_GARAND:     // codmod: vanilla has no reticle for Garand; mod draws the hip crosshair
+		if ( bg_cod.enable ) {
+			goto codHipCrosshair3D;
+		}
+		// fall through (vanilla)
 	case WP_NONE:       // no weapon, no crosshair
 		if ( cg.zoomedBinoc ) {
 			CG_DrawBinocReticle();
@@ -2683,6 +2699,12 @@ static void CG_DrawCrosshair3D( void ) {
 	// codmod: show hip crosshair on Mauser/Garand even when the scope is owned
 	// (vanilla hid Mauser; Garand was in the no-reticle list). Scoped alts still use
 	// CG_DrawWeapReticle above.
+codHipCrosshair3D:
+	if ( !bg_cod.enable && cg.weaponSelect == WP_MAUSER ) {
+		if ( COM_BitCheck( cg.predictedPlayerState.weapons, WP_SNIPERRIFLE ) ) {
+			return;
+		}
+	}
 
 	if ( !cg_drawCrosshair.integer ) {	//----(SA)	moved down so it doesn't keep the scoped weaps from drawing reticles
 		return;

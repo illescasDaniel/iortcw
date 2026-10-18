@@ -1,0 +1,5 @@
+#menu-delta v2 base=ui/menus.txt sha256=532de96437513b4f2453a8ab8d67fd7e7201ad31ee4d98cb9cb9a9d93147d9c6
+@@ 14 14
++	loadMenu { "ui/vidmode.menu" }
++	loadMenu { "ui/lang_text.menu" }
++	loadMenu { "ui/lang_audio.menu" }

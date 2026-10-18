@@ -362,6 +362,26 @@ static void CG_DrawPlayerWeaponIcon( rectDef_t *rect, qboolean drawHighlighted, 
 		}
 		y = rect->y - halfScale;
 
+		if ( !bg_cod.enable ) {
+			// vanilla (cod_enable 0)
+			x = rect->x - halfScale;
+			y = rect->y - halfScale;
+			w = rect->w + scale;
+			h = rect->h + scale;
+			if ( size == 1 ) { // draw half width to match the icon asset
+				w = rect->w / 2 + scale;
+				switch ( align ) {
+				case ITEM_ALIGN_CENTER:
+					x += rect->w / 4;
+					break;
+				case ITEM_ALIGN_RIGHT:
+					x += rect->w / 2;
+					break;
+				default:
+					break;
+				}
+			}
+		} else
 		switch ( align ) {
 		case ITEM_ALIGN_CENTER:
 			x = rect->x + ( rect->w - w ) * 0.5f - halfScale;

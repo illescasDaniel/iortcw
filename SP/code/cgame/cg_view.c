@@ -243,8 +243,10 @@ static void CG_CalcVrect( void ) {
 
 	lbheight = ysize * 0.85;
 
-	// codmod: no cutscene letterbox bars; the view keeps the full height
-	( void )lbheight;
+	// codmod: no cutscene letterbox bars (the view keeps the full height) when the mod is on
+	if ( cg_letterbox.integer && !bg_cod.enable ) {
+		ysize = lbheight;
+	}
 //----(SA)	end
 
 
@@ -764,10 +766,17 @@ static void CG_OffsetFirstPersonView( void ) {
 	if ( cg.predictedPlayerState.leanf != 0 ) {
 		vec3_t leanOfs;
 
-		// codmod: shared with the server's shot origin (BG_CodLeanOffset), so the bullet leaves
-		// from the eye the player sees through
-		cg.refdefViewAngles[ROLL] += BG_CodLeanOffset( &cg.predictedPlayerState, leanOfs );
-		VectorAdd( cg.refdef.vieworg, leanOfs, cg.refdef.vieworg );
+		if ( bg_cod.enable && bg_cod.leanEnable ) {
+			// codmod: shared with the server's shot origin (BG_CodLeanOffset), so the bullet leaves
+			// from the eye the player sees through
+			cg.refdefViewAngles[ROLL] += BG_CodLeanOffset( &cg.predictedPlayerState, leanOfs );
+			VectorAdd( cg.refdef.vieworg, leanOfs, cg.refdef.vieworg );
+		} else {
+			// vanilla (cod_enable 0)
+			cg.refdefViewAngles[2] += cg.predictedPlayerState.leanf / 2.0f;
+			AngleVectors( cg.refdefViewAngles, NULL, leanOfs, NULL );
+			VectorMA( cg.refdef.vieworg, cg.predictedPlayerState.leanf, leanOfs, cg.refdef.vieworg );
+		}
 	}
 
 	// pivot the eye based on a neck length
@@ -1225,7 +1234,9 @@ static int CG_CalcViewValues( void ) {
 			cg.refdef.fov_x = fov;
 
 			// codmod: cutscene lite lighting (sun/dlights/AO/…; see r_cutsceneFx)
-			cg.refdef.rdflags |= RDF_NOSUNLIGHT;
+			if ( bg_cod.enable ) {
+				cg.refdef.rdflags |= RDF_NOSUNLIGHT;
+			}
 
 			trap_SendClientCommand( va( "setCameraOrigin %f %f %f", origin[0], origin[1], origin[2] ) );
 			return 0;

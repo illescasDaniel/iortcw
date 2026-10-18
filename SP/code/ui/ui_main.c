@@ -712,9 +712,9 @@ void _UI_Refresh( int realtime ) {
 
 	UI_UpdateCvars();
 
-	// codmod: briefing/pregame keep their 4:3 layout on widescreen, with a blurred levelshot behind
+	// codmod (ui_briefing43 1): briefing/pregame keep their 4:3 layout on widescreen, with a blurred levelshot behind
 	ui_force43 = qfalse;
-	if ( Menu_Count() > 0 && !ui_fixedAspect.integer && uiInfo.uiDC.bias > 0 ) {
+	if ( Menu_Count() > 0 && ui_briefing43.integer && !ui_fixedAspect.integer && uiInfo.uiDC.bias > 0 ) {
 		menuDef_t *bm = Menus_FindByName( "briefing" );
 		menuDef_t *pm = Menus_FindByName( "pregame" );
 
@@ -740,14 +740,18 @@ void _UI_Refresh( int realtime ) {
 	if (Menu_Count() > 0 && (trap_Key_GetCatcher() & KEYCATCH_UI)) {
 		uiMenuCommand_t mymenu = _UI_GetActiveMenu();
 		if ( mymenu != UIMENU_BRIEFING ) {
-			// codmod: the cursor art's tip is its top-left corner, so the hotspot is (0,0)
-			// (was centred). Size it in pixels from the vertical scale so it stays square
-			// on widescreen instead of stretching with the 640-wide virtual screen.
-			float cx = uiInfo.uiDC.cursorx, cy = uiInfo.uiDC.cursory, cw = 0, ch = 0;
-			float size = 24 * uiInfo.uiDC.yscale;
+			if ( ui_cursorTipHotspot.integer ) {
+				// codmod (ui_cursorTipHotspot 1): the cursor art's tip is its top-left corner, so the hotspot is (0,0)
+				// (was centred). Size it in pixels from the vertical scale so it stays square
+				// on widescreen instead of stretching with the 640-wide virtual screen.
+				float cx = uiInfo.uiDC.cursorx, cy = uiInfo.uiDC.cursory, cw = 0, ch = 0;
+				float size = 24 * uiInfo.uiDC.yscale;
 
-			UI_AdjustFrom640( &cx, &cy, &cw, &ch );
-			trap_R_DrawStretchPic( cx, cy, size, size, 0, 0, 1, 1, uiInfo.uiDC.Assets.cursor );
+				UI_AdjustFrom640( &cx, &cy, &cw, &ch );
+				trap_R_DrawStretchPic( cx, cy, size, size, 0, 0, 1, 1, uiInfo.uiDC.Assets.cursor );
+			} else {
+				UI_DrawHandlePic( uiInfo.uiDC.cursorx - 16, uiInfo.uiDC.cursory - 16, 32, 32, uiInfo.uiDC.Assets.cursor );
+			}
 		}
 	}
 
@@ -4775,16 +4779,9 @@ static void UI_RunMenuScript( char **args ) {
 			trap_Cmd_ExecuteText( EXEC_NOW, "exec language.cfg\n" );       // NERVE - SMF
 			trap_Cmd_ExecuteText( EXEC_NOW, "setRecommended\n" );     // NERVE - SMF
 			Controls_SetDefaults();
-			// codmod: re-apply full codmod bind reset (ADS, quickknife, toggle crouch,
-			// flashlight, unbind CTRL) so menu Defaults is not vanilla-only (phase 5d).
-			{
-				char fsGame[MAX_QPATH];
-
-				trap_Cvar_VariableStringBuffer( "fs_game", fsGame, sizeof( fsGame ) );
-				if ( !Q_stricmp( fsGame, "codmod" ) ) {
-					trap_Cmd_ExecuteText( EXEC_NOW, "exec codmod_binds.cfg\n" );
-				}
-			}
+			// codmod: re-run the mod's config hooks (<fs_game>_defaults.cfg + <fs_game>.cfg; nothing without a mod),
+			// so a mod's default settings, binds and pinned values survive cvar_restart.
+			trap_Cmd_ExecuteText( EXEC_NOW, "execmodcfg\n" );
 #ifdef CINEMATICS_INTRO
 			trap_Cvar_Set( "com_introPlayed", "1" );
 #endif
@@ -7982,6 +7979,8 @@ cvarTable_t cvarTable[] = {
 	{ &ui_emptyswitch, "cg_emptyswitch", "0", CVAR_ARCHIVE }, //----(SA)	added
 
 	{ &ui_fixedAspect, "cg_fixedAspect", "0", CVAR_ARCHIVE | CVAR_LATCH },
+	{ &ui_cursorTipHotspot, "ui_cursorTipHotspot", "0", 0 }, // codmod: 1 = cursor hotspot at the art's top-left tip, square
+	{ &ui_briefing43, "ui_briefing43", "0", 0 },             // codmod: 1 = 4:3 briefing/pregame with blurred backdrop
 	{ &ui_fixedAspectFOV, "cg_fixedAspectFOV", "1", CVAR_ARCHIVE },
 
 	{ &ui_server1, "server1", "", CVAR_ARCHIVE },

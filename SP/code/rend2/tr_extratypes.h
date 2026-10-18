@@ -34,7 +34,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 
 // r_cutsceneFx bits: features to KEEP during RDF_NOSUNLIGHT.
-// Default 27 = sun+dlights+autoexp+rays. Bits: sun=1 dlight=2 ao=4 autoexp=8 rays=16 gamma=32
+// Default 63 = keep everything (no restriction); the mod pins 31. Bits: sun=1 dlight=2 ao=4 autoexp=8 rays=16 gamma=32
 #define CUTSCENE_FX_SUN      1
 #define CUTSCENE_FX_DLIGHT   2
 #define CUTSCENE_FX_AO       4
