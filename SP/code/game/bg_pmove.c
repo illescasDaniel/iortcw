@@ -4980,7 +4980,7 @@ void PM_Sprint( void ) {
 	// drains/recharges a fixed amount *per call*, which is frame-rate dependent; this
 	// uses pml.frametime so a full bar lasts cod_sprintTime seconds at any frame rate.
 	// AI and cod_enable 0 fall through to the unmodified vanilla path below. (phase 2.1.c)
-	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable ) {
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.moveEnable && bg_cod.staminaEnable ) {
 		float sprintRate;
 		qboolean codLinear;
 

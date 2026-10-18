@@ -273,12 +273,82 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_proneGunTime",       "200",  0,            CODOFS( proneGunTime ),       0 },
 	{ "cod_proneGunDip",        "6",    0,            CODOFS( proneGunDip ),        0 },
 
+	// codmod: player-facing mechanic toggles (docs/gameplay-options.md). Archived; code default 0 = vanilla, the
+	// mod's first-launch/Reset value is a `seta ... 1` in codmod_defaults.cfg.
+	{ "cod_optMovement",        "0",    CVAR_ARCHIVE, CODOFS( optMovement ),        1 },
+	{ "cod_optSlide",           "0",    CVAR_ARCHIVE, CODOFS( optSlide ),           1 },
+	{ "cod_optProne",           "0",    CVAR_ARCHIVE, CODOFS( optProne ),           1 },
+	{ "cod_optAiming",          "0",    CVAR_ARCHIVE, CODOFS( optAiming ),          1 },
+	{ "cod_optRecoil",          "0",    CVAR_ARCHIVE, CODOFS( optRecoil ),          1 },
+	{ "cod_optWeapon",          "0",    CVAR_ARCHIVE, CODOFS( optWeapon ),          1 },
+	{ "cod_optRegen",           "0",    CVAR_ARCHIVE, CODOFS( optRegen ),           1 },
+	{ "cod_optStamina",         "0",    CVAR_ARCHIVE, CODOFS( optStamina ),         1 },
+	{ "cod_optAmmo",            "0",    CVAR_ARCHIVE, CODOFS( optAmmo ),            1 },
+	{ "cod_optHitMarkers",      "0",    CVAR_ARCHIVE, CODOFS( optHitMarkers ),      1 },
+	{ "cod_optEnemy",           "0",    CVAR_ARCHIVE, CODOFS( optEnemy ),           1 },
+
 	{ "cod_debugHud",           "0",    CVAR_ARCHIVE, CODOFS( debugHud ),           1 },
 	// codmod: /cod_menu overlay size (cgame). Archived like cod_debugHud — UI preference.
 	{ "cod_menuScale",          "0.7",  CVAR_ARCHIVE, CODOFS( menuScale ),          0 },
 };
 
 const int bg_numCodCvars = sizeof( bg_codCvars ) / sizeof( bg_codCvars[0] );
+
+/*
+================
+BG_CodApplyOptions
+
+codmod: the player-facing toggles (cod_opt*) switch whole groups of mechanics back to vanilla by clearing the
+feature flags and tunables that group owns, after every cvar refresh. Server and cgame run the same code on the
+same archived cvars, so prediction stays in step. Group -> flags: docs/gameplay-options.md.
+================
+*/
+static void BG_CodApplyOptions( void ) {
+	if ( !bg_cod.optMovement ) {
+		bg_cod.moveEnable = 0;
+		bg_cod.leanEnable = 0;
+		bg_cod.landSlowEnable = 0;
+		bg_cod.gaitEnable = 0;
+		bg_cod.duckTime = 100;      // vanilla-equivalent smoothing (table defaults)
+		bg_cod.duckEase = 0;
+		bg_cod.duckGunDip = 0;
+	}
+	// sliding starts from the CoD sprint flag, which only exists with the CoD movement
+	if ( !bg_cod.optSlide || !bg_cod.optMovement ) {
+		bg_cod.slideEnable = 0;
+	}
+	if ( !bg_cod.optProne ) {
+		bg_cod.proneEnable = 0;
+	}
+	if ( !bg_cod.optAiming ) {
+		bg_cod.adsEnable = 0;
+		bg_cod.adsSwayEnable = 0;
+		bg_cod.crosshairStyle = 0;
+	}
+	if ( !bg_cod.optRecoil ) {
+		bg_cod.recoilEnable = 0;
+	}
+	if ( !bg_cod.optWeapon ) {
+		bg_cod.weaponEnable = 0;
+		bg_cod.quickKnifeEnable = 0;
+		bg_cod.kickDamage = 15;
+	}
+	if ( !bg_cod.optRegen ) {
+		bg_cod.healthRegenEnable = 0;
+		bg_cod.maxHealth = 0;
+	}
+	bg_cod.staminaEnable = bg_cod.optStamina;
+	if ( !bg_cod.optAmmo ) {
+		bg_cod.ammoScale = 1;
+	}
+	if ( !bg_cod.optHitMarkers ) {
+		bg_cod.hitMarkerEnable = 0;
+	}
+	if ( !bg_cod.optEnemy ) {
+		bg_cod.aiSpeedMode = 0;
+		bg_cod.aiSprint = 0;
+	}
+}
 
 /*
 ================
@@ -333,6 +403,8 @@ void BG_CodUpdateCvars( vmCvar_t *cvars, int maxCvars ) {
 			*(float *)dst = cvars[i].value;
 		}
 	}
+
+	BG_CodApplyOptions();
 }
 
 // codmod: Phase 3.2 per-weapon ADS table. A field of 0 means "use the cod_ads* cvar

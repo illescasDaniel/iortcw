@@ -230,6 +230,22 @@ typedef struct {
 	float proneGunTime;        // ms ease into/out of crawl pose
 	float proneGunDip;         // u viewmodel dip × transition fraction
 
+	// codmod: player-facing mechanic toggles (MODS > Gameplay Options). Archived, code default 0 (vanilla);
+	// codmod_defaults.cfg seta's them to 1. BG_CodUpdateCvars() clears the matching feature flags above when
+	// a toggle is 0, so the rest of the code keeps testing the *Enable flags.
+	int optMovement;         // CoD speeds/gravity/jump/sprint, lean, crouch easing, land slowdown, gait
+	int optSlide;            // sprint+crouch slide (needs optMovement: sliding starts from the CoD sprint)
+	int optProne;            // prone stance
+	int optAiming;           // ADS, hipfire cone, ADS sway, CoD crosshair
+	int optRecoil;           // per-shot view kick
+	int optWeapon;           // click-fire pistols/semi-autos, quick knife, kick damage
+	int optRegen;            // health regeneration (and the lower max health that goes with it)
+	int optStamina;          // CoD stamina (time-based drain, recharge delay); 0 = vanilla sprint bar
+	int optAmmo;             // more ammo (pickups and carry limit)
+	int optHitMarkers;       // hit-marker flash and sounds
+	int optEnemy;            // enemy soldiers run at CoD speeds and sprint
+	int staminaEnable;       // derived from optStamina, read by PM_Sprint
+
 	int debugHud;    // 0 off, 1 HUD, 2 HUD + nearest AI speed
 	float menuScale; // /cod_menu text+panel scale (0.5..1.0); cgame UI preference
 } codTuning_t;
@@ -277,7 +293,7 @@ extern const int bg_numCodCvars;
 // codmod: g_main.c / cg_main.c each keep a static vmCvar_t[BG_COD_MAX_CVARS] and pass it in.
 // Bump this if bg_codCvars ever grows past it -- BG_CodRegisterCvars() clamps defensively.
 // (phase 3–6b + E9; leave headroom for extras.)
-#define BG_COD_MAX_CVARS 192
+#define BG_COD_MAX_CVARS 256
 
 void BG_CodRegisterCvars( vmCvar_t *cvars, int maxCvars );
 void BG_CodUpdateCvars( vmCvar_t *cvars, int maxCvars );

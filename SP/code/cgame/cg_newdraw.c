@@ -1284,6 +1284,12 @@ static void CG_DrawPlayerHealth( rectDef_t *rect, int font, float scale, vec4_t 
 		CG_SetScreenPlacement(PLACE_LEFT, PLACE_BOTTOM);
 	}
 
+	// codmod: with health regeneration on the bar is hidden (low-health blood is the feedback);
+	// with the Health Regeneration option off the player needs the bar. Only bar-shaped menu items.
+	if ( bg_cod.enable && bg_cod.optRegen && !shader && rect->w >= rect->h && rect->h > 0 ) {
+		return;
+	}
+
 	// codmod: CoD-style health bar when vitals HUD is on and the menu gave us a bar-shaped
 	// rect (wider than tall). Forced red fill. Number-only fallback otherwise. (phase 5b)
 	if ( bg_cod.enable && bg_cod.vitalsEnable && !shader && rect->w >= rect->h && rect->h > 0 ) {
@@ -2434,6 +2440,11 @@ static void CG_DrawFatigue( rectDef_t *rect, vec4_t color, int align ) {
 
 	if ( cg_fixedAspect.integer == 2 ) {
 		CG_SetScreenPlacement(PLACE_LEFT, PLACE_BOTTOM);
+	}
+
+	// codmod: bar hidden while the modified stamina is on; shown with the original stamina (Stamina option off).
+	if ( bg_cod.enable && bg_cod.optStamina ) {
+		return;
 	}
 
 	// codmod: vitals HUD is always horizontal (phase 5b), even if an old menu omitted align.
