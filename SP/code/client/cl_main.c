@@ -56,7 +56,6 @@ cvar_t	*cl_voip;
 #endif
 
 #ifdef USE_RENDERER_DLOPEN
-cvar_t	*cl_renderer;
 #endif
 
 cvar_t  *cl_nodelta;
@@ -940,13 +939,12 @@ static void CL_ReportBenchDemo( void ) {
 				 n, seconds, avgFps, low1Fps, median, p95, p99, maxMs, hitches );
 	Com_Printf( "codmod bench: %s\n", line );
 
-	Com_sprintf( head, sizeof( head ), "res=%dx%d msaa=%s smaa=%s swap=%s maxfps=%s renderer=%s",
+	Com_sprintf( head, sizeof( head ), "res=%dx%d msaa=%s smaa=%s swap=%s maxfps=%s",
 				 cls.glconfig.vidWidth, cls.glconfig.vidHeight,
 				 Cvar_VariableString( "r_ext_framebuffer_multisample" ),
 				 Cvar_VariableString( "r_smaa" ),
 				 Cvar_VariableString( "r_vsync" ),
-				 Cvar_VariableString( "com_maxfps" ),
-				 Cvar_VariableString( "cl_renderer" ) );
+				 Cvar_VariableString( "com_maxfps" ) );
 	Com_Printf( "codmod bench cfg: %s\n", head );
 	// r_vsync 3 (triple buffer) never blocks the swap, so it does not cap the FPS
 	vsync = Cvar_VariableIntegerValue( "r_vsync" );
@@ -2000,8 +1998,7 @@ static qboolean CL_Vid_RestartNeedsHardContext( void ) {
 		Cvar_LatchedPending( "r_colorbits" ) ||
 		Cvar_LatchedPending( "r_depthbits" ) ||
 		Cvar_LatchedPending( "r_stencilbits" ) ||
-		Cvar_LatchedPending( "r_stereoEnabled" ) ||
-		Cvar_LatchedPending( "cl_renderer" );
+		Cvar_LatchedPending( "r_stereoEnabled" );
 }
 
 /*
@@ -3563,21 +3560,9 @@ void CL_InitRef( void ) {
 	Com_Printf( "----- Initializing Renderer ----\n" );
 
 #ifdef USE_RENDERER_DLOPEN
-	cl_renderer = Cvar_Get("cl_renderer", "rend2", CVAR_ARCHIVE | CVAR_LATCH);
-
-	Com_sprintf(dllName, sizeof(dllName), "renderer_sp_%s_" ARCH_STRING DLL_EXT, cl_renderer->string);
-
-	// codmod: the default is rend2, so the fallback must not depend on the value differing from the
-	// default; opengl1 is hard-coded as the last resort (and not retried when it is the one that failed)
-	if(!(rendererLib = Sys_LoadDll(dllName, qfalse)) && Q_stricmp(cl_renderer->string, "opengl1"))
-	{
-		Com_Printf("failed:\n\"%s\"\n", Sys_LibraryError());
-		if(strcmp(cl_renderer->string, cl_renderer->resetString))
-			Cvar_ForceReset("cl_renderer");
-
-		Com_sprintf(dllName, sizeof(dllName), "renderer_sp_opengl1_" ARCH_STRING DLL_EXT);
-		rendererLib = Sys_LoadDll(dllName, qfalse);
-	}
+	// rend2 is the only renderer
+	Com_sprintf(dllName, sizeof(dllName), "renderer_sp_rend2_" ARCH_STRING DLL_EXT);
+	rendererLib = Sys_LoadDll(dllName, qfalse);
 
 	if(!rendererLib)
 	{

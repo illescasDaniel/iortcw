@@ -38,7 +38,7 @@ If you have questions concerning this license or the applicable additional terms
 */
 
 #include "../qcommon/q_shared.h"
-#include "../renderer/tr_types.h"
+#include "../renderercommon/tr_types.h"
 #include "../game/bg_public.h"
 #include "../game/bg_cod.h"    // codmod: phase 2 tuning (bg_cod.c is built into cgame too)
 #include "cg_public.h"

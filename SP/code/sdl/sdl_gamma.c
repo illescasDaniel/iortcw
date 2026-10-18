@@ -26,7 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #	include <SDL.h>
 #endif
 
-#include "../renderer/tr_local.h"
+#include "../rend2/tr_local.h"
 #include "../qcommon/qcommon.h"
 
 extern SDL_Window *SDL_window;

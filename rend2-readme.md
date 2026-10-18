@@ -43,7 +43,6 @@ For Win32:
      ioWolfDED.x86.exe
      renderer_mp_opengl1_x86.dll
      renderer_mp_rend2_x86.dll
-     renderer_sp_opengl1_x86.dll
      renderer_sp_rend2_x86.dll
      
    These can be found in build/release-mingw32-x86 after compiling, or bug
@@ -59,6 +58,9 @@ For Win32:
 2. Open the console (the default key is tilde ~) and type 
 `/cl_renderer rend2` and press enter
 `/vid_restart` then press enter again.
+
+Note: in the SP tree (this fork) the classic opengl1 renderer has been removed and
+there is no `cl_renderer` choice: SP always loads rend2, so this step is MP only.
 
 3. Enjoy.
 

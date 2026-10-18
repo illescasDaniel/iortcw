@@ -1614,7 +1614,6 @@ qboolean IN_ToggleFullscreenInPlace( void )
 	if( Cvar_LatchedPending( "r_mode" ) ||
 		Cvar_LatchedPending( "r_customwidth" ) ||
 		Cvar_LatchedPending( "r_customheight" ) ||
-		Cvar_LatchedPending( "cl_renderer" ) ||
 		Cvar_LatchedPending( "r_noborder" ) )
 		return qfalse;
 

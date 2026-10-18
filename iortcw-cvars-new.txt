@@ -16,7 +16,7 @@ cl_mouseAccelOffset ""5"""
 cl_mouseAccelStyle ""0"""
 cl_mumbleScale ""0.0254"""
 cl_packetdelay ""0"""
-cl_renderer ""opengl1"""
+cl_renderer ""opengl1"""   (MP only; SP has no renderer choice, it always loads rend2)
 cl_showPing ""0"""
 cl_timedemoLog """""
 cl_useMumble ""0"""

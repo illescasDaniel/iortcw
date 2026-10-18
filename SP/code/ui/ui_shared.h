@@ -31,7 +31,7 @@ If you have questions concerning this license or the applicable additional terms
 
 
 #include "../qcommon/q_shared.h"
-#include "../renderer/tr_types.h"
+#include "../renderercommon/tr_types.h"
 #include "../client/keycodes.h"
 
 #include "../../main/ui/menudef.h"

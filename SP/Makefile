@@ -29,9 +29,6 @@ endif
 ifndef BUILD_BASEGAME
   BUILD_BASEGAME =
 endif
-ifndef BUILD_RENDERER_REND2
-  BUILD_RENDERER_REND2 =
-endif
 
 #############################################################################
 #
@@ -272,7 +269,6 @@ BD=$(BUILD_DIR)/debug-$(PLATFORM)-$(ARCH)
 BR=$(BUILD_DIR)/release-$(PLATFORM)-$(ARCH)
 CDIR=$(MOUNT_DIR)/client
 SDIR=$(MOUNT_DIR)/server
-RDIR=$(MOUNT_DIR)/renderer
 R2DIR=$(MOUNT_DIR)/rend2
 CMDIR=$(MOUNT_DIR)/qcommon
 SDLDIR=$(MOUNT_DIR)/sdl
@@ -428,7 +424,6 @@ ifneq (,$(findstring "$(PLATFORM)", "linux" "gnu_kfreebsd" "kfreebsd-gnu" "gnu")
   endif
 
   ifeq ($(USE_OPENGLES),1)
-    BUILD_RENDERER_REND2 = 0
     BASE_CFLAGS += -DUSE_OPENGLES
     CLIENT_LIBS = $(SDL_LIBS)
     RENDERER_LIBS = $(SDL_LIBS)
@@ -1109,16 +1104,9 @@ ifneq ($(BUILD_SERVER),0)
 endif
 
 ifneq ($(BUILD_CLIENT),0)
+  TARGETS += $(B)/$(CLIENTBIN)$(FULLBINEXT)
   ifneq ($(USE_RENDERER_DLOPEN),0)
-    TARGETS += $(B)/$(CLIENTBIN)$(FULLBINEXT) $(B)/renderer_sp_opengl1_$(SHLIBNAME)
-    ifneq ($(BUILD_RENDERER_REND2), 0)
-      TARGETS += $(B)/renderer_sp_rend2_$(SHLIBNAME)
-    endif
-  else
-    TARGETS += $(B)/$(CLIENTBIN)$(FULLBINEXT)
-    ifneq ($(BUILD_RENDERER_REND2), 0)
-      TARGETS += $(B)/$(CLIENTBIN)_rend2$(FULLBINEXT)
-    endif
+    TARGETS += $(B)/renderer_sp_rend2_$(SHLIBNAME)
   endif
 endif
 
@@ -1536,7 +1524,6 @@ makedirs:
 	@$(MKDIR) $(B)/splines
 	@$(MKDIR) $(B)/client/opus
 	@$(MKDIR) $(B)/client/vorbis
-	@$(MKDIR) $(B)/renderer
 	@$(MKDIR) $(B)/rend2
 	@$(MKDIR) $(B)/rend2/glsl
 	@$(MKDIR) $(B)/ded
@@ -1892,8 +1879,8 @@ Q3R2OBJ = \
   $(B)/rend2/tr_vbo.o \
   $(B)/rend2/tr_world.o \
   \
-  $(B)/renderer/sdl_gamma.o \
-  $(B)/renderer/sdl_glimp.o
+  $(B)/rend2/sdl_gamma.o \
+  $(B)/rend2/sdl_glimp.o
 
 Q3R2STRINGOBJ = \
   $(B)/rend2/glsl/bloombright_fp.o \
@@ -1935,155 +1922,109 @@ Q3R2STRINGOBJ = \
   $(B)/rend2/glsl/tonemap_fp.o \
   $(B)/rend2/glsl/tonemap_vp.o
 
-Q3ROBJ = \
-  $(B)/renderer/tr_altivec.o \
-  $(B)/renderer/tr_animation.o \
-  $(B)/renderer/tr_backend.o \
-  $(B)/renderer/tr_bsp.o \
-  $(B)/renderer/tr_cmds.o \
-  $(B)/renderer/tr_cmesh.o \
-  $(B)/renderer/tr_curve.o \
-  $(B)/renderer/tr_flares.o \
-  $(B)/renderer/tr_font.o \
-  $(B)/renderer/tr_image.o \
-  $(B)/renderer/tr_image_bmp.o \
-  $(B)/renderer/tr_image_jpg.o \
-  $(B)/renderer/tr_image_pcx.o \
-  $(B)/renderer/tr_image_png.o \
-  $(B)/renderer/tr_image_tga.o \
-  $(B)/renderer/tr_init.o \
-  $(B)/renderer/tr_light.o \
-  $(B)/renderer/tr_main.o \
-  $(B)/renderer/tr_marks.o \
-  $(B)/renderer/tr_mesh.o \
-  $(B)/renderer/tr_model.o \
-  $(B)/renderer/tr_model_iqm.o \
-  $(B)/renderer/tr_noise.o \
-  $(B)/renderer/tr_scene.o \
-  $(B)/renderer/tr_shade.o \
-  $(B)/renderer/tr_shade_calc.o \
-  $(B)/renderer/tr_shader.o \
-  $(B)/renderer/tr_shadows.o \
-  $(B)/renderer/tr_sky.o \
-  $(B)/renderer/tr_surface.o \
-  $(B)/renderer/tr_world.o \
-
-ifeq ($(USE_BLOOM),1)
-  Q3ROBJ += $(B)/renderer/tr_bloom.o 
-endif
-
-  Q3ROBJ += $(B)/renderer/sdl_gamma.o
-  Q3ROBJ += $(B)/renderer/sdl_glimp.o
-
 ifneq ($(USE_RENDERER_DLOPEN), 0)
-  Q3ROBJ += \
-    $(B)/renderer/q_shared.o \
-    $(B)/renderer/puff.o \
-    $(B)/renderer/q_math.o \
-    $(B)/renderer/tr_subs.o
-
   Q3R2OBJ += \
-    $(B)/renderer/q_shared.o \
-    $(B)/renderer/puff.o \
-    $(B)/renderer/q_math.o \
-    $(B)/renderer/tr_subs.o
+    $(B)/rend2/q_shared.o \
+    $(B)/rend2/puff.o \
+    $(B)/rend2/q_math.o \
+    $(B)/rend2/tr_subs.o
 endif
 
 ifneq ($(USE_INTERNAL_JPEG),0)
   JPGOBJ = \
-    $(B)/renderer/jaricom.o \
-    $(B)/renderer/jcapimin.o \
-    $(B)/renderer/jcapistd.o \
-    $(B)/renderer/jcarith.o \
-    $(B)/renderer/jccoefct.o  \
-    $(B)/renderer/jccolor.o \
-    $(B)/renderer/jcdctmgr.o \
-    $(B)/renderer/jchuff.o   \
-    $(B)/renderer/jcinit.o \
-    $(B)/renderer/jcmainct.o \
-    $(B)/renderer/jcmarker.o \
-    $(B)/renderer/jcmaster.o \
-    $(B)/renderer/jcomapi.o \
-    $(B)/renderer/jcparam.o \
-    $(B)/renderer/jcprepct.o \
-    $(B)/renderer/jcsample.o \
-    $(B)/renderer/jctrans.o \
-    $(B)/renderer/jdapimin.o \
-    $(B)/renderer/jdapistd.o \
-    $(B)/renderer/jdarith.o \
-    $(B)/renderer/jdatadst.o \
-    $(B)/renderer/jdatasrc.o \
-    $(B)/renderer/jdcoefct.o \
-    $(B)/renderer/jdcolor.o \
-    $(B)/renderer/jddctmgr.o \
-    $(B)/renderer/jdhuff.o \
-    $(B)/renderer/jdinput.o \
-    $(B)/renderer/jdmainct.o \
-    $(B)/renderer/jdmarker.o \
-    $(B)/renderer/jdmaster.o \
-    $(B)/renderer/jdmerge.o \
-    $(B)/renderer/jdpostct.o \
-    $(B)/renderer/jdsample.o \
-    $(B)/renderer/jdtrans.o \
-    $(B)/renderer/jerror.o \
-    $(B)/renderer/jfdctflt.o \
-    $(B)/renderer/jfdctfst.o \
-    $(B)/renderer/jfdctint.o \
-    $(B)/renderer/jidctflt.o \
-    $(B)/renderer/jidctfst.o \
-    $(B)/renderer/jidctint.o \
-    $(B)/renderer/jmemmgr.o \
-    $(B)/renderer/jmemnobs.o \
-    $(B)/renderer/jquant1.o \
-    $(B)/renderer/jquant2.o \
-    $(B)/renderer/jutils.o
+    $(B)/rend2/jaricom.o \
+    $(B)/rend2/jcapimin.o \
+    $(B)/rend2/jcapistd.o \
+    $(B)/rend2/jcarith.o \
+    $(B)/rend2/jccoefct.o  \
+    $(B)/rend2/jccolor.o \
+    $(B)/rend2/jcdctmgr.o \
+    $(B)/rend2/jchuff.o   \
+    $(B)/rend2/jcinit.o \
+    $(B)/rend2/jcmainct.o \
+    $(B)/rend2/jcmarker.o \
+    $(B)/rend2/jcmaster.o \
+    $(B)/rend2/jcomapi.o \
+    $(B)/rend2/jcparam.o \
+    $(B)/rend2/jcprepct.o \
+    $(B)/rend2/jcsample.o \
+    $(B)/rend2/jctrans.o \
+    $(B)/rend2/jdapimin.o \
+    $(B)/rend2/jdapistd.o \
+    $(B)/rend2/jdarith.o \
+    $(B)/rend2/jdatadst.o \
+    $(B)/rend2/jdatasrc.o \
+    $(B)/rend2/jdcoefct.o \
+    $(B)/rend2/jdcolor.o \
+    $(B)/rend2/jddctmgr.o \
+    $(B)/rend2/jdhuff.o \
+    $(B)/rend2/jdinput.o \
+    $(B)/rend2/jdmainct.o \
+    $(B)/rend2/jdmarker.o \
+    $(B)/rend2/jdmaster.o \
+    $(B)/rend2/jdmerge.o \
+    $(B)/rend2/jdpostct.o \
+    $(B)/rend2/jdsample.o \
+    $(B)/rend2/jdtrans.o \
+    $(B)/rend2/jerror.o \
+    $(B)/rend2/jfdctflt.o \
+    $(B)/rend2/jfdctfst.o \
+    $(B)/rend2/jfdctint.o \
+    $(B)/rend2/jidctflt.o \
+    $(B)/rend2/jidctfst.o \
+    $(B)/rend2/jidctint.o \
+    $(B)/rend2/jmemmgr.o \
+    $(B)/rend2/jmemnobs.o \
+    $(B)/rend2/jquant1.o \
+    $(B)/rend2/jquant2.o \
+    $(B)/rend2/jutils.o
 endif
 
 ifeq ($(USE_FREETYPE),1)
 ifneq ($(USE_INTERNAL_FREETYPE),0)
   FTOBJ += \
-    $(B)/renderer/ftsystem.o \
-    $(B)/renderer/ftdebug.o \
-    $(B)/renderer/ftinit.o \
-    $(B)/renderer/ftbase.o \
-    $(B)/renderer/ftbbox.o \
-    $(B)/renderer/ftbdf.o \
-    $(B)/renderer/ftbitmap.o \
-    $(B)/renderer/ftcid.o \
-    $(B)/renderer/ftfntfmt.o \
-    $(B)/renderer/ftfstype.o \
-    $(B)/renderer/ftgasp.o \
-    $(B)/renderer/ftglyph.o \
-    $(B)/renderer/ftgxval.o \
-    $(B)/renderer/ftlcdfil.o \
-    $(B)/renderer/ftmm.o \
-    $(B)/renderer/ftotval.o \
-    $(B)/renderer/ftpatent.o \
-    $(B)/renderer/ftpfr.o \
-    $(B)/renderer/ftstroke.o \
-    $(B)/renderer/ftsynth.o \
-    $(B)/renderer/fttype1.o \
-    $(B)/renderer/ftwinfnt.o \
-    $(B)/renderer/truetype.o \
-    $(B)/renderer/type1.o \
-    $(B)/renderer/cff.o \
-    $(B)/renderer/type1cid.o \
-    $(B)/renderer/pfr.o \
-    $(B)/renderer/type42.o \
-    $(B)/renderer/winfnt.o \
-    $(B)/renderer/pcf.o \
-    $(B)/renderer/bdf.o \
-    $(B)/renderer/sfnt.o \
-    $(B)/renderer/autofit.o \
-    $(B)/renderer/pshinter.o \
-    $(B)/renderer/raster.o \
-    $(B)/renderer/smooth.o \
-    $(B)/renderer/ftcache.o \
-    $(B)/renderer/ftgzip.o \
-    $(B)/renderer/ftlzw.o \
-    $(B)/renderer/ftbzip2.o \
-    $(B)/renderer/psaux.o \
-    $(B)/renderer/psnames.o
+    $(B)/rend2/ftsystem.o \
+    $(B)/rend2/ftdebug.o \
+    $(B)/rend2/ftinit.o \
+    $(B)/rend2/ftbase.o \
+    $(B)/rend2/ftbbox.o \
+    $(B)/rend2/ftbdf.o \
+    $(B)/rend2/ftbitmap.o \
+    $(B)/rend2/ftcid.o \
+    $(B)/rend2/ftfntfmt.o \
+    $(B)/rend2/ftfstype.o \
+    $(B)/rend2/ftgasp.o \
+    $(B)/rend2/ftglyph.o \
+    $(B)/rend2/ftgxval.o \
+    $(B)/rend2/ftlcdfil.o \
+    $(B)/rend2/ftmm.o \
+    $(B)/rend2/ftotval.o \
+    $(B)/rend2/ftpatent.o \
+    $(B)/rend2/ftpfr.o \
+    $(B)/rend2/ftstroke.o \
+    $(B)/rend2/ftsynth.o \
+    $(B)/rend2/fttype1.o \
+    $(B)/rend2/ftwinfnt.o \
+    $(B)/rend2/truetype.o \
+    $(B)/rend2/type1.o \
+    $(B)/rend2/cff.o \
+    $(B)/rend2/type1cid.o \
+    $(B)/rend2/pfr.o \
+    $(B)/rend2/type42.o \
+    $(B)/rend2/winfnt.o \
+    $(B)/rend2/pcf.o \
+    $(B)/rend2/bdf.o \
+    $(B)/rend2/sfnt.o \
+    $(B)/rend2/autofit.o \
+    $(B)/rend2/pshinter.o \
+    $(B)/rend2/raster.o \
+    $(B)/rend2/smooth.o \
+    $(B)/rend2/ftcache.o \
+    $(B)/rend2/ftgzip.o \
+    $(B)/rend2/ftlzw.o \
+    $(B)/rend2/ftbzip2.o \
+    $(B)/rend2/psaux.o \
+    $(B)/rend2/psnames.o
 endif
 endif
 
@@ -2340,23 +2281,12 @@ $(B)/$(CLIENTBIN)$(FULLBINEXT): $(Q3OBJ) $(JPGOBJ) $(LIBSDLMAIN)
 		-o $@ $(Q3OBJ) $(JPGOBJ) \
 		$(LIBSDLMAIN) $(CLIENT_LIBS) $(LIBS)
 
-$(B)/renderer_sp_opengl1_$(SHLIBNAME): $(Q3ROBJ) $(JPGOBJ) $(FTOBJ)
-	$(echo_cmd) "LD $@"
-	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3ROBJ) $(JPGOBJ) $(FTOBJ) \
-		$(THREAD_LIBS) $(LIBSDLMAIN) $(RENDERER_LIBS) $(LIBS)
-
 $(B)/renderer_sp_rend2_$(SHLIBNAME): $(Q3R2OBJ) $(Q3R2STRINGOBJ) $(JPGOBJ) $(FTOBJ)
 	$(echo_cmd) "LD $@"
 	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3R2OBJ) $(Q3R2STRINGOBJ) $(JPGOBJ) $(FTOBJ) \
 		$(THREAD_LIBS) $(LIBSDLMAIN) $(RENDERER_LIBS) $(LIBS)
 else
-$(B)/$(CLIENTBIN)$(FULLBINEXT): $(Q3OBJ) $(Q3ROBJ) $(JPGOBJ) $(FTOBJ) $(LIBSDLMAIN)
-	$(echo_cmd) "LD $@"
-	$(Q)$(CXX) $(CLIENT_CFLAGS) $(CFLAGS) $(CLIENT_LDFLAGS) $(LDFLAGS) $(NOTSHLIBLDFLAGS) \
-		-o $@ $(Q3OBJ) $(Q3ROBJ) $(JPGOBJ) $(FTOBJ) \
-		$(LIBSDLMAIN) $(CLIENT_LIBS) $(RENDERER_LIBS) $(LIBS)
-
-$(B)/$(CLIENTBIN)_rend2$(FULLBINEXT): $(Q3OBJ) $(Q3R2OBJ) $(Q3R2STRINGOBJ) $(JPGOBJ) $(FTOBJ) $(LIBSDLMAIN)
+$(B)/$(CLIENTBIN)$(FULLBINEXT): $(Q3OBJ) $(Q3R2OBJ) $(Q3R2STRINGOBJ) $(JPGOBJ) $(FTOBJ) $(LIBSDLMAIN)
 	$(echo_cmd) "LD $@"
 	$(Q)$(CXX) $(CLIENT_CFLAGS) $(CFLAGS) $(CLIENT_LDFLAGS) $(LDFLAGS) $(NOTSHLIBLDFLAGS) \
 		-o $@ $(Q3OBJ) $(Q3R2OBJ) $(Q3R2STRINGOBJ) $(JPGOBJ) $(FTOBJ) \
@@ -2749,20 +2679,14 @@ $(B)/client/win_resource.o: $(SYSDIR)/win_resource.rc $(SYSDIR)/win_manifest.xml
 $(B)/splines/%.o: $(SPLDIR)/%.cpp
 	$(DO_SPLINE_CXX)
 
-$(B)/renderer/%.o: $(CMDIR)/%.c
+$(B)/rend2/%.o: $(CMDIR)/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(SDLDIR)/%.c
+$(B)/rend2/%.o: $(SDLDIR)/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(JPDIR)/%.c
+$(B)/rend2/%.o: $(JPDIR)/%.c
 	$(DO_REF_CC)
-
-$(B)/renderer/%.o: $(RDIR)/%.c
-	$(DO_REF_CC)
-
-$(B)/renderer/tr_altivec.o: $(RDIR)/tr_altivec.c
-	$(DO_REF_CC_ALTIVEC)
 
 $(B)/rend2/glsl/%.c: $(R2DIR)/glsl/%.glsl $(STRINGIFY)
 	$(DO_REF_STR)
@@ -2773,76 +2697,76 @@ $(B)/rend2/glsl/%.o: $(B)/rend2/glsl/%.c
 $(B)/rend2/%.o: $(R2DIR)/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/autofit/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/autofit/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/base/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/base/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/bdf/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/bdf/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/bzip2/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/bzip2/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/cache/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/cache/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/cff/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/cff/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/cid/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/cid/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/gxvalid/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/gxvalid/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/gzip/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/gzip/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/lzw/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/lzw/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/otvalid/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/otvalid/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/pcf/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/pcf/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/pfr/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/pfr/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/psaux/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/psaux/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/pshinter/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/pshinter/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/psnames/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/psnames/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/raster/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/raster/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/sfnt/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/sfnt/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/smooth/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/smooth/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/tools/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/tools/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/truetype/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/truetype/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/type1/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/type1/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/type42/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/type42/%.c
 	$(DO_REF_CC)
 
-$(B)/renderer/%.o: $(FTDIR)/src/winfonts/%.c
+$(B)/rend2/%.o: $(FTDIR)/src/winfonts/%.c
 	$(DO_REF_CC)
 
 $(B)/ded/%.o: $(ASMDIR)/%.s
@@ -2929,7 +2853,7 @@ $(B)/$(BASEGAME)/qcommon/%.asm: $(CMDIR)/%.c $(Q3LCC)
 # MISC
 #############################################################################
 
-OBJ = $(Q3OBJ) $(Q3ROBJ) $(Q3R2OBJ) $(Q3DOBJ) $(JPGOBJ) $(FTOBJ) \
+OBJ = $(Q3OBJ) $(Q3R2OBJ) $(Q3DOBJ) $(JPGOBJ) $(FTOBJ) \
   $(Q3GOBJ) $(Q3CGOBJ) $(Q3UIOBJ) \
   $(Q3GVMOBJ) $(Q3CGVMOBJ) $(Q3UIVMOBJ) 
 TOOLSOBJ = $(LBURGOBJ) $(Q3CPPOBJ) $(Q3RCCOBJ) $(Q3LCCOBJ) $(Q3ASMOBJ)
@@ -2947,14 +2871,7 @@ endif
 ifneq ($(BUILD_CLIENT),0)
 	$(INSTALL) $(STRIP_FLAG) -m 0755 $(BR)/$(CLIENTBIN)$(FULLBINEXT) $(COPYBINDIR)/$(CLIENTBIN)$(FULLBINEXT)
   ifneq ($(USE_RENDERER_DLOPEN),0)
-	$(INSTALL) $(STRIP_FLAG) -m 0755 $(BR)/renderer_sp_opengl1_$(SHLIBNAME) $(COPYBINDIR)/renderer_sp_opengl1_$(SHLIBNAME)
-    ifneq ($(BUILD_RENDERER_REND2),0)
 	$(INSTALL) $(STRIP_FLAG) -m 0755 $(BR)/renderer_sp_rend2_$(SHLIBNAME) $(COPYBINDIR)/renderer_sp_rend2_$(SHLIBNAME)
-    endif
-  else
-    ifneq ($(BUILD_RENDERER_REND2),0)
-	$(INSTALL) $(STRIP_FLAG) -m 0755 $(BR)/$(CLIENTBIN)_rend2$(FULLBINEXT) $(COPYBINDIR)/$(CLIENTBIN)_rend2$(FULLBINEXT)
-    endif
   endif
 endif
 

@@ -33,9 +33,9 @@ If you have questions concerning this license or the applicable additional terms
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qfiles.h"
 #include "../qcommon/qcommon.h"
-#include "../renderer/tr_public.h"
+#include "../renderercommon/tr_public.h"
 #include "qgl.h"
-#include "../renderer/iqm.h"
+#include "../renderercommon/iqm.h"
 
 #define GLE(ret, name, ...) extern name##proc * qgl##name;
 QGL_1_1_PROCS;

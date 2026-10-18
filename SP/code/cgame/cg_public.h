@@ -220,7 +220,7 @@ typedef enum {
 
 	// New in IORTCW
 	CG_ALLOC = 900,
-	// codmod: directional spotlight (rend2 cone; opengl1 falls back to point)
+	// codmod: directional spotlight (rend2 cone)
 	CG_R_ADDSPOTLIGHTTOSCENE = 901,
 	// codmod: save/restore key binds while /cod_menu steals arrows
 	CG_KEY_GETBINDINGBUF = 902,

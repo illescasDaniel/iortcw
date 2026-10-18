@@ -34,7 +34,7 @@ extern "C" {
 #ifdef Q3RADIANT
   #include "../qgl.h"
 #else
-  #include "../renderer/qgl.h"
+  #include "../rend2/qgl.h"
 #endif
 }
 #endif

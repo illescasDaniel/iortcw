@@ -4574,7 +4574,6 @@ static void UI_Update( const char *name ) {
 			trap_Cvar_Set( "r_texturemode", "GL_LINEAR_MIPMAP_LINEAR" );
 			trap_Cvar_SetValue( "r_ext_compressed_textures", 0 );
 			trap_Cvar_SetValue( "r_overBrightBits", 0 );
-			trap_Cvar_Set( "cl_renderer", "rend2" );
 			trap_Cvar_SetValue( "r_hdr", 1 );
 			trap_Cvar_SetValue( "r_postProcess", 1 );
 			trap_Cvar_SetValue( "r_toneMap", 1 );
@@ -4608,7 +4607,6 @@ static void UI_Update( const char *name ) {
 			trap_Cvar_Set( "r_texturemode", "GL_LINEAR_MIPMAP_LINEAR" );
 			trap_Cvar_SetValue( "r_ext_compressed_textures", 0 );
 			trap_Cvar_SetValue( "r_overBrightBits", 0 );
-			trap_Cvar_Set( "cl_renderer", "opengl1" );
 #ifdef USE_BLOOM
 			trap_Cvar_SetValue( "r_bloom", 1 );
 #endif
@@ -4631,7 +4629,6 @@ static void UI_Update( const char *name ) {
 			trap_Cvar_Set( "r_texturemode", "GL_LINEAR_MIPMAP_NEAREST" );
 			trap_Cvar_SetValue( "r_ext_compressed_textures", 1 );
 			trap_Cvar_SetValue( "r_overBrightBits", 0 );
-			trap_Cvar_Set( "cl_renderer", "opengl1" );
 #ifdef USE_BLOOM
 			trap_Cvar_SetValue( "r_bloom", 0 );
 #endif
@@ -4654,7 +4651,6 @@ static void UI_Update( const char *name ) {
 			trap_Cvar_Set( "r_texturemode", "GL_LINEAR_MIPMAP_NEAREST" );
 			trap_Cvar_SetValue( "r_ext_compressed_textures", 1 );
 			trap_Cvar_SetValue( "r_overBrightBits", 0 );
-			trap_Cvar_Set( "cl_renderer", "opengl1" );
 #ifdef USE_BLOOM
 			trap_Cvar_SetValue( "r_bloom", 0 );
 #endif
