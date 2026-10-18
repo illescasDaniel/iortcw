@@ -1591,19 +1591,15 @@ void IN_Frame( void )
 ===============
 IN_ToggleFullscreenInPlace
 
-Apply a pending r_fullscreen change without destroying the GL context.
-Needed on Wayland with overlays (MangoHud): vid_restart SIGSEGVs while
-recreating the window/context after a fullscreen toggle.
-Returns qtrue if the toggle was handled (caller should skip vid_restart).
+Skip vid_restart when a pending r_fullscreen latch matches a window that was
+already toggled AND the renderer already has its size. Otherwise returns qfalse and
+the soft vid_restart applies it (GLimp_SetModeInPlace, no GL context recreate, which
+MangoHud on Wayland needs).
 ===============
 */
 qboolean IN_ToggleFullscreenInPlace( void )
 {
-	const char *videoDriver;
 	int want, have;
-	int prevW, prevH, w, h;
-	int dw, dh;
-	Uint32 flag = 0;
 	qboolean fsPending;
 
 	if( !SDL_window )
@@ -1625,7 +1621,13 @@ qboolean IN_ToggleFullscreenInPlace( void )
 	// any leftover latch and skip the destructive GL recreate (SIGSEGV under MangoHud).
 	if( !!want == !!have )
 	{
+		int ww = 0, wh = 0;
+
 		if( !fsPending )
+			return qfalse;
+		// codmod: only skip the restart if the renderer already has this window size
+		SDL_GetWindowSize( SDL_window, &ww, &wh );
+		if( abs( ww - cls.glconfig.vidWidth ) > 2 || abs( wh - cls.glconfig.vidHeight ) > 2 )
 			return qfalse;
 		Cvar_Set( "r_fullscreen", want ? "1" : "0" );
 		cls.glconfig.isFullscreen = want ? qtrue : qfalse;
@@ -1633,48 +1635,12 @@ qboolean IN_ToggleFullscreenInPlace( void )
 		return qtrue;
 	}
 
-	videoDriver = SDL_GetCurrentVideoDriver();
-	if( want )
-	{
-		if( videoDriver && !Q_stricmp( videoDriver, "wayland" ) )
-			flag = SDL_WINDOW_FULLSCREEN_DESKTOP;
-		else
-			flag = SDL_WINDOW_FULLSCREEN;
-	}
-
-	prevW = cls.glconfig.vidWidth;
-	prevH = cls.glconfig.vidHeight;
-
-	if( SDL_SetWindowFullscreen( SDL_window, flag ) < 0 )
-	{
-		// Never fall through to vid_restart for a fullscreen-only apply: recreating
-		// the GL context under MangoHud/Wayland SIGSEGVs.
-		Com_Printf( "IN_ToggleFullscreenInPlace: SDL_SetWindowFullscreen failed: %s\n",
-			SDL_GetError() );
-		Cvar_Set( "r_fullscreen", have ? "1" : "0" );
-		return qtrue;
-	}
-
-	w = prevW;
-	h = prevH;
-	SDL_GetWindowSize( SDL_window, &w, &h );
-	dw = w - prevW;
-	dh = h - prevH;
-	if( w > 0 && h > 0 && ( abs( dw ) > 2 || abs( dh ) > 2 ) )
-	{
-		// Keep the in-place toggle; updating glconfig beats a MangoHud crash.
-		cls.glconfig.vidWidth = w;
-		cls.glconfig.vidHeight = h;
-		Com_Printf( "Fullscreen size tweak %dx%d -> %dx%d (in-place)\n",
-			prevW, prevH, w, h );
-	}
-
-	Cvar_Set( "r_fullscreen", want ? "1" : "0" );
-	cls.glconfig.isFullscreen = want ? qtrue : qfalse;
-
-	Com_Printf( "Fullscreen %s (in-place, no vid_restart)\n", want ? "enabled" : "disabled" );
-	IN_Restart();
-	return qtrue;
+	// codmod: a real FS change is NOT applied here any more. Toggling and reading the
+	// window size right away sees the old size on Wayland (async resize), and nothing
+	// rebuilt the FBOs/projection, so the menu rendered in the bottom-left corner.
+	// Fall through to the soft vid_restart: GLimp_SetModeInPlace toggles the window,
+	// waits for the compositor size, and R_Init rebuilds everything at that size.
+	return qfalse;
 }
 
 /*

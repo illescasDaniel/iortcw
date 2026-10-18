@@ -107,6 +107,47 @@ void GLimp_Shutdown( void )
 
 /*
 ===============
+GLimp_WaitForWindowSize
+
+SDL_SetWindowFullscreen / SDL_SetWindowSize return before the compositor has
+resized the window (Wayland is fully asynchronous), so SDL_GetWindowSize right
+after the call still reports the OLD size. Pump events until the window reaches
+the expected size (or time out) and return what it really is.
+===============
+*/
+// codmod: new helper, fixes fullscreen switch rendering at the old size
+static void GLimp_WaitForWindowSize( int expectW, int expectH, int *outW, int *outH )
+{
+	int w = 0, h = 0, dw, dh;
+	int start = ri.Milliseconds();
+
+	for( ;; )
+	{
+		SDL_PumpEvents();
+		SDL_GetWindowSize( SDL_window, &w, &h );
+		dw = w - expectW;
+		dh = h - expectH;
+		if( dw < 0 ) dw = -dw;
+		if( dh < 0 ) dh = -dh;
+		if( ( dw <= 2 && dh <= 2 ) || ri.Milliseconds() - start > 1000 )
+			break;
+		SDL_Delay( 10 );
+	}
+
+	{
+		int gw = 0, gh = 0;
+
+		SDL_GL_GetDrawableSize( SDL_window, &gw, &gh );
+		ri.Printf( PRINT_ALL, "GLimp_WaitForWindowSize: want %dx%d, window %dx%d, drawable %dx%d (%d ms)\n",
+			expectW, expectH, w, h, gw, gh, ri.Milliseconds() - start );
+	}
+
+	*outW = w;
+	*outH = h;
+}
+
+/*
+===============
 GLimp_SetModeInPlace
 
 Apply r_mode / r_fullscreen / custom size without destroying the GL context.
@@ -259,7 +300,12 @@ qboolean GLimp_SetModeInPlace( void )
 
 	w = width;
 	h = height;
-	SDL_GetWindowSize( SDL_window, &w, &h );
+	// codmod: the compositor resizes asynchronously; wait for the real size
+	// (desktop size for Wayland/desktop fullscreen) before sizing the FBOs.
+	if( wantFs && ( wayland || ( SDL_GetWindowFlags( SDL_window ) & SDL_WINDOW_FULLSCREEN_DESKTOP ) == SDL_WINDOW_FULLSCREEN_DESKTOP ) && desktopMode.w > 0 )
+		GLimp_WaitForWindowSize( desktopMode.w, desktopMode.h, &w, &h );
+	else
+		GLimp_WaitForWindowSize( width, height, &w, &h );
 	if( w > 0 && h > 0 )
 	{
 		glConfig.vidWidth = w;
@@ -1528,15 +1574,29 @@ void GLimp_EndFrame( void )
 			// In-place only: vid_restart after a FS toggle SIGSEGVs under MangoHud/Wayland.
 			if( SDL_window && SDL_SetWindowFullscreen( SDL_window, flag ) == 0 )
 			{
-				SDL_GetWindowSize( SDL_window, &w, &h );
+				// codmod: wait for the async compositor resize (was an immediate, stale read)
+				if( r_fullscreen->integer )
+				{
+					SDL_DisplayMode dm;
+					int di = SDL_GetWindowDisplayIndex( SDL_window );
+
+					if( SDL_GetDesktopDisplayMode( di < 0 ? 0 : di, &dm ) == 0 && dm.w > 0 )
+						GLimp_WaitForWindowSize( dm.w, dm.h, &w, &h );
+					else
+						SDL_GetWindowSize( SDL_window, &w, &h );
+				}
+				else
+					SDL_GetWindowSize( SDL_window, &w, &h );
 				glConfig.isFullscreen = r_fullscreen->integer ? qtrue : qfalse;
 				if( w > 0 && h > 0 && ( abs( w - prevW ) > 2 || abs( h - prevH ) > 2 ) )
 				{
-					glConfig.vidWidth = w;
-					glConfig.vidHeight = h;
-					ri.Printf( PRINT_ALL, "Switching %s rendering (%dx%d -> %dx%d, in-place)\n",
+					// codmod: the window size changed, so FBOs/viewport/projection must be
+					// rebuilt; just patching glConfig left rendering at the old size in a
+					// corner. Queue a (soft) vid_restart, which picks up the new size.
+					ri.Printf( PRINT_ALL, "Switching %s rendering (%dx%d -> %dx%d), soft vid_restart\n",
 						r_fullscreen->integer ? "to fullscreen" : "to windowed",
 						prevW, prevH, w, h );
+					ri.Cmd_ExecuteText( EXEC_APPEND, "vid_restart\n" );
 				}
 				else
 				{
