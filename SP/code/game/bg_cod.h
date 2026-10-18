@@ -91,6 +91,13 @@ typedef struct {
 	int aiPush;             // Phase 2b: push for an angle when the player sits behind cover nobody can hit
 	float aiNoShotTime;     // ms of trying without a real shot before a soldier / squad pushes
 	float aiPushCooldown;   // ms between pushes per squad (or soldier)
+	float aiGrenadeHold;    // Phase 3: ms the player must stay behind the same cover before a grenade; 0 = vanilla flush rules
+	float aiGrenadeCooldown;// Phase 3: ms between grenade throws per squad (or soldier)
+	float aiSuppressDecay;  // Phase 3: suppression lost per second
+	float aiSuppressThreshold; // Phase 3: suppression value (0..1) from which a soldier counts as suppressed
+	float aiRetreatHealth;  // Phase 3: percent of max health below which a hit soldier retreats
+	int aiOpportunity;      // Phase 3: push / peek at once while the player reloads, switches weapons, slides or goes prone
+	int aiMorale;           // Phase 3: a squad that lost half its members falls back
 	float recoilEnable;     // E5: real view-angle kick per shot (player only)
 	float recoilScale;      // global multiplier on the per-weapon kick table
 	float recoilAdsScale;   // kick multiplier at full ADS

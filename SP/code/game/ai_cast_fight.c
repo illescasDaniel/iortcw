@@ -46,6 +46,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "../botlib/botai.h"          //bot ai interface
 
 #include "ai_cast.h"
+#include "bg_cod.h"     // codmod: Phase 3, suppression hooks
 
 /*
 Support routines for the Decision Making layer.
@@ -1977,6 +1978,10 @@ float AICast_GetAccuracy( int entnum ) {
 			}
 		}
 	}
+	// codmod: Phase 3, a suppressed tactical soldier aims worse (1.0 for everyone else)
+	if ( bg_cod.enable && bg_cod.aiTactics ) {
+		acc *= AICast_CodAccuracyScale( entnum );
+	}
 	return ( acc );
 }
 
@@ -2230,6 +2235,10 @@ void AICast_ProcessBullet( gentity_t *attacker, vec3_t start, vec3_t end ) {
 		}
 		if ( !( tent->r.svFlags & SVF_CASTAI ) ) {
 			continue;
+		}
+		// codmod: Phase 3, a tactical soldier in a fight notes near misses (suppression); gated inside
+		if ( cs->aiState >= AISTATE_COMBAT && bg_cod.enable && bg_cod.aiTactics ) {
+			AICast_CodNoteBullet( cs, attacker, start, end );
 		}
 		if ( cs->aiState >= AISTATE_COMBAT ) { // RF add	// already fighting, not interested in bullet impacts
 			continue;

@@ -115,6 +115,20 @@ const char *AICast_CodCoverName( int type ) {
 	}
 }
 
+static int codCoverTravelCap;       // Phase 3: one-shot travel cap (1/100 s) for the next AICast_CodFindCover
+
+/*
+============
+AICast_CodCoverSetTravelCap
+
+codmod: Phase 3. The next AICast_CodFindCover only accepts spots reachable within 'travel' (1/100 s); consumed by
+that call. A grenade dodge has the fuse time to work with, not the cover radius.
+============
+*/
+void AICast_CodCoverSetTravelCap( int travel ) {
+	codCoverTravelCap = travel;
+}
+
 /*
 ============
 AICast_CodCoverSearchAllowed
@@ -480,7 +494,7 @@ static int CodClassify( vec3_t P, vec3_t threatEye, vec3_t tdirH, qboolean canCr
 
 	// hidden even standing
 	VectorCopy( P, peekOut );
-	if ( mode == COVER_HIDE ) {
+	if ( mode == COVER_HIDE || mode == COVER_DODGE ) {
 		return COVER_FULL;
 	}
 
@@ -554,9 +568,13 @@ qboolean AICast_CodFindCover( cast_state_t *cs, vec3_t threatPos, int threatNum,
 	qboolean angle, bodyAware;
 	int maxCands, numBody;
 	vec3_t bodyPts[3], enemyEye;
+	qboolean retreat, dodge;
+	int travelCap;
 
 	codCoverLastCandidates = 0;
 	codCoverLastValid = 0;
+	travelCap = codCoverTravelCap;      // one-shot
+	codCoverTravelCap = 0;
 
 	if ( !cs || !cs->bs || !out || threatNum < 0 ) {
 		return qfalse;
@@ -596,6 +614,8 @@ qboolean AICast_CodFindCover( cast_state_t *cs, vec3_t threatPos, int threatNum,
 
 	// codmod: Phase 2 modes
 	flank = ( mode == COVER_FLANK && refPos ) ? qtrue : qfalse;
+	retreat = ( mode == COVER_RETREAT ) ? qtrue : qfalse;       // Phase 3: attack-type spot clearly farther from the threat
+	dodge = ( mode == COVER_DODGE ) ? qtrue : qfalse;           // Phase 3: hidden from a grenade's landing point, quickly reachable
 	// codmod: Phase 2b. COVER_ANGLE needs a shot at the enemy's body; advance / flank spots must give one too (the
 	// eye test alone treats a prone player behind a table as reachable)
 	angle = ( mode == COVER_ANGLE ) ? qtrue : qfalse;
@@ -612,6 +632,11 @@ qboolean AICast_CodFindCover( cast_state_t *cs, vec3_t threatPos, int threatNum,
 		maxTravel *= 0.7f;      // short bounds
 	} else if ( flank || angle ) {
 		maxTravel *= 2.0f;      // flank and push routes are long
+	} else if ( retreat ) {
+		maxTravel *= 1.5f;
+	}
+	if ( travelCap > 0 && maxTravel > travelCap ) {
+		maxTravel = travelCap;
 	}
 	VectorClear( refDir );
 	if ( flank ) {
@@ -739,6 +764,11 @@ qboolean AICast_CodFindCover( cast_state_t *cs, vec3_t threatPos, int threatNum,
 			VectorNormalize( toSpot );
 			if ( DotProduct( toSpot, refDir ) > 0.5f ) {
 				continue;       // within 60 degrees of the squad's bearing: not a flank
+			}
+		} else if ( retreat ) {
+			d = Distance( cands[i].pos, threatPos );
+			if ( d < tdist + 80.0f || Distance( cands[i].pos, origin ) < 96.0f ) {
+				continue;       // has to be a real step away from the threat
 			}
 		} else if ( angle ) {
 			d = Distance( cands[i].pos, threatPos );
@@ -871,18 +901,18 @@ qboolean AICast_CodFindCover( cast_state_t *cs, vec3_t threatPos, int threatNum,
 		}
 
 		// score (higher is better)
-		if ( mode == COVER_HIDE ) {
+		if ( mode == COVER_HIDE || dodge ) {
 			w = ( cands[i].type == COVER_FULL ) ? 1.0f : 0.6f;
 		} else {
 			w = ( cands[i].type == COVER_FULL ) ? 0.3f : 1.0f;
 		}
-		score = w * 100.0f - travel * 0.1f;
+		score = w * 100.0f - travel * ( dodge ? 0.4f : 0.1f );     // a dodge is a race against the fuse
 
 		d = Distance( cands[i].pos, threatPos );
 		if ( d < 192.0f ) {
 			score -= 40.0f + ( 192.0f - d ) * 0.2f;
 		}
-		if ( mode != COVER_HIDE ) {
+		if ( mode != COVER_HIDE && !dodge ) {
 			if ( d < lo ) {
 				score -= ( lo - d ) * 0.08f;
 			} else if ( d > hi ) {
@@ -918,6 +948,28 @@ qboolean AICast_CodFindCover( cast_state_t *cs, vec3_t threatPos, int threatNum,
 				}
 			}
 			score -= seen * 8.0f;
+		} else if ( retreat ) {
+			// the farther from the threat the better (capped), and a route the threat cannot watch is better still
+			int sample, seen = 0;
+			vec3_t sp;
+
+			progress = d - dAI;
+			score += ( progress > 300.0f ? 300.0f : progress ) * 0.1f;
+			for ( sample = 1; sample <= 4; sample++ ) {
+				VectorSubtract( cands[i].pos, origin, sp );
+				VectorMA( origin, sample * 0.25f, sp, sp );
+				sp[2] += 40.0f;
+				if ( AICast_CodLineClear( threatEye, sp ) ) {
+					seen++;
+				}
+			}
+			score -= seen * 8.0f;
+		} else if ( dodge ) {
+			// away from the blast: the farther the better (capped); running at the grenade is penalised below
+			score += ( d > 450.0f ? 450.0f : d ) * 0.08f;
+			if ( d < dAI - 64.0f && DotProduct( toSpot, tdir ) > 0.5f ) {
+				score -= 40.0f;
+			}
 		} else if ( d < dAI - 64.0f && DotProduct( toSpot, tdir ) > 0.5f ) {
 			score -= 25.0f;
 		}

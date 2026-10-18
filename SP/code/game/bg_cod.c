@@ -113,6 +113,14 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_aiPush",             "1",    0,            CODOFS( aiPush ),             1 },
 	{ "cod_aiNoShotTime",       "4000", 0,            CODOFS( aiNoShotTime ),       0 },
 	{ "cod_aiPushCooldown",     "9000", 0,            CODOFS( aiPushCooldown ),     0 },
+	// codmod: tactical AI Phase 3, threat reactions (ai_cast_cod.c / ai_cast_cod_squad.c)
+	{ "cod_aiGrenadeHold",      "4000", 0,            CODOFS( aiGrenadeHold ),      0 },
+	{ "cod_aiGrenadeCooldown",  "8000", 0,            CODOFS( aiGrenadeCooldown ),  0 },
+	{ "cod_aiSuppressDecay",    "0.35", 0,            CODOFS( aiSuppressDecay ),    0 },
+	{ "cod_aiSuppressThreshold", "0.5", 0,            CODOFS( aiSuppressThreshold ), 0 },
+	{ "cod_aiRetreatHealth",    "35",   0,            CODOFS( aiRetreatHealth ),    0 },
+	{ "cod_aiOpportunity",      "1",    0,            CODOFS( aiOpportunity ),      1 },
+	{ "cod_aiMorale",           "1",    0,            CODOFS( aiMorale ),           1 },
 	// codmod: E5 recoil (docs/phase-7-extras.md). Per-weapon degrees live in PM_CodRecoilKick.
 	{ "cod_recoilEnable",       "1",    0,            CODOFS( recoilEnable ),       1 },
 	{ "cod_recoilScale",        "1",    0,            CODOFS( recoilScale ),        0 },

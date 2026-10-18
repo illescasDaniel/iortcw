@@ -41,7 +41,9 @@ typedef enum {
 	COVER_HIDE,         // fully hidden, for reloading / retreating
 	COVER_ADVANCE,      // Phase 2: attack spot clearly closer to the threat (bounding overwatch hop)
 	COVER_FLANK,        // Phase 2: attack spot with a very different bearing to the threat than the squad's
-	COVER_ANGLE         // Phase 2b: a spot with a real shot at the enemy's body (push for an angle)
+	COVER_ANGLE,        // Phase 2b: a spot with a real shot at the enemy's body (push for an angle)
+	COVER_RETREAT,      // Phase 3: attack spot clearly farther from the threat (low health, broken morale)
+	COVER_DODGE         // Phase 3: hidden spot out of a grenade's blast; threatPos is the grenade's landing point
 } codCoverMode_t;
 
 // how a cover spot works
@@ -68,6 +70,7 @@ typedef struct {
 // ai_cast_cod_cover.c
 qboolean AICast_CodFindCover( cast_state_t *cs, vec3_t threatPos, int threatNum, int mode, codCover_t *out, vec3_t avoidPos, vec3_t refPos );
 qboolean AICast_CodCoverSearchAllowed( qboolean urgent );
+void AICast_CodCoverSetTravelCap( int travel );     // Phase 3: cap (1/100 s) for the NEXT search only (dodge: fuse time)
 void AICast_CodClaimCover( int entNum, vec3_t pos );
 void AICast_CodReleaseCover( int entNum );
 qboolean AICast_CodLineClear( vec3_t from, vec3_t to );
@@ -79,6 +82,10 @@ extern int codCoverLastValid;
 
 // ai_cast_cod.c
 qboolean AICast_CodCanCrouch( cast_state_t *cs );
+float AICast_CodAccuracyScale( int entNum );                                    // Phase 3: < 1 while suppressed (ai_cast_fight.c)
+void AICast_CodNoteBullet( cast_state_t *cs, gentity_t *attacker, vec3_t start, vec3_t end );    // Phase 3: near misses
+int AICast_CodGrenadeScore( cast_state_t *cs, vec3_t threatPos );               // Phase 3: > 0 when this soldier could throw now
+char *AIFunc_BattleDiveStart( cast_state_t *cs, vec3_t vec );                   // ai_cast_funcs.c (declared in g_func_decs.h only)
 
 // ai_cast_cod_squad.c (Phase 2: squads, attack tokens, movers, flanking, callouts)
 #define COD_BARK_ATTACK     0       // callout kinds
@@ -112,5 +119,14 @@ void AICast_CodSquadPushStarted( cast_state_t *cs, int travelMs );      // movin
 void AICast_CodSquadPushResult( cast_state_t *cs, qboolean started );   // search done (qfalse: nothing found)
 void AICast_CodSquadPushDone( cast_state_t *cs, qboolean ok );          // push over: cooldown
 qboolean AICast_CodSquadThreatFresh( cast_state_t *cs );                // the enemy's position is known fresh
+
+// Phase 3: threat reactions
+qboolean AICast_CodSquadGrenadeThrower( cast_state_t *cs, vec3_t threatPos );   // squad cooldown over and cs is the best thrower (always qtrue when solo)
+void AICast_CodSquadGrenadeThrown( cast_state_t *cs );                  // starts the squad cooldown + callout
+int AICast_CodSquadLastShot( cast_state_t *cs );                        // newest time any member had a real shot (0 = none known)
+qboolean AICast_CodSquadPushActive( cast_state_t *cs );                 // somebody is ordered to / on a push
+void AICast_CodSquadOpportunity( cast_state_t *cs, int ms );            // the player is weak: one more attack token for ms
+qboolean AICast_CodSquadMoraleActive( cast_state_t *cs );               // broken: survivors fall back and stay cautious
+qboolean AICast_CodSquadMoraleFresh( cast_state_t *cs );                // qtrue once per soldier per broken morale: retreat now
 
 #endif // __AI_CAST_COD_H__

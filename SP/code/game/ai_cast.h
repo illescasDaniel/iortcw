@@ -738,6 +738,8 @@ qboolean AICast_CodWantsCrouch( cast_state_t *cs );                 // codmod: t
 // ai_cast_cod.c (tactical AI, docs/ai-overhaul-plan.md)
 qboolean AICast_CodTacticsActive( cast_state_t *cs );
 void AICast_CodReset( int entNum );
+float AICast_CodAccuracyScale( int entNum );                          // codmod: Phase 3, < 1 while suppressed
+void AICast_CodNoteBullet( cast_state_t *cs, gentity_t *attacker, vec3_t start, vec3_t end );   // codmod: Phase 3, near misses
 //
 // ai_cast_script.c
 qboolean AICast_ScriptRun( cast_state_t *cs, qboolean force );

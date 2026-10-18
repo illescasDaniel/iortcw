@@ -47,6 +47,12 @@ If you have questions concerning this license or the applicable additional terms
 // order) take a mover slot while the others fire from cover, and token holders suppress the threat's last known
 // position while a teammate moves. A soldier outside any squad behaves exactly as in Phase 1.
 //
+// Phase 3 (threat reactions): offensive grenades (a player who holds one cover for too long, or sits behind a known
+// corner), grenade dodging (and the vanilla catch / kick), suppression from near misses (a decaying value per
+// soldier: stay down longer, peek shorter, aim worse, an OPEN soldier runs for cover), pain (urgent cover in the
+// open, a farther retreat at low health), squad morale (a squad that lost half falls back and is cautious for a
+// while) and opportunism (the player reloads, switches weapons, slides or goes prone: peek / push now).
+//
 // All state lives in the static codAI[] array (never in cast_state_t, which is saved as a raw struct). A savegame
 // load just leaves it stale; CodGet() detects that (level.startTime / lastThink) and starts from scratch.
 //===========================================================================
@@ -74,7 +80,7 @@ typedef enum {
 } codState_t;
 
 static const char *codStateNames[] = { "OPEN", "MOVE", "HIDE", "PEEK" };
-static const char *codModeNames[] = { "attack", "hide", "advance", "flank", "angle" };
+static const char *codModeNames[] = { "attack", "hide", "advance", "flank", "angle", "retreat", "dodge" };
 
 // why CodEligibility() said no
 #define COD_ELIG_OK     0
@@ -143,8 +149,31 @@ typedef struct {
 	int pushLastShot;
 	int nextPushDbg;
 
+	// Phase 3
+	int nextGrenadeCheck;           // offensive grenade: next evaluation
+	int nextGrenade;                // this soldier's own cooldown (a solo soldier's only one)
+	vec3_t holdPos;                 // where the threat has been sitting
+	int holdSince;                  // since when (0 = threat not fresh)
+	qboolean dodging;               // the current MOVE is a grenade dodge
+	qboolean dodgeFailed;           // no dodge cover for the grenade we reacted to: the vanilla avoid runs
+	qboolean dodged;                // dived already
+	int dodgeEnt;                   // the grenade we reacted to ...
+	int dodgeThink;                 // ... (its explode time identifies it)
+	int dodgeEnd;                   // explosion time
+	float dodgeRadius;
+	int retreatKind;                // 0 none, 1 low health, 2 broken morale (the current MOVE is a retreat)
+	int nextRetreat;
+	int oppUntil;                   // the player is weak until then
+	int nextOppBark;
+	qboolean oppWasProne;
+	int nextDbg;                    // rate limit of the Phase 3 debug lines
+	int nextSuppDbg;
+
 	int nextDraw;
 } codAI_t;
+
+#define COD_RETREAT_HEALTH  1
+#define COD_RETREAT_MORALE  2
 
 #define COD_RELOC_NONE      0
 #define COD_RELOC_ADVANCE   1
@@ -412,6 +441,118 @@ static void CodThreatPos( cast_state_t *cs, vec3_t out ) {
 	}
 }
 
+//===========================================================================
+// Phase 3: suppression, morale
+//===========================================================================
+
+// suppression per soldier: a value 0..1 that near misses add to and that decays by cod_aiSuppressDecay per second
+static struct {
+	int levelStart;
+	int time;
+	float val;
+} codSupp[MAX_CLIENTS];
+
+static float CodSuppression( int entNum ) {
+	float v;
+
+	if ( entNum < 0 || entNum >= MAX_CLIENTS || codSupp[entNum].levelStart != level.startTime || codSupp[entNum].time > level.time ) {
+		return 0;
+	}
+	v = codSupp[entNum].val - bg_cod.aiSuppressDecay * ( level.time - codSupp[entNum].time ) / 1000.0f;
+	return v > 0 ? v : 0;
+}
+
+static qboolean CodSuppressed( int entNum ) {
+	return ( CodSuppression( entNum ) >= bg_cod.aiSuppressThreshold && bg_cod.aiSuppressThreshold > 0 ) ? qtrue : qfalse;
+}
+
+/*
+============
+AICast_CodNoteBullet
+
+codmod: Phase 3, called from AICast_ProcessBullet for every AI that is already in combat (the vanilla function
+ignores them). A bullet of an enemy that passes within 160 u of a soldier running the tactical combat adds to its
+suppression value.
+============
+*/
+void AICast_CodNoteBullet( cast_state_t *cs, gentity_t *attacker, vec3_t start, vec3_t end ) {
+	codAI_t *ca;
+	vec3_t body, proj, a, dir;
+	float d, v, before;
+	int n = cs->entityNum;
+
+	if ( !bg_cod.enable || !bg_cod.aiTactics || bg_cod.aiSuppressDecay <= 0 || n < 0 || n >= MAX_CLIENTS ) {
+		return;
+	}
+	if ( !attacker || attacker->s.number >= MAX_CLIENTS || attacker->s.number == n || AICast_SameTeam( cs, attacker->s.number ) ) {
+		return;
+	}
+	ca = &codAI[n];
+	if ( ca->levelStart != level.startTime || ca->lastThink < level.time - 1500 || cs->aifunc != AIFunc_CodCombat ) {
+		return;
+	}
+	VectorCopy( g_entities[n].r.currentOrigin, body );
+	body[2] += 20;
+	VectorSubtract( end, start, dir );
+	ProjectPointOntoVector( body, start, end, proj );
+	VectorSubtract( proj, start, a );
+	if ( DotProduct( a, dir ) < 0 ) {
+		return;     // behind the muzzle
+	}
+	VectorSubtract( proj, end, a );
+	d = ( DotProduct( a, dir ) > 0 ) ? Distance( body, end ) : Distance( body, proj );
+	if ( d > 160.0f ) {
+		return;
+	}
+	before = CodSuppression( n );
+	v = before + 0.12f + 0.2f * ( 1.0f - d / 160.0f );
+	if ( v > 1.0f ) {
+		v = 1.0f;
+	}
+	codSupp[n].levelStart = level.startTime;
+	codSupp[n].time = level.time;
+	codSupp[n].val = v;
+	if ( bg_cod.aiDebug >= 1 && before < bg_cod.aiSuppressThreshold && v >= bg_cod.aiSuppressThreshold && level.time >= ca->nextSuppDbg ) {
+		ca->nextSuppDbg = level.time + 2000;
+		G_Printf( "[ai] %s SUPPRESSED v=%.2f (near miss d=%d)\n", CodName( cs ), v, (int)d );
+	}
+}
+
+/*
+============
+AICast_CodAccuracyScale
+
+codmod: Phase 3, multiplied into AICast_GetAccuracy: 1 for everyone, down to about 0.45 for a suppressed soldier
+============
+*/
+float AICast_CodAccuracyScale( int entNum ) {
+	codAI_t *ca;
+	float v;
+
+	if ( entNum < 0 || entNum >= MAX_CLIENTS ) {
+		return 1.0f;
+	}
+	ca = &codAI[entNum];
+	if ( ca->levelStart != level.startTime || ca->lastThink < level.time - 1000 ) {
+		return 1.0f;
+	}
+	if ( !CodSuppressed( entNum ) ) {
+		return 1.0f;
+	}
+	v = CodSuppression( entNum );
+	return 1.0f - 0.55f * v;
+}
+
+// aggression, lowered while the squad's morale is broken
+static float CodAggression( cast_state_t *cs ) {
+	float a = cs->attributes[AGGRESSION];
+
+	if ( bg_cod.aiMorale && AICast_CodSquadMoraleActive( cs ) ) {
+		a *= 0.35f;
+	}
+	return a;
+}
+
 /*
 ============
 CodSetState
@@ -593,6 +734,8 @@ static void CodExit( cast_state_t *cs, codAI_t *ca, int backoffMs ) {
 	AICast_CodSquadPublish( cs, qfalse );
 	AICast_CodReleaseCover( cs->entityNum );
 	ca->hasCover = qfalse;
+	ca->dodging = qfalse;
+	ca->retreatKind = 0;
 	ca->crouchUntil = 0;
 	cs->attackcrouch_time = 0;
 	ca->state = COD_OPEN;
@@ -612,6 +755,8 @@ static void CodCoverFailed( cast_state_t *cs, codAI_t *ca, qboolean urgent, cons
 	}
 	AICast_CodReleaseCover( cs->entityNum );
 	ca->hasCover = qfalse;
+	ca->dodging = qfalse;
+	ca->retreatKind = 0;
 	ca->crouchUntil = 0;
 	cs->attackcrouch_time = 0;
 	ca->nextSearchTime = level.time;
@@ -851,6 +996,12 @@ static qboolean CodSuppressFire( cast_state_t *cs, codAI_t *ca, vec3_t at ) {
 
 // leave HIDE for PEEK
 static char *CodEnterPeek( cast_state_t *cs, codAI_t *ca, int durationMs, qboolean suppress, const char *why ) {
+	// codmod: Phase 3, shorter peeks while suppressed, a little longer while the player is weak
+	if ( CodSuppressed( cs->entityNum ) ) {
+		durationMs = (int)( durationMs * ( 1.0f - 0.45f * CodSuppression( cs->entityNum ) ) );
+	} else if ( ca->oppUntil > level.time ) {
+		durationMs += 400;
+	}
 	ca->peekUntil = level.time + durationMs;
 	ca->lastSawEnemy = level.time;
 	ca->peekCycles++;
@@ -933,6 +1084,9 @@ static qboolean CodPushWanted( cast_state_t *cs, codAI_t *ca ) {
 	if ( !bg_cod.aiPush || ca->pushMode ) {
 		return qfalse;
 	}
+	if ( bg_cod.aiMorale && AICast_CodSquadMoraleActive( cs ) ) {
+		return qfalse;      // codmod: Phase 3, a broken squad does not push
+	}
 	if ( AICast_CodSquadId( cs ) ) {
 		return AICast_CodSquadPushOrder( cs );
 	}
@@ -970,6 +1124,150 @@ static void CodPushStartedDebug( cast_state_t *cs, codAI_t *ca, vec3_t threatPos
 	}
 }
 
+//===========================================================================
+// Phase 3: offensive grenades
+//===========================================================================
+
+// the vanilla "can throw one" test (carried, ammo, own recharge, the script lets it switch)
+static qboolean CodHasGrenade( cast_state_t *cs ) {
+	if ( cs->weaponNum && ( cs->castScriptStatus.scriptFlags & SFL_NOCHANGEWEAPON ) ) {
+		return qfalse;
+	}
+	if ( COM_BitCheck( cs->bs->cur_ps.weapons, WP_GRENADE_LAUNCHER ) && AICast_GotEnoughAmmoForWeapon( cs, WP_GRENADE_LAUNCHER )
+		 && cs->weaponFireTimes[WP_GRENADE_LAUNCHER] < level.time - (int)( aicast_skillscale * 3000 ) ) {
+		return qtrue;
+	}
+	if ( COM_BitCheck( cs->bs->cur_ps.weapons, WP_GRENADE_PINEAPPLE ) && AICast_GotEnoughAmmoForWeapon( cs, WP_GRENADE_PINEAPPLE )
+		 && cs->weaponFireTimes[WP_GRENADE_PINEAPPLE] < level.time - (int)( aicast_skillscale * 3000 ) ) {
+		return qtrue;
+	}
+	return qfalse;
+}
+
+// a lob from the eye over the middle to the target is not blocked (a cheap stand-in for the vanilla arc test, which
+// AIFunc_GrenadeFlush repeats with the real trajectory before it lets go)
+static qboolean CodGrenadeArc( cast_state_t *cs, vec3_t threatPos ) {
+	vec3_t eye, apex, tgt;
+	float d;
+
+	VectorCopy( cs->bs->origin, eye );
+	eye[2] += DEFAULT_VIEWHEIGHT;
+	VectorCopy( threatPos, tgt );
+	tgt[2] += 24;
+	d = Distance( eye, tgt );
+	VectorAdd( eye, tgt, apex );
+	VectorScale( apex, 0.5f, apex );
+	apex[2] = ( eye[2] > tgt[2] ? eye[2] : tgt[2] ) + 40.0f + d * 0.18f;
+	return ( AICast_CodLineClear( eye, apex ) && AICast_CodLineClear( apex, tgt ) ) ? qtrue : qfalse;
+}
+
+/*
+============
+AICast_CodGrenadeScore
+
+codmod: Phase 3, how good a thrower this soldier is for a target at threatPos right now (0 = cannot). The squad picks the
+best one; nearer is better, and the soldier needs a lob that is not blocked.
+============
+*/
+int AICast_CodGrenadeScore( cast_state_t *cs, vec3_t threatPos ) {
+	gentity_t *ent;
+	float d;
+
+	if ( !cs || !cs->bs || cs->entityNum < 0 || cs->entityNum >= MAX_CLIENTS ) {
+		return 0;
+	}
+	ent = &g_entities[cs->entityNum];
+	if ( !ent->inuse || ent->health <= 0 || cs->aiState < AISTATE_COMBAT || cs->castScriptStatus.castScriptEventIndex >= 0
+		 || cs->castScriptStatus.scriptNoAttackTime >= level.time || cs->aifunc != AIFunc_CodCombat ) {
+		return 0;
+	}
+	if ( codAI[cs->entityNum].state == COD_MOVE ) {
+		return 0;
+	}
+	d = Distance( cs->bs->origin, threatPos );
+	if ( d < 200.0f || d > 1100.0f || !CodHasGrenade( cs ) || !CodGrenadeArc( cs, threatPos ) ) {
+		return 0;
+	}
+	return 1 + (int)( 1100.0f - d );
+}
+
+// the squad cooldown / thrower choice, the arc and the vanilla availability (ammo, spacing) all say yes
+static qboolean CodGrenadeAvailable( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
+	if ( level.time < ca->nextGrenade || !AICast_CodSquadGrenadeThrower( cs, threatPos ) ) {
+		return qfalse;
+	}
+	if ( AICast_CodGrenadeScore( cs, threatPos ) <= 0 ) {
+		return qfalse;
+	}
+	return AICast_WantsGrenadeFlush( cs, qfalse );
+}
+
+// a throw is decided: cooldowns and the callout
+static void CodGrenadeCommit( cast_state_t *cs, codAI_t *ca ) {
+	AICast_CodSquadGrenadeThrown( cs );
+	ca->nextGrenade = level.time + (int)( bg_cod.aiGrenadeCooldown * ( 0.85f + 0.3f * random() ) );
+	ca->holdSince = 0;
+}
+
+/*
+============
+CodGrenadeWanted
+
+codmod: Phase 3. A grenade is thrown when the threat has sat at the same spot (within 96 u) for cod_aiGrenadeHold ms and
+nobody had a real shot in the last 1.5 s, or when it is out of sight behind a known corner (seen at that spot for
+1.5 s, no line from here). One thrower per squad (the best, squad cooldown cod_aiGrenadeCooldown), nobody while a
+teammate is pushing for an angle (the push has its own grenade fallback).
+============
+*/
+static qboolean CodGrenadeWanted( cast_state_t *cs, codAI_t *ca, vec3_t threatPos, qboolean visible ) {
+	int hold, lastShot;
+	qboolean held, corner;
+
+	if ( !CodThreatFresh( cs ) ) {
+		ca->holdSince = 0;
+		return qfalse;
+	}
+	if ( !ca->holdSince || Distance( threatPos, ca->holdPos ) > 96.0f ) {
+		VectorCopy( threatPos, ca->holdPos );
+		ca->holdSince = level.time;
+	}
+	if ( bg_cod.aiGrenadeHold <= 0 || level.time < ca->nextGrenadeCheck || ca->state == COD_MOVE ) {
+		return qfalse;
+	}
+	ca->nextGrenadeCheck = level.time + 300 + rand() % 200;
+
+	hold = level.time - ca->holdSince;
+	lastShot = AICast_CodSquadLastShot( cs );
+	if ( ca->pushLastShot > lastShot ) {
+		lastShot = ca->pushLastShot;
+	}
+	if ( level.time - lastShot < 1500 ) {
+		return qfalse;
+	}
+	held = ( hold >= (int)bg_cod.aiGrenadeHold ) ? qtrue : qfalse;
+	corner = qfalse;
+	if ( !held && !visible && hold >= 1500 ) {
+		vec3_t eye, threatEye;
+
+		VectorCopy( cs->bs->origin, eye );
+		eye[2] += DEFAULT_VIEWHEIGHT;
+		VectorCopy( threatPos, threatEye );
+		threatEye[2] += DEFAULT_VIEWHEIGHT;
+		corner = AICast_CodLineClear( eye, threatEye ) ? qfalse : qtrue;
+	}
+	if ( !held && !corner ) {
+		return qfalse;
+	}
+	if ( AICast_CodSquadPushActive( cs ) || !CodGrenadeAvailable( cs, ca, threatPos ) ) {
+		return qfalse;
+	}
+	if ( bg_cod.aiDebug >= 1 ) {
+		G_Printf( "[ai] %s sq%d GRENADE %s (threat held %d ms, d=%d)\n", CodName( cs ), AICast_CodSquadId( cs ),
+				  held ? "player holds cover" : "player behind a corner", hold, (int)Distance( cs->bs->origin, threatPos ) );
+	}
+	return qtrue;
+}
+
 /*
 ============
 CodTryPush
@@ -982,7 +1280,7 @@ flush) or COD_PUSH_NONE (not now; the order stays, or was dropped on a failed se
 */
 static int CodTryPush( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 	vec3_t *avoid;
-	qboolean squad, visible;
+	qboolean squad;
 
 	if ( !CodPushWanted( cs, ca ) || level.time < ca->nextPushTry ) {
 		return COD_PUSH_NONE;
@@ -1013,8 +1311,9 @@ static int CodTryPush( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 	}
 
 	// 2. flush the player out with a grenade (the vanilla conditions decide whether this soldier can)
-	visible = CodEnemyVisible( cs );
-	if ( AICast_WantsGrenadeFlush( cs, visible ? qfalse : qtrue ) || AICast_WantsGrenadeFlush( cs, visible ? qtrue : qfalse ) ) {
+	// (codmod: Phase 3, the same squad cooldown / thrower choice as the proactive grenades, so they never double up)
+	if ( CodGrenadeAvailable( cs, ca, threatPos ) ) {
+		CodGrenadeCommit( cs, ca );
 		AICast_CodMoverRelease( cs );
 		if ( squad ) {
 			AICast_CodSquadPushDone( cs, qtrue );
@@ -1146,6 +1445,9 @@ static qboolean CodTryRelocate( cast_state_t *cs, codAI_t *ca, vec3_t threatPos 
 	if ( !AICast_CodSquadId( cs ) ) {
 		return qfalse;
 	}
+	if ( bg_cod.aiMorale && AICast_CodSquadMoraleActive( cs ) ) {
+		return qfalse;      // codmod: Phase 3, a broken squad neither flanks nor advances
+	}
 
 	// 1. flank order
 	if ( AICast_CodSquadFlankOrder( cs ) ) {
@@ -1173,14 +1475,14 @@ static qboolean CodTryRelocate( cast_state_t *cs, codAI_t *ca, vec3_t threatPos 
 		return qfalse;
 	}
 	ca->nextAdvance = level.time + 1000;
-	waitedLong = ( ca->tokenWaitStart && level.time - ca->tokenWaitStart > 2500 ) ? qtrue : qfalse;
+	waitedLong = ( ( ca->tokenWaitStart && level.time - ca->tokenWaitStart > 2500 ) || ca->oppUntil > level.time ) ? qtrue : qfalse;     // Phase 3: or the player is weak
 	if ( !waitedLong && ca->peekCycles < 1 ) {
 		return qfalse;
 	}
 	if ( Distance( cs->bs->origin, threatPos ) < bg_cod.aiAdvanceMinDist || !AICast_CodSquadCanAdvance( cs ) ) {
 		return qfalse;
 	}
-	aggr = 0.25f + 0.4f * cs->attributes[AGGRESSION];
+	aggr = 0.25f + 0.4f * CodAggression( cs );
 	if ( !waitedLong && random() > aggr ) {
 		return qfalse;
 	}
@@ -1209,6 +1511,14 @@ static char *CodStateOpen( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 	// Phase 2: without a token this soldier does not shoot, it gets to cover. With no cover to be found it fights anyway.
 	hasToken = AICast_CodTokenAcquire( cs, 1200 );
 	shoot = ( hasToken || ca->searchFails >= 3 ) ? qtrue : qfalse;
+
+	// codmod: Phase 3, pinned down in the open: get to cover now (an urgent search ignores the ration)
+	if ( CodSuppressed( cs->entityNum ) && !ca->hasCover ) {
+		ca->urgent = qtrue;
+		if ( ca->nextSearchTime > level.time + 250 ) {
+			ca->nextSearchTime = level.time + 250;
+		}
+	}
 
 	// cover search (rationed). An empty or nearly empty magazine looks for a hidden spot to reload in.
 	if ( level.time >= ca->nextSearchTime ) {
@@ -1272,10 +1582,23 @@ static char *CodStateMove( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 			return NULL;
 		}
 		ca->hideStart = level.time;
-		ca->hideUntil = level.time + (int)( CodRandMs( bg_cod.aiHideMin, bg_cod.aiHideMax ) * ( 1.15f - 0.5f * cs->attributes[AGGRESSION] ) );
+		ca->hideUntil = level.time + (int)( CodRandMs( bg_cod.aiHideMin, bg_cod.aiHideMax ) * ( 1.15f - 0.5f * CodAggression( cs ) ) );
 		ca->hideCheck = level.time + 250;
 		ca->settledAt = 0;
 		ca->reloadIssued = qfalse;
+		// codmod: Phase 3, arrived from a retreat: stay down longer. Arrived from a dodge: at least until the
+		// blast is over, and the (hidden-only) spot is replaced by an ordinary one at the first look
+		if ( ca->retreatKind ) {
+			ca->hideUntil = level.time + (int)( ( ca->hideUntil - level.time ) * ( ca->retreatKind == COD_RETREAT_MORALE ? 1.5f : 1.3f ) );
+			ca->retreatKind = 0;
+		}
+		if ( ca->dodging ) {
+			ca->dodging = qfalse;
+			if ( ca->hideUntil < ca->dodgeEnd + 500 ) {
+				ca->hideUntil = ca->dodgeEnd + 500;
+			}
+			ca->peekCycles = ca->maxPeekCycles;
+		}
 		CodSetState( cs, ca, COD_HIDE, "arrived" );
 		return NULL;
 	}
@@ -1285,7 +1608,7 @@ static char *CodStateMove( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 	}
 	if ( level.time >= ca->nextVisCheck ) {
 		ca->nextVisCheck = level.time + 250;
-		if ( dist > 150.0f && !ca->pushMode && CodExposed( cs, ca, threatPos ) ) {
+		if ( dist > 150.0f && !ca->pushMode && !ca->dodging && CodExposed( cs, ca, threatPos ) ) {
 			CodCoverFailed( cs, ca, qtrue, "cover exposed" );
 			return NULL;
 		}
@@ -1293,8 +1616,26 @@ static char *CodStateMove( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 
 	ca->crouchUntil = 0;
 	cs->attackcrouch_time = 0;
-	if ( dist > 200.0f ) {
+	if ( dist > ( ca->dodging ? 60.0f : 200.0f ) ) {
 		AICast_CodTrySprint( cs );
+	}
+	// codmod: Phase 3, still inside the blast with the fuse nearly out: dive (a character with the dive animation)
+	if ( ca->dodging && !ca->dodged && ( cs->aiFlags & AIFL_DIVE_ANIM ) && dist > 96.0f && ca->dodgeEnd - level.time < 1200
+		 && Distance( cs->bs->origin, cs->dangerEntityPos ) < ca->dodgeRadius && !cs->bs->cur_ps.torsoTimer
+		 && cs->lastRollMove < level.time - 800 && cs->castScriptStatus.castScriptEventIndex < 0
+		 && cs->bs->cur_ps.groundEntityNum == ENTITYNUM_WORLD ) {
+		vec3_t dir;
+		char *r;
+
+		VectorSubtract( ca->cover.pos, cs->bs->origin, dir );
+		dir[2] = 0;
+		ca->dodged = qtrue;
+		if ( VectorNormalize( dir ) > 1.0f && ( r = AIFunc_BattleDiveStart( cs, dir ) ) != NULL ) {
+			if ( bg_cod.aiDebug >= 1 ) {
+				G_Printf( "[ai] %s DODGE dive (fuse %d ms)\n", CodName( cs ), ca->dodgeEnd - level.time );
+			}
+			return r;
+		}
 	}
 	mr = AICast_MoveToPos( cs, ca->cover.pos, -1 );
 	if ( mr ) {
@@ -1310,7 +1651,7 @@ static char *CodStateMove( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 	}
 	// run and gun where the weapon allows it (AICast_ProcessAttack aims after the movement was issued); Phase 2:
 	// only a token holder shoots on the way
-	if ( !CodWeaponTick( cs, AICast_CodHasToken( cs ) ) ) {
+	if ( !CodWeaponTick( cs, ca->dodging ? qfalse : AICast_CodHasToken( cs ) ) ) {
 		CodExit( cs, ca, 2000 );
 		return AIFunc_DefaultStart( cs );
 	}
@@ -1351,7 +1692,7 @@ static char *CodStateHide( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 
 	// compromised: hit, or the threat can now see us. Only once back on the spot: the sight list lags a few
 	// hundred ms, so a sighting must be newer than the moment we settled.
-	if ( ca->settledAt && level.time > ca->settledAt + 100 ) {
+	if ( ca->settledAt && level.time > ca->settledAt + 100 && level.time >= ca->dodgeEnd ) {
 		qboolean hit = ( cs->lastPain > ca->stateTime ) ? qtrue : qfalse;
 		qboolean seen = ( CodEnemyVisible( cs ) && cs->vislist[cs->enemyNum].real_visible_timestamp > ca->settledAt + 50 ) ? qtrue : qfalse;
 
@@ -1387,6 +1728,15 @@ static char *CodStateHide( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 		 && !CodNeedsReload( cs ) && AICast_CodSquadSuppress( cs, supPos ) && AICast_CodTokenAcquire( cs, 900 ) ) {
 		ca->nextSuppress = level.time + 3000;
 		return CodEnterPeek( cs, ca, CodRandMs( 1000, 2000 ), qtrue, "suppress" );
+	}
+
+	// codmod: Phase 3. Under fire: keep the head down while the near misses go on (at most 3.5 s in all). The player
+	// is weak (reloading, switching weapons, sliding, prone): a token holder does not wait out the rest of the hide.
+	if ( !reloading && ca->settledAt && level.time >= ca->hideUntil - 50 && level.time - ca->hideStart < 3500 && CodSuppressed( cs->entityNum ) ) {
+		ca->hideUntil = level.time + 300;
+	} else if ( !reloading && ca->settledAt && level.time < ca->hideUntil && ca->oppUntil > level.time && !CodNeedsReload( cs )
+				&& !CodSuppressed( cs->entityNum ) ) {
+		ca->hideUntil = level.time;
 	}
 
 	if ( level.time < ca->hideUntil || reloading ) {
@@ -1450,9 +1800,16 @@ static char *CodStateEndPeek( cast_state_t *cs, codAI_t *ca, qboolean hit, const
 	AICast_CodTokenRelease( cs );       // Phase 2: the next waiting squad member may shoot
 	ca->suppressPeek = qfalse;
 	ca->hideStart = level.time;
-	ca->hideUntil = level.time + (int)( CodRandMs( bg_cod.aiHideMin, bg_cod.aiHideMax ) * ( 1.15f - 0.5f * cs->attributes[AGGRESSION] ) * ( ca->pushMode ? 0.5f : 1.0f ) );
+	ca->hideUntil = level.time + (int)( CodRandMs( bg_cod.aiHideMin, bg_cod.aiHideMax ) * ( 1.15f - 0.5f * CodAggression( cs ) ) * ( ca->pushMode ? 0.5f : 1.0f ) );
 	if ( hit ) {
 		ca->hideUntil += 400;       // keep the head down a little longer after being hit
+	}
+	// codmod: Phase 3, suppressed soldiers and broken squads stay down longer
+	if ( CodSuppressed( cs->entityNum ) ) {
+		ca->hideUntil = level.time + (int)( ( ca->hideUntil - level.time ) * ( 1.0f + 0.8f * CodSuppression( cs->entityNum ) ) );
+	}
+	if ( bg_cod.aiMorale && AICast_CodSquadMoraleActive( cs ) ) {
+		ca->hideUntil = level.time + (int)( ( ca->hideUntil - level.time ) * 1.4f );
 	}
 	ca->hideCheck = level.time + 250;
 	ca->settledAt = 0;
@@ -1527,6 +1884,9 @@ static char *CodStatePeek( cast_state_t *cs, codAI_t *ca, qboolean visible ) {
 		CodExit( cs, ca, 3000 );
 		return AIFunc_BattleChaseStart( cs );
 	}
+	if ( level.time >= ca->peekUntil && tokenOk && !ca->suppressPeek && !pushFire && ca->oppUntil > level.time && ca->peekCycles < 6 ) {
+		ca->peekUntil = level.time + 300;       // codmod: Phase 3, the player is weak: keep shooting
+	}
 	if ( level.time >= ca->peekUntil ) {
 		if ( pushFire ) {
 			// an exposed push spot: keep firing for as long as the shot lasts, leave when it is gone
@@ -1543,6 +1903,226 @@ static char *CodStatePeek( cast_state_t *cs, codAI_t *ca, qboolean visible ) {
 		return CodStateEndPeek( cs, ca, qfalse, ca->suppressPeek ? "suppression done" : "burst done" );
 	}
 	return NULL;
+}
+
+//===========================================================================
+// Phase 3: grenade defence, retreat, morale, opportunism
+//===========================================================================
+
+#define COD_DANGER_VANILLA  0       // CodDanger results: hand over to the vanilla AvoidDanger
+#define COD_DANGER_HANDLED  1       // *rval is the return value of this think
+#define COD_DANGER_CONTINUE 2       // go on with the tactical think (a dodge is on, or this spot is safe)
+
+/*
+============
+CodDanger
+
+codmod: Phase 3. A danger entity is near. Only a grenade (or pineapple) is handled here, the rest (flames, dynamite, a
+panzerfaust, ...) goes to the vanilla AvoidDanger as before. A grenade with a long fuse is caught and kicked back by a
+soldier with AIFL_CATCH_GRENADE (the vanilla rule, AIFunc_GrenadeKick), otherwise the soldier stays put when the cover
+here hides it from the landing point, or runs to cover out of the blast that it can reach before the fuse is out
+(COVER_DODGE, urgent search, travel capped at the fuse) and dives when the fuse is nearly out (AIFL_DIVE_ANIM). No
+dodge cover: the vanilla avoid. Each grenade is reacted to once.
+============
+*/
+static int CodDanger( cast_state_t *cs, codAI_t *ca, char **rval ) {
+	gentity_t *ent = &g_entities[cs->entityNum];
+	gentity_t *danger;
+	vec3_t kp, end;
+	trace_t tr;
+	int fuse, travelCap;
+	float dist;
+
+	*rval = NULL;
+	if ( cs->dangerEntity < 0 || cs->dangerEntity >= MAX_GENTITIES ) {
+		return COD_DANGER_VANILLA;
+	}
+	danger = &g_entities[cs->dangerEntity];
+	if ( !danger->inuse || danger->s.eType != ET_MISSILE || ent->s.onFireEnd >= level.time
+		 || ( danger->s.weapon != WP_GRENADE_LAUNCHER && danger->s.weapon != WP_GRENADE_PINEAPPLE ) ) {
+		return COD_DANGER_VANILLA;
+	}
+	if ( ca->dodgeEnt == cs->dangerEntity && ca->dodgeThink == danger->nextthink ) {
+		return ca->dodgeFailed ? COD_DANGER_VANILLA : COD_DANGER_CONTINUE;      // already reacted to this one
+	}
+	fuse = danger->nextthink - level.time;
+
+	// 1. catch it and kick it back (the vanilla rules, AICast_AvoidDanger)
+	if ( fuse > 1500 && level.lastGrenadeKick < level.time - 3000 && ( cs->aiFlags & AIFL_CATCH_GRENADE )
+		 && !( danger->flags & FL_AI_GRENADE_KICK ) && !AICast_SameTeam( cs, danger->r.ownerNum ) ) {
+		if ( G_PredictMissile( danger, fuse, kp, qfalse ) ) {
+			kp[2] += -ent->r.mins[2] + 12;
+			VectorCopy( kp, end );
+			end[2] -= 90;
+			trap_Trace( &tr, kp, ent->r.mins, ent->r.maxs, end, cs->entityNum, MASK_SOLID );
+			VectorCopy( tr.endpos, kp );
+			if ( !tr.startsolid && tr.fraction < 1.0f
+				 && VectorDistance( cs->bs->origin, kp ) < cs->attributes[RUNNING_SPEED] * 0.0004 * ( fuse - 2000 ) ) {
+				trap_Trace( &tr, cs->bs->origin, ent->r.mins, ent->r.maxs, kp, cs->entityNum, MASK_SOLID );
+				if ( VectorDistance( tr.endpos, kp ) < 8 ) {
+					VectorCopy( kp, cs->takeCoverPos );
+					danger->flags |= FL_AI_GRENADE_KICK;
+					ent->flags |= FL_AI_GRENADE_KICK;
+					level.lastGrenadeKick = level.time;
+					if ( bg_cod.aiDebug >= 1 ) {
+						G_Printf( "[ai] %s GRENADE kick it back (fuse %d ms)\n", CodName( cs ), fuse );
+					}
+					CodExit( cs, ca, 0 );
+					*rval = AIFunc_GrenadeKickStart( cs );
+					return COD_DANGER_HANDLED;
+				}
+			}
+		}
+	}
+
+	// 2. dodge
+	ca->dodgeEnt = cs->dangerEntity;
+	ca->dodgeThink = danger->nextthink;
+	ca->dodgeFailed = qfalse;
+	ca->dodged = qfalse;
+	ca->dodgeEnd = cs->dangerEntityValidTime;
+	ca->dodgeRadius = cs->dangerDist / 1.5f;
+	dist = Distance( cs->bs->origin, cs->dangerEntityPos );
+	if ( dist > ca->dodgeRadius * 1.15f
+		 || ( dist > 60.0f && !AICast_VisibleFromPos( cs->dangerEntityPos, cs->dangerEntity, cs->bs->origin, cs->entityNum, qfalse ) ) ) {
+		return COD_DANGER_CONTINUE;     // out of the blast, or covered from it: stay
+	}
+	travelCap = ( fuse - 500 ) / 10;    // AAS travel time is 1/100 s
+	if ( travelCap < 40 ) {
+		travelCap = 40;
+	}
+	if ( AICast_CodCoverSearchAllowed( qtrue ) ) {
+		AICast_CodCoverSetTravelCap( travelCap );
+		if ( AICast_CodFindCover( cs, cs->dangerEntityPos, cs->enemyNum, COVER_DODGE, &ca->cover, NULL, NULL ) ) {
+			CodRelocEnd( cs, ca, qfalse );
+			AICast_CodTokenRelease( cs );
+			CodTakeCover( cs, ca, COVER_DODGE );
+			ca->dodging = qtrue;
+			ca->dodgeEnd = cs->dangerEntityValidTime;
+			if ( ca->moveTimeout > level.time + fuse + 400 ) {
+				ca->moveTimeout = level.time + fuse + 400;
+			}
+			if ( bg_cod.aiDebug >= 1 ) {
+				G_Printf( "[ai] %s DODGE grenade fuse=%d d=%d -> cover d=%d travel=%d\n", CodName( cs ), fuse, (int)dist,
+						  (int)Distance( ca->cover.pos, cs->dangerEntityPos ), ca->cover.travel );
+			}
+			return COD_DANGER_CONTINUE;
+		}
+	}
+	ca->dodgeFailed = qtrue;
+	if ( bg_cod.aiDebug >= 1 ) {
+		G_Printf( "[ai] %s DODGE grenade fuse=%d d=%d, no cover in reach: vanilla avoid\n", CodName( cs ), fuse, (int)dist );
+	}
+	return COD_DANGER_VANILLA;
+}
+
+/*
+============
+CodTryRetreat
+
+codmod: Phase 3. Low health or a broken squad: an urgent COVER_RETREAT search (an attack-type spot clearly farther from
+the threat, up to 1.5x the usual travel). The soldier runs there, stays down longer and fights from there.
+============
+*/
+static qboolean CodTryRetreat( cast_state_t *cs, codAI_t *ca, vec3_t threatPos, int kind ) {
+	if ( !AICast_CodCoverSearchAllowed( qtrue ) ) {
+		return qfalse;
+	}
+	CodRelocEnd( cs, ca, qfalse );
+	if ( CodSearch( cs, ca, threatPos, COVER_RETREAT, NULL, NULL ) ) {
+		AICast_CodTokenRelease( cs );
+		ca->retreatKind = kind;
+		ca->nextRetreat = level.time + 10000;
+		if ( bg_cod.aiDebug >= 1 ) {
+			G_Printf( "[ai] %s RETREAT %s -> cover d=%d travel=%d\n", CodName( cs ), kind == COD_RETREAT_MORALE ? "morale broken" : "low health",
+					  (int)Distance( ca->cover.pos, threatPos ), ca->cover.travel );
+		}
+		return qtrue;
+	}
+	return qfalse;
+}
+
+// morale and low health, once per event
+static void CodReactions( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
+	gentity_t *ent = &g_entities[cs->entityNum];
+	int maxHealth = ent->client->ps.stats[STAT_MAX_HEALTH];
+
+	if ( bg_cod.aiMorale && AICast_CodSquadMoraleFresh( cs ) ) {
+		AICast_CodSquadBark( cs, COD_BARK_ORDERS );
+		if ( !CodTryRetreat( cs, ca, threatPos, COD_RETREAT_MORALE ) && bg_cod.aiDebug >= 1 ) {
+			G_Printf( "[ai] %s MORALE broken, no farther cover: stays cautious\n", CodName( cs ) );
+		}
+		return;
+	}
+	if ( maxHealth <= 0 ) {
+		maxHealth = 100;
+	}
+	if ( bg_cod.aiRetreatHealth > 0 && ent->health * 100 < maxHealth * (int)bg_cod.aiRetreatHealth && level.time >= ca->nextRetreat
+		 && cs->lastPain > level.time - 3000 && ca->state != COD_MOVE ) {
+		ca->nextRetreat = level.time + 3000;
+		CodTryRetreat( cs, ca, threatPos, COD_RETREAT_HEALTH );
+	}
+}
+
+/*
+============
+CodOpportunity
+
+codmod: Phase 3. The player is weak for a moment: reloading, switching weapons, sliding or going prone. A soldier that saw
+the player within the last second (or hears the reload, within 700 u) marks the squad opportunity: token holders peek
+or advance at once, a waiting soldier may get an early token (one more token while it lasts), plus a bark.
+============
+*/
+static void CodOpportunity( cast_state_t *cs, codAI_t *ca ) {
+	gentity_t *enemy;
+	playerState_t *ps;
+	cast_visibility_t *vis;
+	int ws, ms;
+	qboolean reload, event, prone, proneNew, seen, heard;
+
+	if ( cs->enemyNum < 0 || cs->enemyNum >= MAX_CLIENTS ) {
+		return;
+	}
+	enemy = &g_entities[cs->enemyNum];
+	if ( !enemy->client || ( enemy->r.svFlags & SVF_CASTAI ) ) {
+		return;
+	}
+	ps = &enemy->client->ps;
+	ws = ps->weaponstate;
+	prone = ( ps->stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ? qtrue : qfalse;
+	proneNew = ( prone && !ca->oppWasProne ) ? qtrue : qfalse;
+	ca->oppWasProne = prone;
+	if ( !bg_cod.aiOpportunity ) {
+		return;
+	}
+	reload = ( ws == WEAPON_RELOADING ) ? qtrue : qfalse;
+	event = ( reload || ws == WEAPON_DROPPING || ws == WEAPON_RAISING || ws == WEAPON_DROPPING_TORELOAD || ws == WEAPON_RAISING_TORELOAD
+			  || ( ps->pm_flags & PMF_COD_SLIDING ) || proneNew ) ? qtrue : qfalse;
+	if ( !event ) {
+		return;
+	}
+	vis = &cs->vislist[cs->enemyNum];
+	seen = ( vis->real_visible_timestamp && vis->real_visible_timestamp > level.time - 1000 ) ? qtrue : qfalse;
+	heard = ( reload && Distance( cs->bs->origin, ps->origin ) < 700.0f ) ? qtrue : qfalse;
+	if ( !seen && !heard ) {
+		return;
+	}
+	ms = reload ? 1500 : 900;
+	if ( ca->oppUntil < level.time ) {
+		if ( bg_cod.aiDebug >= 1 && level.time >= ca->nextDbg ) {
+			ca->nextDbg = level.time + 2000;
+			G_Printf( "[ai] %s sq%d OPPORTUNITY player %s\n", CodName( cs ), AICast_CodSquadId( cs ),
+					  reload ? "reloads" : ( ps->pm_flags & PMF_COD_SLIDING ) ? "slides" : prone ? "goes prone" : "switches weapon" );
+		}
+		if ( level.time >= ca->nextOppBark ) {
+			ca->nextOppBark = level.time + 7000;
+			AICast_CodSquadBark( cs, COD_BARK_ORDERS );     // "Schnell!"
+		}
+	}
+	if ( ca->oppUntil < level.time + ms ) {
+		ca->oppUntil = level.time + ms;
+	}
+	AICast_CodSquadOpportunity( cs, ms );
 }
 
 //===========================================================================
@@ -1571,14 +2151,21 @@ char *AIFunc_CodCombat( cast_state_t *cs ) {
 	if ( cs->aiState < AISTATE_COMBAT ) {
 		AICast_StateChange( cs, AISTATE_COMBAT );
 	}
-	// do we need to avoid a danger?
+	// do we need to avoid a danger? (Phase 3: a grenade is kicked back, dodged or ignored from cover here)
 	if ( cs->dangerEntityValidTime >= level.time ) {
-		if ( !AICast_GetTakeCoverPos( cs, cs->dangerEntity, cs->dangerEntityPos, cs->takeCoverPos ) ) {
-			// shit??
+		int dr = CodDanger( cs, ca, &rval );
+
+		if ( dr == COD_DANGER_HANDLED ) {
+			return rval;
 		}
-		cs->takeCoverTime = cs->dangerEntityValidTime + 1000;
-		CodExit( cs, ca, 0 );
-		return AIFunc_AvoidDangerStart( cs );
+		if ( dr == COD_DANGER_VANILLA ) {
+			if ( !AICast_GetTakeCoverPos( cs, cs->dangerEntity, cs->dangerEntityPos, cs->takeCoverPos ) ) {
+				// shit??
+			}
+			cs->takeCoverTime = cs->dangerEntityValidTime + 1000;
+			CodExit( cs, ca, 0 );
+			return AIFunc_AvoidDangerStart( cs );
+		}
 	}
 	// are we waiting for a door?
 	if ( cs->doorMarkerTime > level.time - 100 ) {
@@ -1629,8 +2216,13 @@ char *AIFunc_CodCombat( cast_state_t *cs ) {
 	AICast_CodSquadPublish( cs, ( ca->state == COD_HIDE || ca->state == COD_PEEK ) ? qtrue : qfalse );
 	CodThreatPos( cs, threatPos );
 
-	// the vanilla grenade flush (shared helper); not while running to cover
-	if ( ca->state != COD_MOVE && AICast_WantsGrenadeFlush( cs, visible ? qfalse : qtrue ) ) {
+	// codmod: Phase 3. The player is weak for a moment.
+	CodOpportunity( cs, ca );
+
+	// codmod: Phase 3. A grenade for a player who holds one spot or sits behind a corner (replaces the vanilla
+	// grenade flush call, whose 7 s spacing ignored squads); never while running for cover.
+	if ( !ca->dodging && CodGrenadeWanted( cs, ca, threatPos, visible ) ) {
+		CodGrenadeCommit( cs, ca );
 		CodExit( cs, ca, 0 );
 		return AIFunc_GrenadeFlushStart( cs );
 	}
@@ -1640,7 +2232,17 @@ char *AIFunc_CodCombat( cast_state_t *cs ) {
 		ca->lastPainSeen = cs->lastPain;
 		if ( level.time - cs->lastPain < 500 ) {
 			ca->urgent = qtrue;
+			if ( ca->state == COD_OPEN && !ca->hasCover ) {
+				ca->nextSearchTime = level.time;        // codmod: Phase 3, hit in the open: cover now
+				if ( bg_cod.aiDebug >= 1 ) {
+					G_Printf( "[ai] %s HIT in the open: urgent cover\n", CodName( cs ) );
+				}
+			}
 		}
+	}
+	// codmod: Phase 3, broken morale, low health
+	if ( !ca->dodging ) {
+		CodReactions( cs, ca, threatPos );
 	}
 
 	if ( ca->pushMode == 2 && CodPushWatch( cs, ca, threatPos ) ) {
@@ -1697,6 +2299,10 @@ char *AIFunc_CodCombatStart( cast_state_t *cs ) {
 	ca->noShotMs = 0;
 	ca->lastTry = 0;
 	ca->nextPushTry = 0;
+	ca->dodging = qfalse;
+	ca->retreatKind = 0;
+	ca->holdSince = 0;
+	ca->nextGrenadeCheck = level.time + 1000;
 	ca->lastThink = level.time;
 
 	// what AIFunc_BattleStart sets up that still applies; we do our own crouching

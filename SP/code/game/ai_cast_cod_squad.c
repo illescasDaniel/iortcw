@@ -51,6 +51,8 @@ If you have questions concerning this license or the applicable additional terms
 //                 shot at a position it knows fresh: the player sits behind cover nobody can hit. One member
 //                 (two with 4+) is ordered to push for an angle (COVER_ANGLE), the rest keep shooting at the cover
 //                 (suppression window). Cooldown cod_aiPushCooldown after a push ends.
+//   Phase 3       grenade thrower choice + squad cooldown, the opportunity token (+1 while the player is weak) and
+//                 morale (a squad that lost half its members falls back); see ai_cast_cod.c for the reactions.
 //   Suppression   starting a move opens a cod_aiSuppressMs window in which token holders fire at the threat's
 //                 last known position (see CodSuppressFire in ai_cast_cod.c).
 //
@@ -118,6 +120,15 @@ typedef struct {
 	qboolean pushPending[2];    // ordered, not picked up yet
 	int pushIssued;
 	int nextPush;
+
+	// Phase 3
+	int grenadeThrower;         // entity number or -1 (best member to throw, re-evaluated every 600 ms)
+	int nextGrenadeEval;
+	int nextGrenade;            // squad cooldown after a throw
+	int peak;                   // most members alive at the same time since the last morale break
+	int killed;                 // members that died since then
+	int nextMorale;
+	int oppUntil;               // +1 attack token until then (the player reloads, switches weapons, slides...)
 } codSquad_t;
 
 typedef struct {
@@ -133,6 +144,13 @@ typedef struct {
 	int noTokenUntil;           // gave way: not again for a moment
 	int moverUntil;
 	int nextDbg;
+
+	// Phase 3 (survives a regroup, so a lone survivor of a broken squad still falls back)
+	int moraleUntil;
+	int moraleLevel;            // level.startTime the morale fields belong to
+	int moraleSerial;           // changes with every break, compared by the soldier (AICast_CodSquadMoraleFresh)
+	int moraleSeen;
+	int nextBarkSolo;           // callout rate limit of a soldier outside any squad
 } codMember_t;
 
 static codSquad_t squads[COD_MAX_SQUADS];
@@ -232,12 +250,15 @@ AICast_CodSquadForget
 codmod: a soldier spawned or died: drop its tokens and slots and regroup soon
 ============
 */
+static void SqMoraleDeath( int entNum );
+
 void AICast_CodSquadForget( int entNum ) {
 	codSquad_t *sq;
 
 	if ( entNum < 0 || entNum >= MAX_CLIENTS ) {
 		return;
 	}
+	SqMoraleDeath( entNum );        // Phase 3: before the member's squad index is wiped
 	memset( &members[entNum], 0, sizeof( members[entNum] ) );
 	members[entNum].squad = -1;
 	for ( sq = squads; sq < squads + COD_MAX_SQUADS; sq++ ) {
@@ -281,11 +302,14 @@ typedef struct {
 	int group;
 } sqCand_t;
 
-static int SqTokenLimit( void ) {
+static int SqTokenLimit( codSquad_t *sq ) {
 	int n = bg_cod.aiAttackTokens;
 
 	if ( n <= 0 ) {
 		n = g_gameskill.integer + 2;        // easy / medium / hard -> 2 / 3 / 4
+	}
+	if ( sq && sq->oppUntil > level.time ) {
+		n++;                                // Phase 3: the player is weak right now, one more may shoot
 	}
 	return n < 1 ? 1 : n;
 }
@@ -574,6 +598,11 @@ static void SqRebuild( void ) {
 			sq->pushPending[1] = old[bestOld].pushPending[1];
 			sq->pushIssued = old[bestOld].pushIssued;
 			sq->nextPush = old[bestOld].nextPush;
+			sq->nextGrenade = old[bestOld].nextGrenade;
+			sq->peak = old[bestOld].peak;
+			sq->killed = old[bestOld].killed;
+			sq->nextMorale = old[bestOld].nextMorale;
+			sq->oppUntil = old[bestOld].oppUntil;
 		} else {
 			sq->pusher[0] = sq->pusher[1] = -1;
 			sq->nextPush = level.time + 2000;
@@ -583,6 +612,11 @@ static void SqRebuild( void ) {
 			VectorCopy( g_entities[sq->enemy].r.currentOrigin, sq->anchor );
 			sq->nextFlank = level.time + 2000;
 			sq->lastDbgNum = 0;
+		}
+		sq->grenadeThrower = -1;        // Phase 3: chosen again at the next throw decision
+		sq->nextGrenadeEval = 0;
+		if ( size > sq->peak ) {
+			sq->peak = size;
 		}
 		// a flanker who left the squad loses the order
 		if ( sq->flanker >= 0 ) {
@@ -632,7 +666,7 @@ static void SqRebuild( void ) {
 			SqPickFlanker( sq );
 		}
 		if ( bg_cod.aiDebug >= 1 && sq->num != sq->lastDbgNum && level.time >= sq->nextDbg ) {
-			G_Printf( "[ai] sq%d members=%d tokens=%d/%d movers<=%d\n", sq->id, sq->num, SqTokensHeld( sq ), SqTokenLimit(), sq->maxMovers );
+			G_Printf( "[ai] sq%d members=%d tokens=%d/%d movers<=%d\n", sq->id, sq->num, SqTokensHeld( sq ), SqTokenLimit( sq ), sq->maxMovers );
 			sq->lastDbgNum = sq->num;
 			sq->nextDbg = level.time + 2000;
 		}
@@ -709,7 +743,7 @@ qboolean AICast_CodSquadCentre( cast_state_t *cs, vec3_t out ) {
 qboolean AICast_CodHasToken( cast_state_t *cs ) {
 	codSquad_t *sq = SquadOf( cs );
 
-	if ( !sq || sq->num <= SqTokenLimit() ) {
+	if ( !sq || sq->num <= SqTokenLimit( sq ) ) {
 		return qtrue;
 	}
 	return ( members[cs->entityNum].tokenUntil > level.time ) ? qtrue : qfalse;
@@ -759,7 +793,7 @@ qboolean AICast_CodTokenAcquire( cast_state_t *cs, int leaseMs ) {
 	if ( !sq ) {
 		return qtrue;
 	}
-	limit = SqTokenLimit();
+	limit = SqTokenLimit( sq );
 	if ( sq->num <= limit ) {
 		return qtrue;
 	}
@@ -958,8 +992,14 @@ void AICast_CodSquadBark( cast_state_t *cs, int kind ) {
 	codSquad_t *sq = SquadOf( cs );
 	gentity_t *ent = &g_entities[cs->entityNum];
 	char *script;
+	int *next;
 
-	if ( !sq || level.time < sq->nextBark ) {
+	if ( cs->entityNum < 0 || cs->entityNum >= MAX_CLIENTS ) {
+		return;
+	}
+	// Phase 3: a soldier outside any squad (lone survivor, solo grenade thrower) has its own rate limit
+	next = sq ? &sq->nextBark : &members[cs->entityNum].nextBarkSolo;
+	if ( level.time < *next ) {
 		return;
 	}
 	if ( ( cs->aiFlags & AIFL_DENYACTION ) || cs->castScriptStatus.scriptNoAttackTime >= level.time ) {
@@ -969,7 +1009,7 @@ void AICast_CodSquadBark( cast_state_t *cs, int kind ) {
 	if ( !script || !script[0] ) {
 		return;
 	}
-	sq->nextBark = level.time + (int)( bg_cod.aiBarkMs * ( 0.8f + 0.5f * random() ) );
+	*next = level.time + (int)( bg_cod.aiBarkMs * ( 0.8f + 0.5f * random() ) );
 	G_AddEvent( ent, EV_GENERAL_SOUND, G_SoundIndex( script ) );
 }
 
@@ -1104,4 +1144,156 @@ void AICast_CodSquadPushDone( cast_state_t *cs, qboolean ok ) {
 	sq->pushPending[idx] = qfalse;
 	sq->nextPush = level.time + (int)( bg_cod.aiPushCooldown * ( ok ? 1.0f : 0.5f ) );
 	sq->tryMs = 0;
+}
+
+//===========================================================================
+// Phase 3: threat reactions
+//===========================================================================
+
+/*
+============
+AICast_CodSquadGrenadeThrower
+
+codmod: may this soldier throw a grenade at threatPos? The squad cooldown must be over and this soldier must be
+the member that scores best (AICast_CodGrenadeScore: has a grenade, distance and arc), re-evaluated every 600 ms so
+only one member throws. Always qtrue for a soldier outside a squad (the caller keeps its own cooldown).
+============
+*/
+qboolean AICast_CodSquadGrenadeThrower( cast_state_t *cs, vec3_t threatPos ) {
+	codSquad_t *sq = SquadOf( cs );
+	int i, best = -1, score, bestScore = 0;
+
+	if ( !sq ) {
+		return qtrue;
+	}
+	if ( level.time < sq->nextGrenade ) {
+		return qfalse;
+	}
+	if ( level.time >= sq->nextGrenadeEval ) {
+		sq->nextGrenadeEval = level.time + 600;
+		for ( i = 0; i < sq->num; i++ ) {
+			cast_state_t *mcs = AICast_GetCastState( sq->members[i] );
+
+			if ( !mcs ) {
+				continue;
+			}
+			score = AICast_CodGrenadeScore( mcs, threatPos );
+			if ( score > bestScore ) {
+				bestScore = score;
+				best = sq->members[i];
+			}
+		}
+		sq->grenadeThrower = best;
+	}
+	return ( sq->grenadeThrower == cs->entityNum ) ? qtrue : qfalse;
+}
+
+/*
+============
+AICast_CodSquadGrenadeThrown
+
+codmod: a grenade is on its way: squad cooldown (cod_aiGrenadeCooldown, +-15 %) and a callout
+============
+*/
+void AICast_CodSquadGrenadeThrown( cast_state_t *cs ) {
+	codSquad_t *sq = SquadOf( cs );
+
+	if ( sq ) {
+		sq->nextGrenade = level.time + (int)( bg_cod.aiGrenadeCooldown * ( 0.85f + 0.3f * random() ) );
+		sq->grenadeThrower = -1;
+	}
+	AICast_CodSquadBark( cs, COD_BARK_ATTACK );
+}
+
+int AICast_CodSquadLastShot( cast_state_t *cs ) {
+	codSquad_t *sq = SquadOf( cs );
+
+	return sq ? sq->lastShot : 0;
+}
+
+qboolean AICast_CodSquadPushActive( cast_state_t *cs ) {
+	codSquad_t *sq = SquadOf( cs );
+
+	return ( sq && SqPushActive( sq ) ) ? qtrue : qfalse;
+}
+
+void AICast_CodSquadOpportunity( cast_state_t *cs, int ms ) {
+	codSquad_t *sq = SquadOf( cs );
+
+	if ( sq && level.time + ms > sq->oppUntil ) {
+		sq->oppUntil = level.time + ms;
+	}
+}
+
+qboolean AICast_CodSquadMoraleActive( cast_state_t *cs ) {
+	codMember_t *m;
+
+	if ( cs->entityNum < 0 || cs->entityNum >= MAX_CLIENTS ) {
+		return qfalse;
+	}
+	m = &members[cs->entityNum];
+	return ( m->moraleLevel == level.startTime && m->moraleUntil > level.time ) ? qtrue : qfalse;
+}
+
+// qtrue once per soldier for each morale break
+qboolean AICast_CodSquadMoraleFresh( cast_state_t *cs ) {
+	codMember_t *m;
+
+	if ( !AICast_CodSquadMoraleActive( cs ) ) {
+		return qfalse;
+	}
+	m = &members[cs->entityNum];
+	if ( m->moraleSeen == m->moraleSerial ) {
+		return qfalse;
+	}
+	m->moraleSeen = m->moraleSerial;
+	return qtrue;
+}
+
+/*
+============
+SqMoraleDeath
+
+codmod: a squad member died. When the squad has lost half of its peak strength (3 or more at its peak), every
+survivor, also those that will be alone after this, breaks: it falls back to cover farther from the player and
+stays cautious for 9 s (AICast_CodSquadMoraleFresh / MoraleActive). Squad cooldown 15 s.
+============
+*/
+static void SqMoraleDeath( int entNum ) {
+	codMember_t *dm = &members[entNum];
+	codSquad_t *sq;
+	int i, alive = 0;
+
+	if ( !bg_cod.enable || !bg_cod.aiTactics || !bg_cod.aiMorale || !SqUsable() ) {
+		return;
+	}
+	if ( dm->stamp != sqStamp || dm->squad < 0 || dm->squad >= COD_MAX_SQUADS ) {
+		return;
+	}
+	sq = &squads[dm->squad];
+	if ( !sq->active ) {
+		return;
+	}
+	sq->killed++;
+	if ( sq->peak < 3 || sq->killed * 2 < sq->peak || level.time < sq->nextMorale ) {
+		return;
+	}
+	for ( i = 0; i < sq->num; i++ ) {
+		gentity_t *ent = &g_entities[sq->members[i]];
+		codMember_t *m = &members[sq->members[i]];
+
+		if ( sq->members[i] == entNum || !ent->inuse || ent->health <= 0 ) {
+			continue;
+		}
+		m->moraleUntil = level.time + 9000;
+		m->moraleLevel = level.startTime;
+		m->moraleSerial++;
+		alive++;
+	}
+	if ( bg_cod.aiDebug >= 1 ) {
+		G_Printf( "[ai] sq%d MORALE broken (lost %d of %d, %d survivors fall back)\n", sq->id, sq->killed, sq->peak, alive );
+	}
+	sq->nextMorale = level.time + 15000;
+	sq->peak = alive;
+	sq->killed = 0;
 }
