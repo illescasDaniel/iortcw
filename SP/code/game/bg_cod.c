@@ -210,7 +210,7 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_crosshairStyle",     "1",    0,            CODOFS( crosshairStyle ),     1 },
 	{ "cod_crosshairGap",       "4",    0,            CODOFS( crosshairGap ),       0 },
 	{ "cod_crosshairLength",    "8",    0,            CODOFS( crosshairLength ),    0 },
-	{ "cod_crosshairWidth",     "2",    0,            CODOFS( crosshairWidth ),     0 },
+	{ "cod_crosshairWidth",     "1",    0,            CODOFS( crosshairWidth ),     0 },
 	{ "cod_crosshairDot",       "1",    0,            CODOFS( crosshairDot ),       1 },
 	{ "cod_crosshairBloom",     "16",   0,            CODOFS( crosshairBloom ),     0 },
 	{ "cod_crosshairMoveBloom", "14",   0,            CODOFS( crosshairMoveBloom ), 0 },
@@ -223,7 +223,7 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_hitMarkerTime",      "250",  0,            CODOFS( hitMarkerTime ),      0 },
 	{ "cod_hitMarkerGap",       "6",    0,            CODOFS( hitMarkerGap ),       0 },
 	{ "cod_hitMarkerLength",    "7",    0,            CODOFS( hitMarkerLength ),    0 },
-	{ "cod_hitMarkerWidth",     "2",    0,            CODOFS( hitMarkerWidth ),     0 },
+	{ "cod_hitMarkerWidth",     "1",    0,            CODOFS( hitMarkerWidth ),     0 },
 	{ "cod_hitMarkerSound",     "1",    0,            CODOFS( hitMarkerSound ),     1 },
 
 	// codmod: phase 5d flashlight (client-local view dlight)

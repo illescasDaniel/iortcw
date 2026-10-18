@@ -1880,8 +1880,8 @@ void CG_CodDrawCrosshair( const vec4_t hcolor ) {
 	if ( len < 1.0f ) {
 		len = 1.0f;
 	}
-	if ( th < 1.0f ) {
-		th = 1.0f;
+	if ( th < 0.25f ) {
+		th = 0.25f;
 	}
 	halfTh = th * 0.5f;
 
@@ -1929,11 +1929,11 @@ void CG_CodDrawCrosshair( const vec4_t hcolor ) {
 		if ( bg_cod.crosshairOutline ) {
 			VectorSet( outlineColor, 0.0f, 0.0f, 0.0f );
 			outlineColor[3] = postAlpha * 0.85f;
-			// top / bottom / left / right — 1px larger behind
-			CG_CodDrawCrosshairBar( cx - halfTh - 1.0f, cy - gap - len - 1.0f, th + 2.0f, len + 2.0f, outlineColor );
-			CG_CodDrawCrosshairBar( cx - halfTh - 1.0f, cy + gap - 1.0f,       th + 2.0f, len + 2.0f, outlineColor );
-			CG_CodDrawCrosshairBar( cx - gap - len - 1.0f, cy - halfTh - 1.0f, len + 2.0f, th + 2.0f, outlineColor );
-			CG_CodDrawCrosshairBar( cx + gap - 1.0f,       cy - halfTh - 1.0f, len + 2.0f, th + 2.0f, outlineColor );
+			// top / bottom / left / right — 0.5 unit larger behind (thin outline for thin posts)
+			CG_CodDrawCrosshairBar( cx - halfTh - 0.5f, cy - gap - len - 0.5f, th + 1.0f, len + 1.0f, outlineColor );
+			CG_CodDrawCrosshairBar( cx - halfTh - 0.5f, cy + gap - 0.5f,       th + 1.0f, len + 1.0f, outlineColor );
+			CG_CodDrawCrosshairBar( cx - gap - len - 0.5f, cy - halfTh - 0.5f, len + 1.0f, th + 1.0f, outlineColor );
+			CG_CodDrawCrosshairBar( cx + gap - 0.5f,       cy - halfTh - 0.5f, len + 1.0f, th + 1.0f, outlineColor );
 		}
 		CG_CodDrawCrosshairBar( cx - halfTh, cy - gap - len, th, len, postColor );
 		CG_CodDrawCrosshairBar( cx - halfTh, cy + gap,       th, len, postColor );
@@ -2034,24 +2034,26 @@ codmod: one short diagonal tick (axis-aligned square steps ≈ a 45° line).
 */
 static void CG_CodDrawHitMarkerDiag( float x0, float y0, float x1, float y1,
 									 float th, const vec4_t color ) {
-	float dx, dy, steps, t, x, y;
-	int n, k;
+	// One horizontal run per physical pixel row: rows never overlap (no alpha
+	// build-up) and the edge steps are 1 px, not 1 virtual unit.
+	float dx, dy, rowH, ya, yb, y, t, xc, halfW, slope;
 
 	dx = x1 - x0;
 	dy = y1 - y0;
-	steps = (float)sqrt( dx * dx + dy * dy );
-	if ( steps < 1.0f ) {
+	if ( dy == 0.0f ) {
 		return;
 	}
-	n = (int)( steps + 0.5f );
-	if ( n < 1 ) {
-		n = 1;
-	}
-	for ( k = 0; k <= n; k++ ) {
-		t = (float)k / (float)n;
-		x = x0 + dx * t;
-		y = y0 + dy * t;
-		CG_FillRect( x - th * 0.5f, y - th * 0.5f, th, th, color );
+	rowH = 1.0f / ( cgs.screenYScale > 0.0f ? cgs.screenYScale : 1.0f );
+	slope = dx / dy;
+	// Horizontal width of a line of perpendicular thickness th.
+	halfW = th * 0.5f * (float)sqrt( 1.0f + slope * slope );
+
+	ya = dy < 0.0f ? y1 : y0;
+	yb = dy < 0.0f ? y0 : y1;
+	for ( y = ya; y < yb; y += rowH ) {
+		t = ( y + rowH * 0.5f - y0 ) / dy;
+		xc = x0 + dx * t;
+		CG_FillRect( xc - halfW, y, halfW * 2.0f, rowH, color );
 	}
 }
 
@@ -2103,8 +2105,8 @@ void CG_CodDrawHitMarker( void ) {
 	if ( len < 2.0f ) {
 		len = 2.0f;
 	}
-	if ( th < 1.0f ) {
-		th = 1.0f;
+	if ( th < 0.25f ) {
+		th = 0.25f;
 	}
 
 	// White X; headshots get a slight warm tint.
