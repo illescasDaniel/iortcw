@@ -53,6 +53,10 @@ If you have questions concerning this license or the applicable additional terms
 // open, a farther retreat at low health), squad morale (a squad that lost half falls back and is cautious for a
 // while) and opportunism (the player reloads, switches weapons, slides or goes prone: peek / push now).
 //
+// Phase 5 (ai_cast_cod_polish.c): movement and aim polish -- backpedal under a charge, crouch-walking between low covers,
+// jinks under fire, a kick in melee range, the warm-up accuracy model and CAMPER soldiers that crouch-peek at their
+// post. Each has its own switch (cod_aiPolish and cod_aiBackpedal / CrouchWalk / Jink / Kick / Accuracy / Camper).
+//
 // All state lives in the static codAI[] array (never in cast_state_t, which is saved as a raw struct). A savegame
 // load just leaves it stale; CodGet() detects that (level.startTime / lastThink) and starts from scratch.
 //===========================================================================
@@ -61,6 +65,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "../qcommon/q_shared.h"
 #include "../botlib/botlib.h"      //bot lib interface
 #include "../botlib/be_aas.h"
+#include "../botlib/aasfile.h"      // codmod: Phase 5, TRAVEL_WALK
 #include "../botlib/be_ea.h"
 #include "../botlib/be_ai_gen.h"
 #include "../botlib/be_ai_goal.h"
@@ -169,6 +174,16 @@ typedef struct {
 	int nextDbg;                    // rate limit of the Phase 3 debug lines
 	int nextSuppDbg;
 
+	// Phase 5
+	qboolean crouchWalk;            // the current MOVE is crouch-walked (low cover to low cover)
+	qboolean camper;                // CAMPER attribute and cod_aiCamper: holds its post
+	qboolean camperReloc;           // a camper relocation (compromised post) is under way: the arrival is the new post
+	int camperPainSeen;             // camper: last pain already counted
+	int camperHits;                 // camper: hits taken while hiding
+	int camperHitTime;
+	qboolean prevLow;               // the cover search started from a LOW cover spot we were standing at ...
+	vec3_t prevPos;                 // ... this one
+
 	int nextDraw;
 } codAI_t;
 
@@ -245,6 +260,7 @@ void AICast_CodReset( int entNum ) {
 	CodClear( &codAI[entNum], entNum );
 	AICast_CodSquadForget( entNum );
 	AICast_CodHuntReset( entNum );      // codmod: Phase 4
+	AICast_CodPolishReset( entNum );    // codmod: Phase 5
 }
 
 /*
@@ -379,8 +395,8 @@ static int CodEligibility( cast_state_t *cs ) {
 		 || cs->pauseTime >= level.time ) {
 		return COD_ELIG_NO;
 	}
-	// campers keep their post
-	if ( cs->attributes[CAMPER] >= 0.5f ) {
+	// campers keep their post (Phase 5: with cod_aiCamper they fight from it as crouch-peekers instead)
+	if ( cs->attributes[CAMPER] >= 0.5f && !AICast_CodPolishIsCamper( cs ) ) {
 		return COD_ELIG_NO;
 	}
 	// the enemy was seen recently
@@ -526,7 +542,8 @@ void AICast_CodNoteBullet( cast_state_t *cs, gentity_t *attacker, vec3_t start, 
 ============
 AICast_CodAccuracyScale
 
-codmod: Phase 3, multiplied into AICast_GetAccuracy: 1 for everyone, down to about 0.45 for a suppressed soldier
+codmod: Phase 3, multiplied into AICast_GetAccuracy: 1 for everyone, down to about 0.45 for a suppressed soldier;
+Phase 5 adds the polish accuracy model (first-shot warm-up, sprinting / sliding target, moving shooter)
 ============
 */
 float AICast_CodAccuracyScale( int entNum ) {
@@ -541,10 +558,10 @@ float AICast_CodAccuracyScale( int entNum ) {
 		return 1.0f;
 	}
 	if ( !CodSuppressed( entNum ) ) {
-		return 1.0f;
+		return AICast_CodPolishAccuracy( entNum );      // codmod: Phase 5, warm-up and movement (1.0 when off)
 	}
 	v = CodSuppression( entNum );
-	return 1.0f - 0.55f * v;
+	return ( 1.0f - 0.55f * v ) * AICast_CodPolishAccuracy( entNum );
 }
 
 // aggression, lowered while the squad's morale is broken
@@ -555,6 +572,11 @@ static float CodAggression( cast_state_t *cs ) {
 		a *= 0.35f;
 	}
 	return a;
+}
+
+// codmod: Phase 5, hit within the last 2 s or suppressed: jink instead of running straight
+static qboolean CodUnderFire( cast_state_t *cs ) {
+	return ( ( cs->lastPain && cs->lastPain > level.time - 2000 ) || CodSuppressed( cs->entityNum ) ) ? qtrue : qfalse;
 }
 
 /*
@@ -735,11 +757,14 @@ static void CodExit( cast_state_t *cs, codAI_t *ca, int backoffMs ) {
 	CodRelocEnd( cs, ca, qfalse );
 	CodPushEnd( cs, ca, qfalse );
 	AICast_CodTokenRelease( cs );
-	AICast_CodSquadPublish( cs, qfalse );
+	if ( !ca->camper ) {
+		AICast_CodSquadPublish( cs, qfalse );
+	}
 	AICast_CodReleaseCover( cs->entityNum );
 	ca->hasCover = qfalse;
 	ca->dodging = qfalse;
 	ca->retreatKind = 0;
+	ca->crouchWalk = qfalse;
 	ca->crouchUntil = 0;
 	cs->attackcrouch_time = 0;
 	ca->state = COD_OPEN;
@@ -750,6 +775,19 @@ static void CodExit( cast_state_t *cs, codAI_t *ca, int backoffMs ) {
 
 // the cover we were using is no good any more: back to OPEN and search again (excluding that spot for a while)
 static void CodCoverFailed( cast_state_t *cs, codAI_t *ca, qboolean urgent, const char *why ) {
+	// codmod: Phase 5, a camper keeps its post: only the third compromise within 8 s drives it out (CodCamperPost)
+	if ( ca->camper && urgent && !ca->camperReloc ) {
+		if ( level.time - ca->camperHitTime > 8000 ) {
+			ca->camperHits = 0;
+		}
+		ca->camperHitTime = level.time;
+		if ( ++ca->camperHits >= 3 ) {
+			ca->camperReloc = qtrue;
+			if ( bg_cod.aiDebug >= 1 ) {
+				G_Printf( "[ai] %s CAMPER post compromised (%s): relocating\n", CodName( cs ), why );
+			}
+		}
+	}
 	CodRelocEnd( cs, ca, qfalse );
 	CodPushEnd( cs, ca, qfalse );
 	AICast_CodTokenRelease( cs );
@@ -761,6 +799,7 @@ static void CodCoverFailed( cast_state_t *cs, codAI_t *ca, qboolean urgent, cons
 	ca->hasCover = qfalse;
 	ca->dodging = qfalse;
 	ca->retreatKind = 0;
+	ca->crouchWalk = qfalse;
 	ca->crouchUntil = 0;
 	cs->attackcrouch_time = 0;
 	ca->nextSearchTime = level.time;
@@ -828,6 +867,19 @@ static void CodTakeCover( cast_state_t *cs, codAI_t *ca, int mode ) {
 	ca->reloadIssued = qfalse;
 	ca->crouchUntil = 0;
 	cs->attackcrouch_time = 0;
+	// codmod: Phase 5, from one low cover to another over a hidden route: crouch-walk (slower, head stays down). Not for
+	// a dodge, a retreat, a push or a camper's way back to its post.
+	ca->crouchWalk = qfalse;
+	if ( ca->prevLow && ca->cover.type == COVER_LOW && ( mode == COVER_ATTACK || mode == COVER_ADVANCE || mode == COVER_FLANK )
+		 && !ca->camper ) {
+		vec3_t tp;
+
+		CodThreatPos( cs, tp );
+		if ( AICast_CodPolishCrouchWalk( cs, ca->prevPos, ca->cover.pos, tp ) ) {
+			ca->crouchWalk = qtrue;
+			ca->moveTimeout = level.time + ca->cover.travel * 10 * 3 + 1500;      // slower
+		}
+	}
 	CodSetState( cs, ca, COD_MOVE, va( "%s pick %s travel=%d score=%d cands=%d/%d", codModeNames[mode],
 									   AICast_CodCoverName( ca->cover.type ), ca->cover.travel, (int)ca->cover.score,
 									   codCoverLastValid, codCoverLastCandidates ) );
@@ -841,6 +893,12 @@ static qboolean CodSearch( cast_state_t *cs, codAI_t *ca, vec3_t threatPos, int 
 		avoid = (vec3_t *)extraAvoid;
 	} else if ( ca->avoidUntil > level.time ) {
 		avoid = &ca->avoidPos;
+	}
+	// codmod: Phase 5, are we standing at a low cover right now? (CodTakeCover decides about crouch-walking)
+	ca->prevLow = ( ca->hasCover && ca->cover.type == COVER_LOW && ( ca->state == COD_HIDE || ca->state == COD_PEEK )
+					&& CodFlatDist( cs, ca->cover.pos ) < 32.0f ) ? qtrue : qfalse;
+	if ( ca->prevLow ) {
+		VectorCopy( ca->cover.pos, ca->prevPos );
 	}
 	if ( AICast_CodFindCover( cs, threatPos, cs->enemyNum, mode, &ca->cover, avoid ? *avoid : NULL, refPos ) ) {
 		CodTakeCover( cs, ca, mode );
@@ -867,10 +925,15 @@ static void CodOpenMove( cast_state_t *cs, codAI_t *ca, vec3_t threatPos, qboole
 	vec3_t toThreat, perp, dir, end, eye, threatEye;
 	trace_t tr;
 	static vec3_t mins = { -18, -18, -24 }, maxs = { 18, 18, 48 };
-	int tries, d;
+	int tries, d, jl;
 
 	if ( ( shooting && !AICast_CanMoveWhileFiringWeapon( cs->weaponNum ) ) || ca->crouchUntil > level.time ) {
 		return;
+	}
+	// codmod: Phase 5, under fire the legs are short (0.3-0.6 s): a jink instead of a steady strafe
+	jl = AICast_CodPolishJinkLegMs( cs, CodUnderFire( cs ) );
+	if ( jl && ca->strafeDir && ca->strafeUntil > level.time + 600 ) {
+		ca->strafeUntil = level.time + jl;
 	}
 
 	VectorSubtract( threatPos, cs->bs->origin, toThreat );
@@ -889,7 +952,7 @@ static void CodOpenMove( cast_state_t *cs, codAI_t *ca, vec3_t threatPos, qboole
 		if ( !ca->strafeDir || level.time >= ca->strafeUntil || tries > 0 ) {
 			if ( tries == 0 ) {
 				ca->strafeDir = ( rand() & 1 ) ? 1 : -1;
-				ca->strafeUntil = level.time + CodRandMs( bg_cod.aiStrafeMin, bg_cod.aiStrafeMax );
+				ca->strafeUntil = level.time + ( jl ? jl : CodRandMs( bg_cod.aiStrafeMin, bg_cod.aiStrafeMax ) );
 			} else {
 				ca->strafeDir = -ca->strafeDir;     // blocked: try the other way
 			}
@@ -1085,7 +1148,7 @@ static qboolean CodThreatFresh( cast_state_t *cs ) {
 
 // is this soldier supposed to push now (ordered by the squad, or a solo soldier whose own clock ran out)?
 static qboolean CodPushWanted( cast_state_t *cs, codAI_t *ca ) {
-	if ( !bg_cod.aiPush || ca->pushMode ) {
+	if ( !bg_cod.aiPush || ca->pushMode || ca->camper ) {      // codmod: Phase 5, campers do not push
 		return qfalse;
 	}
 	if ( bg_cod.aiMorale && AICast_CodSquadMoraleActive( cs ) ) {
@@ -1508,9 +1571,44 @@ static qboolean CodTryRelocate( cast_state_t *cs, codAI_t *ca, vec3_t threatPos 
 	return qfalse;
 }
 
+// codmod: Phase 5, a camper's post is its cover: a fake LOW cover at the anchor, fought from as a crouch-peeker.
+// Returns qtrue when the soldier was sent to (or is at) the post.
+static qboolean CodCamperPost( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
+	vec3_t anchor;
+
+	if ( !ca->camper ) {
+		return qfalse;
+	}
+	if ( ca->camperReloc ) {
+		if ( level.time - ca->camperHitTime < 6000 ) {
+			return qfalse;          // driven out: ordinary cover search
+		}
+		ca->camperReloc = qfalse;   // nothing better found: back to the old post
+		ca->camperHits = 0;
+	}
+	if ( !AICast_CodPolishCamperAnchor( cs, anchor ) ) {
+		return qfalse;
+	}
+	VectorCopy( anchor, ca->cover.pos );
+	VectorCopy( anchor, ca->cover.peekPos );
+	VectorCopy( threatPos, ca->cover.threatPos );
+	ca->cover.type = COVER_LOW;
+	ca->cover.score = 0;
+	ca->cover.angle = qfalse;
+	ca->cover.crouchShot = qfalse;
+	ca->cover.travel = (int)( CodFlatDist( cs, anchor ) / 3.0f );
+	ca->crouchWalk = qfalse;
+	CodTakeCover( cs, ca, COVER_ATTACK );
+	return qtrue;
+}
+
 static char *CodStateOpen( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 	int mode;
 	qboolean urgent, hasToken, shoot;
+
+	if ( !ca->hasCover && CodCamperPost( cs, ca, threatPos ) ) {
+		return NULL;
+	}
 
 	// Phase 2: without a token this soldier does not shoot, it gets to cover. With no cover to be found it fights anyway.
 	hasToken = AICast_CodTokenAcquire( cs, 1200 );
@@ -1565,7 +1663,13 @@ static char *CodStateOpen( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 		cs->attackcrouch_time = 0;
 		CodFaceThreat( cs, threatPos );
 	}
-	CodOpenMove( cs, ca, threatPos, shoot );
+	// codmod: Phase 5, the player charges: back away while shooting instead of standing / strafing
+	if ( shoot && CodEnemyVisible( cs ) && AICast_CodPolishBackpedal( cs, threatPos ) ) {
+		ca->crouchUntil = 0;
+		cs->attackcrouch_time = 0;
+	} else {
+		CodOpenMove( cs, ca, threatPos, shoot );
+	}
 	if ( !CodWeaponTick( cs, shoot ) ) {
 		CodExit( cs, ca, 2000 );
 		return AIFunc_DefaultStart( cs );
@@ -1590,6 +1694,13 @@ static char *CodStateMove( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 		ca->hideCheck = level.time + 250;
 		ca->settledAt = 0;
 		ca->reloadIssued = qfalse;
+		ca->crouchWalk = qfalse;
+		if ( ca->camperReloc ) {
+			// codmod: Phase 5, a camper that was driven out of its post holds the new one
+			ca->camperReloc = qfalse;
+			ca->camperHits = 0;
+			AICast_CodPolishCamperMoved( cs, ca->cover.pos );
+		}
 		// codmod: Phase 3, arrived from a retreat: stay down longer. Arrived from a dodge: at least until the
 		// blast is over, and the (hidden-only) spot is replaced by an ordinary one at the first look
 		if ( ca->retreatKind ) {
@@ -1618,10 +1729,19 @@ static char *CodStateMove( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 		}
 	}
 
-	ca->crouchUntil = 0;
-	cs->attackcrouch_time = 0;
-	if ( dist > ( ca->dodging ? 60.0f : 200.0f ) ) {
-		AICast_CodTrySprint( cs );
+	// codmod: Phase 5, crouch-walk between low covers (a hit makes the soldier run instead)
+	if ( ca->crouchWalk && cs->lastPain > ca->stateTime ) {
+		ca->crouchWalk = qfalse;
+	}
+	if ( ca->crouchWalk ) {
+		ca->crouchUntil = level.time + 300;
+		cs->attackcrouch_time = ca->crouchUntil;
+	} else {
+		ca->crouchUntil = 0;
+		cs->attackcrouch_time = 0;
+		if ( dist > ( ca->dodging ? 60.0f : 200.0f ) ) {
+			AICast_CodTrySprint( cs );
+		}
 	}
 	// codmod: Phase 3, still inside the blast with the fuse nearly out: dive (a character with the dive animation)
 	if ( ca->dodging && !ca->dodged && ( cs->aiFlags & AIFL_DIVE_ANIM ) && dist > 96.0f && ca->dodgeEnd - level.time < 1200
@@ -1651,6 +1771,10 @@ static char *CodStateMove( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 		if ( mr->blocked ) {
 			CodCoverFailed( cs, ca, qfalse, "blocked" );
 			return NULL;
+		}
+		// codmod: Phase 5, hit or suppressed on the way: zigzag (walking moves only, not for a dodge or a crouch-walk)
+		if ( !ca->dodging && !ca->crouchWalk && dist > 100.0f && ( mr->traveltype & TRAVELTYPE_MASK ) == TRAVEL_WALK ) {
+			AICast_CodPolishJink( cs, mr->movedir, CodUnderFire( cs ) );
 		}
 	}
 	// run and gun where the weapon allows it (AICast_ProcessAttack aims after the movement was issued); Phase 2:
@@ -1874,6 +1998,11 @@ static char *CodStatePeek( cast_state_t *cs, codAI_t *ca, qboolean visible ) {
 	} else if ( !CodWeaponTick( cs, qtrue ) ) {
 		CodExit( cs, ca, 2000 );
 		return AIFunc_DefaultStart( cs );
+	}
+	// codmod: Phase 5, the player charges while we shoot from the peek: back away (the next HIDE walks back to the cover)
+	if ( tokenOk && visible && !pushFire && !ca->suppressPeek && !ca->camper && AICast_CodPolishBackpedal( cs, threatNow ) ) {
+		ca->crouchUntil = 0;
+		cs->attackcrouch_time = 0;
 	}
 	if ( CodNeedsReload( cs ) || cs->bs->cur_ps.weaponstate == WEAPON_RELOADING ) {
 		if ( pushFire ) {
@@ -2158,6 +2287,7 @@ char *AIFunc_CodCombat( cast_state_t *cs ) {
 
 	ca = CodGet( cs );
 	ca->lastThink = level.time;
+	ca->camper = AICast_CodPolishIsCamper( cs );    // codmod: Phase 5
 	AICast_CodSquadThink();     // codmod: Phase 2, regroups squads about once a second
 
 	// ---- the checks of the vanilla functions we replace -----------------------------------------------
@@ -2208,6 +2338,11 @@ char *AIFunc_CodCombat( cast_state_t *cs ) {
 	if ( elig != COD_ELIG_LOST ) {
 		AICast_CodHuntLeave( cs );      // codmod: Phase 4, contact again (or not tactical any more): the hunt state goes
 	}
+	if ( elig == COD_ELIG_LOST && ca->camper ) {
+		// codmod: Phase 5, a camper does not hunt or chase: vanilla camper behaviour until the enemy shows up again
+		CodExit( cs, ca, 3000 );
+		return AIFunc_DefaultStart( cs );
+	}
 	if ( elig == COD_ELIG_LOST && bg_cod.aiHunt ) {
 		// codmod: Phase 4, lost contact: hunt (hops, held angles, corner clearing, a sweep, then heightened alert)
 		int hr;
@@ -2247,15 +2382,26 @@ char *AIFunc_CodCombat( cast_state_t *cs ) {
 	}
 
 	visible = CodEnemyVisible( cs );
-	if ( visible ) {
+	AICast_CodPolishThink( cs, visible );       // codmod: Phase 5, time-in-sight clock for the accuracy model
+	if ( visible && !ca->camper ) {
 		AICast_CodSquadReportThreat( cs, g_entities[cs->enemyNum].r.currentOrigin );
 		AICast_CodHuntTrack( cs );      // codmod: Phase 4, last seen position and velocity for the hunt
 	}
-	AICast_CodSquadPublish( cs, ( ca->state == COD_HIDE || ca->state == COD_PEEK ) ? qtrue : qfalse );
+	if ( !ca->camper ) {
+		AICast_CodSquadPublish( cs, ( ca->state == COD_HIDE || ca->state == COD_PEEK ) ? qtrue : qfalse );
+	}
 	CodThreatPos( cs, threatPos );
 
 	// codmod: Phase 3. The player is weak for a moment.
 	CodOpportunity( cs, ca );
+
+	// codmod: Phase 5, melee kick when the player is right in front of the soldier
+	if ( AICast_CodPolishKick( cs, ca->dodging ) ) {
+		ca->crouchUntil = 0;
+		cs->attackcrouch_time = 0;
+		CodDebugDraw( cs, ca );
+		return NULL;
+	}
 
 	// codmod: Phase 3. A grenade for a player who holds one spot or sits behind a corner (replaces the vanilla
 	// grenade flush call, whose 7 s spacing ignored squads); never while running for cover.

@@ -105,6 +105,18 @@ typedef struct {
 	float aiHuntPredict;    // Phase 4: u; the predicted position is at most this far from where the player was last seen
 	float aiHoldTime;       // Phase 4: ms a soldier holds an angle before it may take its own hop
 	float aiAlertTime;      // Phase 4: ms of heightened alert (half the reaction time) after the search found nothing
+	int aiPolish;           // Phase 5: master switch of the movement / aim polish below
+	int aiBackpedal;        // Phase 5: back away while firing when the player charges
+	int aiCrouchWalk;       // Phase 5: crouch-walk between low covers when the route stays hidden
+	int aiJink;             // Phase 5: short sideways direction changes under fire
+	int aiKick;             // Phase 5: kick the player in melee range
+	int aiAccuracy;         // Phase 5: warm-up / moving-target / moving-shooter accuracy model
+	int aiCamper;           // Phase 5: CAMPER soldiers crouch-peek in place instead of vanilla behaviour
+	float aiBackpedalSpeed; // Phase 5: u/s, closing speed of the player from which a soldier backs away
+	float aiKickDamage;     // Phase 5: damage of a soldier's kick
+	float aiKickCooldown;   // Phase 5: ms between kicks per soldier
+	float aiWarmup;         // Phase 5: ms of sight until a soldier reaches full accuracy (scaled by skill)
+	float aiWarmupAcc;      // Phase 5: accuracy multiplier at first sight (0.4 = first shots go wide)
 	float recoilEnable;     // E5: real view-angle kick per shot (player only)
 	float recoilScale;      // global multiplier on the per-weapon kick table
 	float recoilAdsScale;   // kick multiplier at full ADS
@@ -332,7 +344,7 @@ extern const int bg_numCodCvars;
 // codmod: g_main.c / cg_main.c each keep a static vmCvar_t[BG_COD_MAX_CVARS] and pass it in.
 // Bump this if bg_codCvars ever grows past it -- BG_CodRegisterCvars() clamps defensively.
 // (phase 3–6b + E9; leave headroom for extras.)
-#define BG_COD_MAX_CVARS 256
+#define BG_COD_MAX_CVARS 288
 
 void BG_CodRegisterCvars( vmCvar_t *cvars, int maxCvars );
 void BG_CodUpdateCvars( vmCvar_t *cvars, int maxCvars );

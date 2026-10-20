@@ -2514,6 +2514,7 @@ Q3GOBJ_ = \
   $(B)/$(BASEGAME)/game/ai_cast_cod_cover.o \
   $(B)/$(BASEGAME)/game/ai_cast_cod_squad.o \
   $(B)/$(BASEGAME)/game/ai_cast_cod_hunt.o \
+  $(B)/$(BASEGAME)/game/ai_cast_cod_polish.o \
   $(B)/$(BASEGAME)/game/ai_cast_debug.o \
   $(B)/$(BASEGAME)/game/ai_cast_events.o \
   $(B)/$(BASEGAME)/game/ai_cast_fight.o \

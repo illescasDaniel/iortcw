@@ -499,6 +499,9 @@ static void SqRebuild( void ) {
 		if ( !cs || cs->aifunc != AIFunc_CodCombat || cs->enemyNum < 0 ) {
 			continue;
 		}
+		if ( AICast_CodPolishIsCamper( cs ) ) {
+			continue;       // codmod: Phase 5, a camper holds its post on its own (no orders, flanks or pushes)
+		}
 		cands[numCands].ent = i;
 		cands[numCands].cs = cs;
 		cands[numCands].gent = ent;

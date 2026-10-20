@@ -141,4 +141,17 @@ void AICast_CodHuntReset( int entNum );                                 // spawn
 qboolean AICast_CodHuntCrouch( cast_state_t *cs );                      // the hunt wants this soldier crouched
 const char *AICast_CodHuntModeName( cast_state_t *cs );                 // debug
 
+// ai_cast_cod_polish.c (Phase 5: movement and aim polish; every function is gated inside and cheap when off)
+void AICast_CodPolishReset( int entNum );                               // spawn / death
+void AICast_CodPolishThink( cast_state_t *cs, qboolean visible );       // once per AIFunc_CodCombat: sight clock, closing speed
+float AICast_CodPolishAccuracy( int entNum );                           // multiplied into AICast_GetAccuracy; 1.0 when off
+qboolean AICast_CodPolishKick( cast_state_t *cs, qboolean busy );       // kicking (or starting to) this think: do nothing else
+qboolean AICast_CodPolishBackpedal( cast_state_t *cs, vec3_t threatPos );   // moving backwards this think (OPEN / PEEK)
+qboolean AICast_CodPolishJink( cast_state_t *cs, vec3_t moveDir, qboolean underFire );  // sideways overlay on the MOVE direction
+int AICast_CodPolishJinkLegMs( cast_state_t *cs, qboolean underFire );  // 0 = use the normal strafe leg, else a short jink leg
+qboolean AICast_CodPolishCrouchWalk( cast_state_t *cs, vec3_t from, vec3_t to, vec3_t threatPos );    // low cover to low cover, hidden route
+qboolean AICast_CodPolishIsCamper( cast_state_t *cs );                  // CAMPER attribute and the camper polish is on
+qboolean AICast_CodPolishCamperAnchor( cast_state_t *cs, vec3_t out );  // where this camper holds its post (remembered)
+void AICast_CodPolishCamperMoved( cast_state_t *cs, vec3_t pos );       // the camper relocated: the new post
+
 #endif // __AI_CAST_COD_H__
