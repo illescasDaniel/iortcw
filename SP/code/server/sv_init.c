@@ -1087,10 +1087,13 @@ void SV_FinalMessage( char *message ) {
 		for ( i = 0, cl = svs.clients ; i < sv_maxclients->integer ; i++, cl++ ) {
 			if ( cl->state >= CS_CONNECTED ) {
 				// don't send a disconnect to a local client
-				if ( cl->netchan.remoteAddress.type != NA_LOOPBACK ) {
-					SV_SendServerCommand( cl, "print \"%s\n\"\n", message );
-					SV_SendServerCommand( cl, "disconnect \"%s\"", message );
+				if ( cl->netchan.remoteAddress.type == NA_LOOPBACK ) {
+					// nothing to deliver to the local client either, and quitting while it is still
+					// connecting (+map ... +quit on startup) leaves its netchan queue unset: SIGSEGV
+					continue;
 				}
+				SV_SendServerCommand( cl, "print \"%s\n\"\n", message );
+				SV_SendServerCommand( cl, "disconnect \"%s\"", message );
 				// force a snapshot to be sent
 				cl->lastSnapshotTime = 0;
 				SV_SendClientSnapshot( cl );
