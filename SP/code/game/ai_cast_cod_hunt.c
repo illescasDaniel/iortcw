@@ -738,7 +738,7 @@ qboolean AICast_CodAlertActive( cast_state_t *cs ) {
 	if ( hs->mode != HM_NONE && hs->lastThink <= level.time && hs->lastThink >= level.time - 600 ) {
 		return qtrue;
 	}
-	return ( hs->alertUntil > level.time && hs->alertUntil <= level.time + (int)bg_cod.aiAlertTime + 1000 ) ? qtrue : qfalse;
+	return ( hs->alertUntil > level.time && hs->alertUntil <= level.time + (int)( bg_cod.aiAlertTime * 1.5f ) + 1000 ) ? qtrue : qfalse;
 }
 
 /*
@@ -755,7 +755,7 @@ static int HuntAlert( cast_state_t *cs, huntRec_t *rec, huntSoldier_t *hs, char 
 				  level.time - rec->start, (int)bg_cod.aiAlertTime );
 	}
 	HuntForget( cs, hs );
-	hs->alertUntil = level.time + (int)bg_cod.aiAlertTime;
+	hs->alertUntil = level.time + (int)( bg_cod.aiAlertTime * AICast_CodSkill( COD_SK_HUNT ) );
 	cs->enemyNum = -1;
 	cs->lastEnemy = -1;
 	*rval = AIFunc_DefaultStart( cs );
@@ -1219,10 +1219,10 @@ int AICast_CodHuntThink( cast_state_t *cs, char **rval ) {
 	}
 
 	// phase changes (the first soldier to notice does them)
-	if ( rec->phase == HP_HUNT && level.time - rec->start > (int)bg_cod.aiHuntTime ) {
+	if ( rec->phase == HP_HUNT && level.time - rec->start > (int)( bg_cod.aiHuntTime * AICast_CodSkill( COD_SK_HUNT ) ) ) {
 		HuntBeginSweep( rec, cs, "hunt time over" );
 	}
-	if ( rec->phase == HP_SWEEP && level.time - rec->sweepStart > (int)bg_cod.aiSweepTime ) {
+	if ( rec->phase == HP_SWEEP && level.time - rec->sweepStart > (int)( bg_cod.aiSweepTime * AICast_CodSkill( COD_SK_HUNT ) ) ) {
 		rec->phase = HP_DONE;
 		rec->doneTime = level.time;
 	}

@@ -67,6 +67,31 @@ typedef struct {
 	qboolean crouchShot;    // Phase 2b: the crouched eye already has the shot
 } codCover_t;
 
+// Phase 6: difficulty scaling (ai_cast_cod.c). One table for everything that depends on g_gameskill; every factor is
+// 1.0 when cod_aiSkillScale is 0. Time factors multiply a duration (> 1 = slower / longer).
+typedef enum {
+	COD_SK_REACT,           // reaction time before a visible enemy counts as seen
+	COD_SK_PEEK,            // length of a peek burst
+	COD_SK_HIDE,            // time spent hidden between peeks
+	COD_SK_FLANK,           // how long the player must hold a spot before a flank
+	COD_SK_PUSH,            // no-shot time before a push for an angle
+	COD_SK_GRENADE_HOLD,    // time the player must hold a spot before a grenade
+	COD_SK_GRENADE_CD,      // grenade cooldown
+	COD_SK_WARMUP,          // accuracy warm-up time
+	COD_SK_HUNT,            // hunt / sweep / alert durations
+	COD_SK_COUNT
+} codSkill_t;
+
+float AICast_CodSkill( int what );                                      // factor for the current g_gameskill
+float AICast_CodSkillReact( cast_state_t *cs );                         // reaction-time factor for this soldier (1 for non-tactical)
+
+// Phase 6: per-frame budget counters for the tactical AI (cod_aiDebug 2 prints them once per second)
+extern int codPerfTraces, codPerfAas;
+void AICast_CodPerfCoverSearch( void );
+#define trap_Trace( r, s, mn, mx, e, p, m )  ( codPerfTraces++, trap_Trace( r, s, mn, mx, e, p, m ) )
+#define trap_AAS_AreaTravelTimeToGoalArea( a, o, g, f )  ( codPerfAas++, trap_AAS_AreaTravelTimeToGoalArea( a, o, g, f ) )
+#define trap_AAS_GetRouteFirstVisPos( a, b, c, d )  ( codPerfAas++, trap_AAS_GetRouteFirstVisPos( a, b, c, d ) )
+
 // ai_cast_cod_cover.c
 qboolean AICast_CodFindCover( cast_state_t *cs, vec3_t threatPos, int threatNum, int mode, codCover_t *out, vec3_t avoidPos, vec3_t refPos );
 qboolean AICast_CodCoverSearchAllowed( qboolean urgent );

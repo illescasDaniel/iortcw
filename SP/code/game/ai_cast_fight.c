@@ -365,6 +365,8 @@ qboolean AICast_EntityVisible( cast_state_t *cs, int enemynum, qboolean directvi
 	if ( AICast_CodAlertActive( cs ) ) {
 		reactionTime /= 2;
 	}
+	// codmod: Phase 6, difficulty scales the reaction time of tactical soldiers (1.0 for everybody else)
+	reactionTime = (int)( reactionTime * AICast_CodSkillReact( cs ) );
 
 	// if they are close, we should react faster
 	if ( cs->bs && enemynum == cs->enemyNum ) {

@@ -740,6 +740,7 @@ qboolean AICast_CodTacticsActive( cast_state_t *cs );
 void AICast_CodReset( int entNum );
 float AICast_CodAccuracyScale( int entNum );                          // codmod: Phase 3, < 1 while suppressed
 qboolean AICast_CodAlertActive( cast_state_t *cs );                // codmod: Phase 4, hunting or on heightened alert: faster reaction (ai_cast_cod_hunt.c)
+float AICast_CodSkillReact( cast_state_t *cs );                     // codmod: Phase 6, difficulty factor on the reaction time (ai_cast_cod.c)
 void AICast_CodNoteBullet( cast_state_t *cs, gentity_t *attacker, vec3_t start, vec3_t end );   // codmod: Phase 3, near misses
 //
 // ai_cast_script.c

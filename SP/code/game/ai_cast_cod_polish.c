@@ -178,7 +178,7 @@ void AICast_CodPolishThink( cast_state_t *cs, qboolean visible ) {
 		if ( !p->accDbg ) {
 			p->accDbg = qtrue;
 			if ( bg_cod.aiDebug >= 1 ) {
-				float mul = ( g_gameskill.integer <= GSKILL_EASY ) ? 1.4f : ( g_gameskill.integer == GSKILL_MEDIUM ? 1.0f : 0.7f );
+				float mul = AICast_CodSkill( COD_SK_WARMUP );
 
 				PolDebug( cs, va( "ACC warmup start x%.2f over %d ms (skill %d)", bg_cod.aiWarmupAcc, (int)( bg_cod.aiWarmup * mul ), g_gameskill.integer ) );
 			}
@@ -219,7 +219,7 @@ float AICast_CodPolishAccuracy( int entNum ) {
 	}
 
 	// warm-up
-	warm = bg_cod.aiWarmup * ( ( g_gameskill.integer <= GSKILL_EASY ) ? 1.4f : ( g_gameskill.integer == GSKILL_MEDIUM ? 1.0f : 0.7f ) );
+	warm = bg_cod.aiWarmup * AICast_CodSkill( COD_SK_WARMUP );
 	if ( warm >= 1.0f && p->sightMs < warm ) {
 		a = bg_cod.aiWarmupAcc;
 		if ( a < 0.05f ) {

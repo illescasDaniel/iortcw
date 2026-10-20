@@ -152,6 +152,7 @@ qboolean AICast_CodCoverSearchAllowed( qboolean urgent ) {
 		return qfalse;
 	}
 	searchCount++;
+	AICast_CodPerfCoverSearch();    // codmod: Phase 6
 	return qtrue;
 }
 

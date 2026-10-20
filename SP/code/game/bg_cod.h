@@ -116,6 +116,7 @@ typedef struct {
 	float aiKickDamage;     // Phase 5: damage of a soldier's kick
 	float aiKickCooldown;   // Phase 5: ms between kicks per soldier
 	float aiWarmup;         // Phase 5: ms of sight until a soldier reaches full accuracy (scaled by skill)
+	float aiSkillScale;     // Phase 6: 1 = scale timings by g_gameskill (easy slower/forgiving, hard sharper), 0 = off
 	float aiWarmupAcc;      // Phase 5: accuracy multiplier at first sight (0.4 = first shots go wide)
 	float recoilEnable;     // E5: real view-angle kick per shot (player only)
 	float recoilScale;      // global multiplier on the per-weapon kick table

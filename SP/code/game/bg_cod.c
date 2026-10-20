@@ -140,6 +140,7 @@ const codCvarDef_t bg_codCvars[] = {
 	{ "cod_aiKickDamage",       "15",   0,            CODOFS( aiKickDamage ),       0 },
 	{ "cod_aiKickCooldown",     "2500", 0,            CODOFS( aiKickCooldown ),     0 },
 	{ "cod_aiWarmup",           "800",  0,            CODOFS( aiWarmup ),           0 },
+	{ "cod_aiSkillScale",       "1",    0,            CODOFS( aiSkillScale ),       1 },
 	{ "cod_aiWarmupAcc",        "0.4",  0,            CODOFS( aiWarmupAcc ),        0 },
 	// codmod: E5 recoil (docs/phase-7-extras.md). Per-weapon degrees live in PM_CodRecoilKick.
 	{ "cod_recoilEnable",       "1",    0,            CODOFS( recoilEnable ),       1 },

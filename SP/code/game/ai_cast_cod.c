@@ -316,6 +316,124 @@ static qboolean CodIsTacticalType( int aiCharacter ) {
 	}
 }
 
+//===========================================================================
+// Phase 6: difficulty scaling (g_gameskill) and the per-frame budget counters
+//===========================================================================
+
+/*
+Difficulty table (rows: codSkill_t; factor on a duration, > 1 = longer). cod_aiSkillScale 0 = all 1.0.
+Attack tokens (cod_aiAttackTokens 0 = 2/3/4) and the Phase 5 accuracy warm-up come from the same table / skill value.
+
+                         easy   medium   hard
+  reaction time           1.35    1.0     0.75
+  peek burst              0.80    1.0     1.25
+  hide between peeks      1.30    1.0     0.80
+  flank hold              1.60    1.0     0.70
+  push no-shot time       1.50    1.0     0.75
+  grenade hold            1.50    1.0     0.75
+  grenade cooldown        1.50    1.0     0.75
+  accuracy warm-up        1.40    1.0     0.70
+  hunt / sweep / alert    0.70    1.0     1.30
+*/
+static const float codSkillTable[COD_SK_COUNT][3] = {
+	{ 1.35f, 1.0f, 0.75f },     // COD_SK_REACT
+	{ 0.80f, 1.0f, 1.25f },     // COD_SK_PEEK
+	{ 1.30f, 1.0f, 0.80f },     // COD_SK_HIDE
+	{ 1.60f, 1.0f, 0.70f },     // COD_SK_FLANK
+	{ 1.50f, 1.0f, 0.75f },     // COD_SK_PUSH
+	{ 1.50f, 1.0f, 0.75f },     // COD_SK_GRENADE_HOLD
+	{ 1.50f, 1.0f, 0.75f },     // COD_SK_GRENADE_CD
+	{ 1.40f, 1.0f, 0.70f },     // COD_SK_WARMUP
+	{ 0.70f, 1.0f, 1.30f }      // COD_SK_HUNT
+};
+
+float AICast_CodSkill( int what ) {
+	int sk;
+
+	if ( !bg_cod.enable || !bg_cod.aiTactics || !bg_cod.aiSkillScale || what < 0 || what >= COD_SK_COUNT ) {
+		return 1.0f;
+	}
+	sk = g_gameskill.integer;
+	if ( sk < 0 ) {
+		sk = 0;
+	} else if ( sk > 2 ) {
+		sk = 2;
+	}
+	return codSkillTable[what][sk];
+}
+
+static qboolean CodIsTacticalType( int aiCharacter );
+
+// reaction time: only for the soldier types the tactical AI drives; monsters, bosses and civilians stay vanilla
+float AICast_CodSkillReact( cast_state_t *cs ) {
+	if ( !bg_cod.enable || !bg_cod.aiTactics || !bg_cod.aiSkillScale || !CodIsTacticalType( cs->aiCharacter ) || cs->aasWorldIndex != 0 ) {
+		return 1.0f;
+	}
+	return AICast_CodSkill( COD_SK_REACT );
+}
+
+int codPerfTraces, codPerfAas;
+static int codPerfSearches;
+
+typedef struct {
+	int frameTime;                  // frame being counted
+	int soldiers;                   // tactical thinks this frame
+	int nextPrint;
+	int frames, sumTraces, maxTraces, sumAas, maxAas, searches, maxSoldiers, sumSoldiers;
+} codPerf_t;
+
+static codPerf_t codPerf;
+
+void AICast_CodPerfCoverSearch( void ) {
+	codPerfSearches++;
+}
+
+/*
+============
+CodPerfFrame
+
+codmod: called once per AIFunc_CodCombat think. Rolls the counters over when the server frame changes (the counters
+are bumped by the trap_ macros in ai_cast_cod.h and by the cover search ration) and, with cod_aiDebug 2, prints one
+line per second: avg/max traces and AAS route queries per frame that had tactical soldiers, cover searches, and the
+soldier count. Traces made by vanilla AI code or by AICast_PredictMovement are not included.
+============
+*/
+static void CodPerfFrame( void ) {
+	codPerf_t *pf = &codPerf;
+
+	if ( pf->frameTime != level.time ) {
+		if ( pf->soldiers ) {
+			pf->frames++;
+			pf->sumTraces += codPerfTraces;
+			if ( codPerfTraces > pf->maxTraces ) {
+				pf->maxTraces = codPerfTraces;
+			}
+			pf->sumAas += codPerfAas;
+			if ( codPerfAas > pf->maxAas ) {
+				pf->maxAas = codPerfAas;
+			}
+			pf->searches += codPerfSearches;
+			pf->sumSoldiers += pf->soldiers;
+			if ( pf->soldiers > pf->maxSoldiers ) {
+				pf->maxSoldiers = pf->soldiers;
+			}
+		}
+		if ( bg_cod.aiDebug >= 2 && level.time >= pf->nextPrint ) {
+			if ( pf->frames ) {
+				G_Printf( "[ai] perf: %d tactical frames/s, traces avg %.1f max %d, aas avg %.1f max %d, cover searches %d, soldiers avg %.1f max %d\n",
+						  pf->frames, (float)pf->sumTraces / pf->frames, pf->maxTraces, (float)pf->sumAas / pf->frames, pf->maxAas,
+						  pf->searches, (float)pf->sumSoldiers / pf->frames, pf->maxSoldiers );
+			}
+			pf->nextPrint = level.time + 1000;
+			pf->frames = pf->sumTraces = pf->maxTraces = pf->sumAas = pf->maxAas = pf->searches = pf->maxSoldiers = pf->sumSoldiers = 0;
+		}
+		pf->frameTime = level.time;
+		pf->soldiers = 0;
+		codPerfTraces = codPerfAas = codPerfSearches = 0;
+	}
+	pf->soldiers++;
+}
+
 // bullet weapons that suit fighting from cover (no panzerfaust, scoped rifles, flamers, monster attacks, melee)
 static qboolean CodUsableWeapon( int weapon ) {
 	switch ( weapon ) {
@@ -1157,7 +1275,7 @@ static qboolean CodPushWanted( cast_state_t *cs, codAI_t *ca ) {
 	if ( AICast_CodSquadId( cs ) ) {
 		return AICast_CodSquadPushOrder( cs );
 	}
-	return ( ca->noShotMs >= (int)bg_cod.aiNoShotTime && level.time >= ca->nextPush && CodThreatFresh( cs ) ) ? qtrue : qfalse;
+	return ( ca->noShotMs >= (int)( bg_cod.aiNoShotTime * AICast_CodSkill( COD_SK_PUSH ) ) && level.time >= ca->nextPush && CodThreatFresh( cs ) ) ? qtrue : qfalse;
 }
 
 // does the stand eye at the chosen angle spot still have a line to the enemy's body?
@@ -1272,7 +1390,7 @@ static qboolean CodGrenadeAvailable( cast_state_t *cs, codAI_t *ca, vec3_t threa
 // a throw is decided: cooldowns and the callout
 static void CodGrenadeCommit( cast_state_t *cs, codAI_t *ca ) {
 	AICast_CodSquadGrenadeThrown( cs );
-	ca->nextGrenade = level.time + (int)( bg_cod.aiGrenadeCooldown * ( 0.85f + 0.3f * random() ) );
+	ca->nextGrenade = level.time + (int)( bg_cod.aiGrenadeCooldown * AICast_CodSkill( COD_SK_GRENADE_CD ) * ( 0.85f + 0.3f * random() ) );
 	ca->holdSince = 0;
 }
 
@@ -1311,7 +1429,7 @@ static qboolean CodGrenadeWanted( cast_state_t *cs, codAI_t *ca, vec3_t threatPo
 	if ( level.time - lastShot < 1500 ) {
 		return qfalse;
 	}
-	held = ( hold >= (int)bg_cod.aiGrenadeHold ) ? qtrue : qfalse;
+	held = ( hold >= (int)( bg_cod.aiGrenadeHold * AICast_CodSkill( COD_SK_GRENADE_HOLD ) ) ) ? qtrue : qfalse;
 	corner = qfalse;
 	if ( !held && !visible && hold >= 1500 ) {
 		vec3_t eye, threatEye;
@@ -1690,7 +1808,7 @@ static char *CodStateMove( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 			return NULL;
 		}
 		ca->hideStart = level.time;
-		ca->hideUntil = level.time + (int)( CodRandMs( bg_cod.aiHideMin, bg_cod.aiHideMax ) * ( 1.15f - 0.5f * CodAggression( cs ) ) );
+		ca->hideUntil = level.time + (int)( CodRandMs( bg_cod.aiHideMin, bg_cod.aiHideMax ) * ( 1.15f - 0.5f * CodAggression( cs ) ) * AICast_CodSkill( COD_SK_HIDE ) );
 		ca->hideCheck = level.time + 250;
 		ca->settledAt = 0;
 		ca->reloadIssued = qfalse;
@@ -1921,14 +2039,14 @@ static char *CodStateHide( cast_state_t *cs, codAI_t *ca, vec3_t threatPos ) {
 		return NULL;
 	}
 
-	return CodEnterPeek( cs, ca, CodRandMs( bg_cod.aiPeekMin, bg_cod.aiPeekMax ) + ( ca->cover.type == COVER_LOW ? 250 : 450 ), qfalse, "peek" );
+	return CodEnterPeek( cs, ca, (int)( CodRandMs( bg_cod.aiPeekMin, bg_cod.aiPeekMax ) * AICast_CodSkill( COD_SK_PEEK ) ) + ( ca->cover.type == COVER_LOW ? 250 : 450 ), qfalse, "peek" );
 }
 
 static char *CodStateEndPeek( cast_state_t *cs, codAI_t *ca, qboolean hit, const char *why ) {
 	AICast_CodTokenRelease( cs );       // Phase 2: the next waiting squad member may shoot
 	ca->suppressPeek = qfalse;
 	ca->hideStart = level.time;
-	ca->hideUntil = level.time + (int)( CodRandMs( bg_cod.aiHideMin, bg_cod.aiHideMax ) * ( 1.15f - 0.5f * CodAggression( cs ) ) * ( ca->pushMode ? 0.5f : 1.0f ) );
+	ca->hideUntil = level.time + (int)( CodRandMs( bg_cod.aiHideMin, bg_cod.aiHideMax ) * ( 1.15f - 0.5f * CodAggression( cs ) ) * ( ca->pushMode ? 0.5f : 1.0f ) * AICast_CodSkill( COD_SK_HIDE ) );
 	if ( hit ) {
 		ca->hideUntil += 400;       // keep the head down a little longer after being hit
 	}
@@ -2287,6 +2405,7 @@ char *AIFunc_CodCombat( cast_state_t *cs ) {
 
 	ca = CodGet( cs );
 	ca->lastThink = level.time;
+	CodPerfFrame();     // codmod: Phase 6
 	ca->camper = AICast_CodPolishIsCamper( cs );    // codmod: Phase 5
 	AICast_CodSquadThink();     // codmod: Phase 2, regroups squads about once a second
 

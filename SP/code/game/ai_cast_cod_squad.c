@@ -426,7 +426,7 @@ static void SqUpdatePush( codSquad_t *sq ) {
 	if ( !bg_cod.aiPush || SqPushActive( sq ) || level.time < sq->nextPush || sq->flanker >= 0 ) {
 		return;
 	}
-	if ( sq->tryMs < (int)bg_cod.aiNoShotTime || !SqThreatFresh( sq ) ) {
+	if ( sq->tryMs < (int)( bg_cod.aiNoShotTime * AICast_CodSkill( COD_SK_PUSH ) ) || !SqThreatFresh( sq ) ) {
 		return;
 	}
 
@@ -665,7 +665,7 @@ static void SqRebuild( void ) {
 		}
 		SqUpdatePush( sq );
 		if ( sq->flanker < 0 && !SqPushActive( sq ) && level.time >= sq->nextFlank && sq->threatTime > level.time - 3000
-			 && sq->holdSince && level.time - sq->holdSince > (int)bg_cod.aiFlankHold ) {
+			 && sq->holdSince && level.time - sq->holdSince > (int)( bg_cod.aiFlankHold * AICast_CodSkill( COD_SK_FLANK ) ) ) {
 			SqPickFlanker( sq );
 		}
 		if ( bg_cod.aiDebug >= 1 && sq->num != sq->lastDbgNum && level.time >= sq->nextDbg ) {
@@ -1202,7 +1202,7 @@ void AICast_CodSquadGrenadeThrown( cast_state_t *cs ) {
 	codSquad_t *sq = SquadOf( cs );
 
 	if ( sq ) {
-		sq->nextGrenade = level.time + (int)( bg_cod.aiGrenadeCooldown * ( 0.85f + 0.3f * random() ) );
+		sq->nextGrenade = level.time + (int)( bg_cod.aiGrenadeCooldown * AICast_CodSkill( COD_SK_GRENADE_CD ) * ( 0.85f + 0.3f * random() ) );
 		sq->grenadeThrower = -1;
 	}
 	AICast_CodSquadBark( cs, COD_BARK_ATTACK );
