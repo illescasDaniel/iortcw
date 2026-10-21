@@ -1030,6 +1030,8 @@ typedef struct drawSurf_s {
 } drawSurf_t;
 
 #define	MAX_FACE_POINTS		64
+// ParseFace limit: verts are Hunk_Alloc'd per face, so this is only a sanity cap (bevelled map faces exceed 64)
+#define	BSP_MAX_FACE_VERTS	1024
 
 #define	MAX_PATCH_SIZE		32			// max dimensions of a patch mesh in map file
 #define	MAX_GRID_SIZE		65			// max dimensions of a grid mesh in memory
@@ -1950,6 +1952,7 @@ extern cvar_t	*r_dlightBacks;			// dlight non-facing surfaces for continuity
 extern	cvar_t	*r_norefresh;			// bypasses the ref rendering
 extern	cvar_t	*r_drawentities;		// disable/enable entity rendering
 extern	cvar_t	*r_drawworld;			// disable/enable world rendering
+extern	cvar_t	*r_vaoCacheStats;		// codmod: print VAO cache recycles/fill per frame
 extern	cvar_t	*r_speeds;				// various levels of information display
 extern  cvar_t	*r_detailTextures;		// enables/disables detail texturing stages
 extern	cvar_t	*r_novis;				// disable/enable usage of PVS
@@ -2615,6 +2618,7 @@ void VaoCache_CheckAdd(qboolean *endSurface, qboolean *recycleVertexBuffer, qboo
 void VaoCache_RecycleVertexBuffer(void);
 void VaoCache_RecycleIndexBuffer(void);
 void VaoCache_InitQueue(void);
+void VaoCache_GetStats(int *recycleVertex, int *recycleIndex, int *vertexFill, int *indexFill, int *numBatches);
 void VaoCache_AddSurface(srfVert_t *verts, int numVerts, glIndex_t *indexes, int numIndexes);
 
 /*

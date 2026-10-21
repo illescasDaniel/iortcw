@@ -682,7 +682,7 @@ static struct
 vcq;
 
 #define VAOCACHE_MAX_SURFACES (1 << 16)
-#define VAOCACHE_MAX_BATCHES (1 << 10)
+#define VAOCACHE_MAX_BATCHES (1 << 13) // codmod: bevelled maps cache many more batches before a recycle
 
 // srfVert_t is 60 bytes
 // assuming each vert is referenced 4 times, need 16 bytes (4 glIndex_t) per vert
@@ -691,8 +691,10 @@ vcq;
 #define VAOCACHE_VERTEX_BUFFER_SIZE (sizeof(srfVert_t) * USHRT_MAX)
 #define VAOCACHE_INDEX_BUFFER_SIZE (sizeof(glIndex_t) * USHRT_MAX * 4)
 #else // GL_UNSIGNED_INT
-#define VAOCACHE_VERTEX_BUFFER_SIZE (16 * 1024 * 1024)
-#define VAOCACHE_INDEX_BUFFER_SIZE (5 * 1024 * 1024)
+// codmod: sized for the bevelled world (~0.5M verts / ~1.5M indexes, most of it visible): the old 16/5 MB overflowed every frame
+// and recycled (re-uploaded) the cache per pass. ~60 MB + 16 MB of GPU memory.
+#define VAOCACHE_VERTEX_BUFFER_SIZE (sizeof(srfVert_t) * (1 << 20))
+#define VAOCACHE_INDEX_BUFFER_SIZE (sizeof(glIndex_t) * (1 << 22))
 #endif
 
 typedef struct buffered_s
@@ -714,6 +716,8 @@ static struct
 
 	int vertexOffset;
 	int indexOffset;
+
+	int recycleVertex, recycleIndex; // codmod: counters for r_vaoCacheStats / r_speeds 9
 }
 vc;
 
@@ -933,6 +937,7 @@ void VaoCache_CheckAdd(qboolean *endSurface, qboolean *recycleVertexBuffer, qboo
 
 void VaoCache_RecycleVertexBuffer(void)
 {
+	vc.recycleVertex++;
 	qglBindBuffer(GL_ARRAY_BUFFER, vc.vao->vertexesVBO);
 	qglBufferData(GL_ARRAY_BUFFER, vc.vao->vertexesSize, NULL, GL_DYNAMIC_DRAW);
 	vc.vertexOffset = 0;
@@ -940,11 +945,23 @@ void VaoCache_RecycleVertexBuffer(void)
 
 void VaoCache_RecycleIndexBuffer(void)
 {
+	vc.recycleIndex++;
 	qglBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vc.vao->indexesIBO);
 	qglBufferData(GL_ELEMENT_ARRAY_BUFFER, vc.vao->indexesSize, NULL, GL_DYNAMIC_DRAW);
 	vc.indexOffset = 0;
 	vc.numSurfaces = 0;
 	vc.numBatches = 0;
+}
+
+// codmod: recycles since the last call (reset) and the current fill in percent
+void VaoCache_GetStats(int *recycleVertex, int *recycleIndex, int *vertexFill, int *indexFill, int *numBatches)
+{
+	*recycleVertex = vc.recycleVertex;
+	*recycleIndex = vc.recycleIndex;
+	*vertexFill = (int)(100.0 * vc.vertexOffset / vc.vao->vertexesSize);
+	*indexFill = (int)(100.0 * vc.indexOffset / vc.vao->indexesSize);
+	*numBatches = vc.numBatches;
+	vc.recycleVertex = vc.recycleIndex = 0;
 }
 
 void VaoCache_InitQueue(void)

@@ -34,6 +34,11 @@ R_PerformanceCounters
 =====================
 */
 void R_PerformanceCounters( void ) {
+	if ( r_vaoCacheStats->integer || r_speeds->integer == 9 ) { // codmod: VAO cache recycles since the last frame
+		int rv, ri_, vf, xf, nb;
+		VaoCache_GetStats( &rv, &ri_, &vf, &xf, &nb );
+		ri.Printf( PRINT_ALL, "vaocache: recycles vtx %i idx %i, fill vtx %i%% idx %i%%, %i batches\n", rv, ri_, vf, xf, nb );
+	}
 	if ( !r_speeds->integer ) {
 		// clear the counters even if we aren't printing
 		memset( &tr.pc, 0, sizeof( tr.pc ) );

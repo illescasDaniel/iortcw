@@ -98,6 +98,7 @@ cvar_t  *r_norefresh;
 cvar_t  *r_drawentities;
 cvar_t  *r_drawworld;
 cvar_t  *r_speeds;
+cvar_t  *r_vaoCacheStats;
 cvar_t  *r_fullbright;
 cvar_t  *r_novis;
 cvar_t  *r_nocull;
@@ -1712,6 +1713,7 @@ void R_Register( void ) {
 	r_novis = ri.Cvar_Get( "r_novis", "0", CVAR_CHEAT );
 	r_showcluster = ri.Cvar_Get( "r_showcluster", "0", CVAR_CHEAT );
 	r_speeds = ri.Cvar_Get( "r_speeds", "0", CVAR_CHEAT );
+	r_vaoCacheStats = ri.Cvar_Get( "r_vaoCacheStats", "0", CVAR_CHEAT );
 	r_verbose = ri.Cvar_Get( "r_verbose", "0", CVAR_CHEAT );
 	r_logFile = ri.Cvar_Get( "r_logFile", "0", CVAR_CHEAT );
 	r_debugSurface = ri.Cvar_Get( "r_debugSurface", "0", CVAR_CHEAT );

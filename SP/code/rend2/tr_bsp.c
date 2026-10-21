@@ -759,9 +759,9 @@ static void ParseFace( dsurface_t *ds, drawVert_t *verts, float *hdrVertColors, 
 	}
 
 	numVerts = LittleLong(ds->numVerts);
-	if (numVerts > MAX_FACE_POINTS) {
-		ri.Printf( PRINT_WARNING, "WARNING: MAX_FACE_POINTS exceeded: %i\n", numVerts);
-		numVerts = MAX_FACE_POINTS;
+	if (numVerts > BSP_MAX_FACE_VERTS) {
+		ri.Printf( PRINT_WARNING, "WARNING: BSP_MAX_FACE_VERTS exceeded: %i\n", numVerts);
+		numVerts = BSP_MAX_FACE_VERTS;
 		surf->shader = tr.defaultShader;
 	}
 
@@ -820,6 +820,20 @@ static void ParseFace( dsurface_t *ds, drawVert_t *verts, float *hdrVertColors, 
 	SetPlaneSignbits( &cv->cullPlane );
 	cv->cullPlane.type = PlaneTypeForNormal( cv->cullPlane.normal );
 	surf->cullinfo.plane = cv->cullPlane;
+
+	// a face with verts off its plane (e.g. bevelled corners) must not be culled by that plane
+	{
+		float maxOff = 0;
+		for ( i = 0 ; i < numVerts ; i++ ) {
+			float off = fabs( DotProduct( cv->verts[i].xyz, cv->cullPlane.normal ) - cv->cullPlane.dist );
+			if ( off > maxOff ) {
+				maxOff = off;
+			}
+		}
+		if ( maxOff > 0.25f ) {
+			surf->cullinfo.type &= ~CULLINFO_PLANE;
+		}
+	}
 
 	surf->data = (surfaceType_t *)cv;
 
