@@ -158,6 +158,7 @@ vmCvar_t cg_subMsecLerp;
 vmCvar_t cg_drawFPGun;
 vmCvar_t cg_drawGamemodels;
 vmCvar_t cg_cursorHints;
+vmCvar_t cod_tipFlashlightShown;   // codmod: one-time flashlight key tip, CVAR_ARCHIVE
 vmCvar_t cg_hintFadeTime;       //----(SA)	added
 vmCvar_t cg_gun_frame;
 vmCvar_t cg_gun_x;
@@ -297,6 +298,7 @@ cvarTable_t cvarTable[] = {
 	{ &cg_drawFPGun, "cg_drawFPGun", "1", CVAR_ARCHIVE },
 	{ &cg_gun_frame, "cg_gun_frame", "0", CVAR_TEMP },
 	{ &cg_cursorHints, "cg_cursorHints", "1", CVAR_ARCHIVE },
+	{ &cod_tipFlashlightShown, "cod_tipFlashlightShown", "0", CVAR_ARCHIVE },
 	{ &cg_hintFadeTime, "cg_hintFadeTime", "500", CVAR_ARCHIVE }, //----(SA)	added
 	{ &cg_zoomFov, "cg_zoomfov", "22.5", CVAR_ARCHIVE },
 	{ &cg_zoomDefaultBinoc, "cg_zoomDefaultBinoc", "22.5", CVAR_ARCHIVE },

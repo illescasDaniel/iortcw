@@ -1742,6 +1742,7 @@ extern vmCvar_t cg_subMsecLerp;
 extern vmCvar_t cg_drawFPGun;
 extern vmCvar_t cg_drawGamemodels;
 extern vmCvar_t cg_cursorHints;
+extern vmCvar_t cod_tipFlashlightShown;
 extern vmCvar_t cg_hintFadeTime;            //----(SA)	added
 extern vmCvar_t cg_viewsize;
 extern vmCvar_t cg_letterbox;           //----(SA)	added
@@ -2296,6 +2297,7 @@ void CG_CodResetBinds_f( void );       // codmod: phase 5d full bind reset
 void CG_CodUpdateToggleCrouch( void ); // codmod: phase 5d auto-stand on jump
 void CG_CodUpdateCrouchProne( void );  // codmod: hold-crouch → prone
 void CG_CodUpdateReloadUse( void );    // codmod: tap reload / hold use
+void CG_CodUpdateTips( void );        // codmod: one-time flashlight key tip
 void CG_CodAddFlashlight( void );      // codmod: phase 5d view dlight
 void CG_CodDrawFlashlightHudIcon( float weapX, float weapY, float weapW, float weapH ); // codmod: HUD on-indicator
 void CG_QuickKickDown_f( void );      // codmod: pad R3 tap quickknife / hold kick
@@ -2553,6 +2555,7 @@ int         trap_Key_GetCatcher( void );
 void        trap_Key_SetCatcher( int catcher );
 int         trap_Key_GetKey( const char *binding );
 void        trap_Key_GetBindingBuf( int keynum, char *buf, int buflen ); // codmod
+void        trap_Key_KeynumToStringBuf( int keynum, char *buf, int buflen ); // codmod
 void        trap_Key_SetBinding( int keynum, const char *binding );      // codmod
 
 void CG_S_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t velocity, sfxHandle_t sfx, int volume );

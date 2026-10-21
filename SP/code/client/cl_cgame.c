@@ -861,6 +861,9 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		}
 		return 0;
 	}
+	case CG_KEY_KEYNUMTOSTRING:
+		Q_strncpyz( VMA( 2 ), Key_KeynumToString( args[1], qtrue ), args[3] );
+		return 0;
 	case CG_KEY_SETBINDING:
 		Key_SetBinding( args[1], VMA( 2 ) );
 		return 0;

@@ -5,6 +5,7 @@
 
 #include "cg_local.h"
 #include "../client/keycodes.h" // codmod: K_SPACE for toggle-crouch auto-stand (phase 5d)
+#include "../ui/ui_lang.h"
 
 // codmod: Phase 3.5 per-weapon iron-sight ADS. Primary pose is computed every frame from
 // tag_flash (see CG_CodApplyIronSightAds) so the rear sight sits on the screen center like
@@ -1288,7 +1289,51 @@ void CG_ToggleFlashlight_f( void ) {
 		return;
 	}
 	cg.codFlashlightOn = !cg.codFlashlightOn;
-	CG_Printf( "Flashlight %s\n", cg.codFlashlightOn ? "ON" : "OFF" );
+	// They found the key themselves: the tip is not needed any more.
+	if ( !cod_tipFlashlightShown.integer ) {
+		trap_Cvar_Set( "cod_tipFlashlightShown", "1" );
+	}
+}
+
+/*
+CG_CodUpdateTips
+
+codmod: one-time flashlight key tip, once per install (cod_tipFlashlightShown, CVAR_ARCHIVE in wolfconfig.cfg;
+`cod_tipFlashlightShown 0` re-arms it). Shown as a bottom-screen center print after the player has had control
+in a level for 4 s. The template string goes through Lang_Translate before the key name is formatted in
+(the centerprint lookup afterwards finds no match for the formatted text and leaves it alone).
+*/
+void CG_CodUpdateTips( void ) {
+	static int eligibleSince;
+	int k;
+	char key[32];
+
+	if ( cod_tipFlashlightShown.integer ) {
+		return;
+	}
+	if ( !( bg_cod.enable && bg_cod.flashlightEnable ) || !cg.snap || cg.cameraMode || cg.demoPlayback ||
+		 cg.snap->ps.pm_type != PM_NORMAL || cg.snap->ps.stats[STAT_HEALTH] <= 0 ||
+		 trap_Key_GetCatcher() != 0 ) {
+		eligibleSince = 0;
+		return;
+	}
+	if ( !eligibleSince || cg.time < eligibleSince ) {
+		eligibleSince = cg.time;
+		return;
+	}
+	if ( cg.time - eligibleSince < 4000 ) {
+		return;
+	}
+	k = trap_Key_GetKey( "toggleflashlight" );
+	if ( k < 0 ) {
+		return;     // unbound: stay armed
+	}
+	trap_Key_KeynumToStringBuf( k, key, sizeof( key ) );
+	if ( key[0] >= 'a' && key[0] <= 'z' && key[1] == '\0' ) {
+		key[0] -= 'a' - 'A';    // single letters upper-case
+	}
+	CG_CenterPrint( va( (char *)Lang_Translate( "Toggle Flashlight with %s" ), key ), SCREEN_HEIGHT - ( SCREEN_HEIGHT * 0.25 ), SMALLCHAR_WIDTH );
+	trap_Cvar_Set( "cod_tipFlashlightShown", "1" );
 }
 
 void CG_CodAddFlashlight( void ) {

@@ -452,6 +452,11 @@ void trap_Key_GetBindingBuf( int keynum, char *buf, int buflen ) {
 	syscall( CG_KEY_GETBINDINGBUF, keynum, buf, buflen );
 }
 
+// codmod: readable key name (e.g. "L") for on-screen tips
+void trap_Key_KeynumToStringBuf( int keynum, char *buf, int buflen ) {
+	syscall( CG_KEY_KEYNUMTOSTRING, keynum, buf, buflen );
+}
+
 void trap_Key_SetBinding( int keynum, const char *binding ) {
 	syscall( CG_KEY_SETBINDING, keynum, binding );
 }

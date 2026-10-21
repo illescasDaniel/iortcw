@@ -1686,6 +1686,8 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	CG_CodUpdateCrouchProne();
 	// codmod: pad tap Square/X reload / hold interact
 	CG_CodUpdateReloadUse();
+	// codmod: one-time flashlight key tip
+	CG_CodUpdateTips();
 
 	if ( cg.weaponSelect == WP_FG42SCOPE || cg.weaponSelect == WP_SNOOPERSCOPE || cg.weaponSelect == WP_SNIPERRIFLE ) {
 		float spd;

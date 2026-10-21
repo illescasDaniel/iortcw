@@ -224,7 +224,9 @@ typedef enum {
 	CG_R_ADDSPOTLIGHTTOSCENE = 901,
 	// codmod: save/restore key binds while /cod_menu steals arrows
 	CG_KEY_GETBINDINGBUF = 902,
-	CG_KEY_SETBINDING = 903
+	CG_KEY_SETBINDING = 903,
+	// codmod: key name for on-screen tips
+	CG_KEY_KEYNUMTOSTRING = 904
 
 } cgameImport_t;
 
