@@ -41,8 +41,8 @@ Returns qfalse if nothing was written to dstFbo.
 qboolean RB_SMAA(FBO_t *srcFbo, FBO_t *dstFbo, ivec4_t srcBox)
 {
 	int preset = r_smaa->integer - 1;
-	vec4_t metrics;
-	qboolean useStencil;
+	vec4_t metrics, predInfo;
+	qboolean useStencil, predicate;
 
 	if (preset < 0 || preset > 3)
 		return qfalse;
@@ -76,8 +76,17 @@ qboolean RB_SMAA(FBO_t *srcFbo, FBO_t *dstFbo, ivec4_t srcBox)
 		qglClear(GL_COLOR_BUFFER_BIT);
 	qglClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
+	// codmod: depth predication. The depth copy is valid when the main view ran a depth prepass; "off"
+	// (scale 1, strength 0) gives exactly the plain threshold, so the same program serves both.
+	predicate = r_smaaPredication->integer && tr.hdrDepthImage && r_depthPrepass->integer &&
+		!(backEnd.refdef.rdflags & RDF_NOWORLDMODEL);
+	VectorSet4(predInfo, backEnd.viewParms.zFar / r_znear->value, r_smaaPredThreshold->value,
+		predicate ? r_smaaPredScale->value : 1.0f, predicate ? r_smaaPredStrength->value : 0.0f);
+	GL_BindToTMU(predicate ? tr.hdrDepthImage : tr.whiteImage, TB_LEVELSMAP);
+
 	GLSL_BindProgram(&tr.smaaEdgeShader[preset]);
 	GLSL_SetUniformVec4(&tr.smaaEdgeShader[preset], UNIFORM_SMAAMETRICS, metrics);
+	GLSL_SetUniformVec4(&tr.smaaEdgeShader[preset], UNIFORM_VIEWINFO, predInfo);
 	FBO_Blit(srcFbo, srcBox, NULL, tr.smaaEdgesFbo, srcBox, &tr.smaaEdgeShader[preset], NULL, 0);
 	RB_GpuMark( "smaa_edges" );
 

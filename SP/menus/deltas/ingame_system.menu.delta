@@ -169,18 +169,27 @@
 =ui/ingame_system.menu 53 54
 +		name effects
 =ui/ingame_system.menu 94 96
-+		text "Soft Shadows:"
-+		cvar "r_shadowFilter"
-+		cvarFloatList { "Off" 0 "Soft" 1 "Softer" 2 }
++		text "Flashlight Shadow Size:"
++		cvar "r_flashlightShadowSize"
++		cvarFloatList { "512" 512 "1024" 1024 "2048" 2048 }
 =ui/controls.menu 518 522
 =ui/ingame_system.menu 130 135
 =ui/ingame_system.menu 489 492
 +		name effects
 =ui/ingame_system.menu 94 96
++		text "Soft Shadows:"
++		cvar "r_shadowFilter"
++		cvarFloatList { "Off" 0 "Soft" 1 "Softer" 2 }
++		rect 82 200 290 12
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
++		name effects
+=ui/ingame_system.menu 94 96
 +		text "Anisotropic Filter:"
 +		cvar "r_ext_texture_filter_anisotropic"
 +		cvarFloatList { "Off" 0 "2x" 2 "4x" 4 "8x" 8 "16x" 16 }
-+		rect 82 200 290 12
+=ui/ingame_system.menu 343 344
 =ui/options.menu 97 104
 =ui/credit.menu 414 417
 =ui/ingame_system.menu 53 54

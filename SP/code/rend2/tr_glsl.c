@@ -1396,6 +1396,17 @@ void GLSL_InitGPUShaders(void)
 				"#define SMAA_PRESET_%s\n"
 				"uniform vec4 u_SmaaMetrics;\n"
 				"#define SMAA_RT_METRICS u_SmaaMetrics\n"
+				// codmod: depth predication. u_ViewInfo = zfar/znear, threshold, scale, strength. The depth is hardware
+				// depth, so it is linearized and logged: a neighbour difference of 0.06 is a ~4% relative depth jump.
+				// "Off" is scale 1, strength 0 (identical to the plain threshold), so there is one program per preset.
+				"#define SMAA_PREDICATION 1\n"
+				"#ifndef GLSL_STAGE_VERTEX\n"
+				"uniform vec4 u_ViewInfo;\n"
+				"#define SMAA_PREDICATION_THRESHOLD u_ViewInfo.y\n"
+				"#define SMAA_PREDICATION_SCALE u_ViewInfo.z\n"
+				"#define SMAA_PREDICATION_STRENGTH u_ViewInfo.w\n"
+				"#define SMAA_PREDICATION_FETCH(d) (-log2(mix(u_ViewInfo.x, 1.0, d)))\n"
+				"#endif\n"
 				"%s",
 				smaaPresets[i < 4 ? i : 0], fallbackShader_smaa_lib);
 
@@ -1410,8 +1421,7 @@ void GLSL_InitGPUShaders(void)
 
 			GLSL_InitUniforms(prog);
 			GLSL_SetUniformInt(prog, UNIFORM_TEXTUREMAP, TB_COLORMAP);
-			if (i == 4)
-				GLSL_SetUniformInt(prog, UNIFORM_LEVELSMAP, TB_LEVELSMAP);
+			GLSL_SetUniformInt(prog, UNIFORM_LEVELSMAP, TB_LEVELSMAP);	// blend: weights, edge: depth
 			GLSL_FinishGPUShader(prog);
 			numEtcShaders++;
 

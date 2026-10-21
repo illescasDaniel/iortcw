@@ -1506,7 +1506,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 					qglCopyTextureSubImage2DEXT(tr.renderDepthImage->texnum, GL_TEXTURE_2D, 0, 0, 0, 0, 0, glConfig.vidWidth, glConfig.vidHeight);
 			}
 
-			if (tr.hdrDepthFbo && (r_ssao->integer || r_shadowBlur->integer))
+			if (tr.hdrDepthFbo && (r_ssao->integer || r_shadowBlur->integer || (r_smaa->integer && r_smaaPredication->integer)))
 			{
 				// need the depth in a texture we can do GL_LINEAR sampling on, so copy it to an HDR image
 				vec4_t srcTexCoords;

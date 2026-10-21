@@ -609,9 +609,17 @@ float3 SMAAGatherNeighbours(float2 texcoord,
     #ifdef SMAAGather
     return SMAAGather(tex, texcoord + SMAA_RT_METRICS.xy * float2(-0.5, -0.5)).grb;
     #else
+    // codmod: SMAA_PREDICATION_FETCH(d) converts a raw predication sample (hardware depth) to a measure
+    // whose neighbour differences are meaningful (log of linear depth)
+    #ifdef SMAA_PREDICATION_FETCH
+    float P = SMAA_PREDICATION_FETCH(SMAASamplePoint(tex, texcoord).r);
+    float Pleft = SMAA_PREDICATION_FETCH(SMAASamplePoint(tex, offset[0].xy).r);
+    float Ptop  = SMAA_PREDICATION_FETCH(SMAASamplePoint(tex, offset[0].zw).r);
+    #else
     float P = SMAASamplePoint(tex, texcoord).r;
     float Pleft = SMAASamplePoint(tex, offset[0].xy).r;
     float Ptop  = SMAASamplePoint(tex, offset[0].zw).r;
+    #endif
     return float3(P, Pleft, Ptop);
     #endif
 }

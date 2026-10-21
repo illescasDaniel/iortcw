@@ -371,7 +371,7 @@ static void SetDlightShadowMask( shaderProgram_t *sp, const dlight_t *dl )
 
 	float lift = r_dlightAlbedoLift->value;
 
-	VectorSet4( params, 0.0f, on ? 1.0f : 0.0f, ( lift > 0.0f && lift < 1.0f ) ? lift : 0.0f, 0.0f );
+	VectorSet4( params, 0.0f, on ? 1.0f : 0.0f, ( lift > 0.0f && lift < 1.0f ) ? lift : 0.0f, r_specularAA->value );   // codmod: w = geometric specular AA strength
 	if ( on ) {
 		GL_BindToTMU( tr.flashShadowMaskImage, TB_AOMAP );
 	}
@@ -1744,7 +1744,7 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 				int blendBits = pStage->stateBits & (GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS);
 				qboolean useAo = backEnd.aoReady && (blendBits == 0 || blendBits == (GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO)) && !r_lightmap->integer;
 
-				VectorSet4(aoParams, useAo ? 1.0f : 0.0f, 0, 0, 0);
+				VectorSet4(aoParams, useAo ? 1.0f : 0.0f, 0, 0, r_specularAA->value);   // codmod: w = geometric specular AA strength
 				if (useAo)
 					GL_BindToTMU(tr.aoImage, TB_AOMAP);
 				GLSL_SetUniformVec4(sp, UNIFORM_AOPARAMS, aoParams);

@@ -375,6 +375,12 @@ void main()
 
 	N = normalize(N);
 
+	// codmod: geometric specular AA (Kaplanyan 2016 / Tokuyoshi-Kaplanyan 2019). Derivatives taken here, in
+	// uniform flow, before any branch. u_AoParams.w = r_specularAA strength (0 = off).
+	vec3 dNdx = dFdx(N);
+	vec3 dNdy = dFdy(N);
+	float specAAVar = dot(dNdx, dNdx) + dot(dNdy, dNdy);
+
   #if defined(USE_SHADOWMAP) 
 	vec2 shadowTex = gl_FragCoord.xy * r_FBufScale;
 	float shadowValue = texture2D(u_ShadowMap, shadowTex).r;
@@ -458,6 +464,17 @@ void main()
 	float roughness = pow(2.0 / (8190.0 * gloss + 2.0), 0.25);
   #endif
 
+	// codmod: widen the specular lobe by the screen-space normal variance: alpha2' = alpha2 + min(2 * 0.25 * s * var, 0.18)
+	// CalcSpecular squares roughness to get alpha, and uses alpha^2 in the GGX D term, so alpha2 = roughness^4.
+	float specRoughness = roughness;
+	if (u_AoParams.w > 0.0)
+	{
+		float alpha2 = roughness * roughness;
+		alpha2 *= alpha2;
+		alpha2 = clamp(alpha2 + min(0.5 * u_AoParams.w * specAAVar, 0.18), 0.0, 1.0);
+		specRoughness = sqrt(sqrt(alpha2));
+	}
+
   #if defined(USE_LIGHT_VECTOR)
 	// codmod: near-black albedo barely reflects the flashlight; lift it for dynamic light only
 	if (u_AoParams.z > 0.0)
@@ -468,10 +485,10 @@ void main()
 
   #if defined(r_deluxeSpecular)
     #if defined(USE_LIGHT_VECTOR)
-	reflectance += CalcSpecular(specular.rgb, NH, EH, roughness) * r_deluxeSpecular;
+	reflectance += CalcSpecular(specular.rgb, NH, EH, specRoughness) * r_deluxeSpecular;
     #else
 	// codmod: only where a real directional light exists, never from the N~L~E degenerate case
-	reflectance += CalcSpecular(specular.rgb, NH, EH, pow(roughness, r_deluxeSpecular)) * lightDirectional;
+	reflectance += CalcSpecular(specular.rgb, NH, EH, pow(specRoughness, r_deluxeSpecular)) * lightDirectional;
     #endif
   #endif
 
@@ -482,7 +499,7 @@ void main()
 	// codmod: uniform branch, surfaces without a probe skip the BRDF and the cubemap fetch
 	if (u_EnableTextures.w > 0.0)
 	{
-	reflectance = EnvironmentBRDF(roughness, NE, specular.rgb);
+	reflectance = EnvironmentBRDF(specRoughness, NE, specular.rgb);
 
 	vec3 R = reflect(E, N);
 
@@ -491,9 +508,9 @@ void main()
 	vec3 parallax = u_CubeMapInfo.xyz + u_CubeMapInfo.w * viewDir;
 
   #if defined(USE_BOX_CUBEMAP_PARALLAX)
-	vec3 cubeLightColor = hitCube(R * u_CubeMapInfo.w, parallax, u_CubeMapInfo.www, ROUGHNESS_MIPS * roughness, u_CubeMap).rgb * u_EnableTextures.w;
+	vec3 cubeLightColor = hitCube(R * u_CubeMapInfo.w, parallax, u_CubeMapInfo.www, ROUGHNESS_MIPS * specRoughness, u_CubeMap).rgb * u_EnableTextures.w;
   #else
-	vec3 cubeLightColor = textureCubeLod(u_CubeMap, R + parallax, ROUGHNESS_MIPS * roughness).rgb * u_EnableTextures.w;
+	vec3 cubeLightColor = textureCubeLod(u_CubeMap, R + parallax, ROUGHNESS_MIPS * specRoughness).rgb * u_EnableTextures.w;
   #endif
 
 	// normalize cubemap based on last roughness mip (~diffuse)
@@ -528,7 +545,7 @@ void main()
 	EH2 = clamp(dot(E, H2), 0.0, 1.0);
 	NH2 = clamp(dot(N, H2), 0.0, 1.0);
 
-	reflectance  = CalcSpecular(specular.rgb, NH2, EH2, roughness);
+	reflectance  = CalcSpecular(specular.rgb, NH2, EH2, specRoughness);
 
 	// bit of a hack, with modulated shadowmaps, ignore diffuse
     #if !defined(SHADOWMAP_MODULATE)

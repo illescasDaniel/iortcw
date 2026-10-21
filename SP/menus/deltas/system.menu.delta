@@ -170,17 +170,26 @@
 =ui/system.menu 93 94
 +		name effects
 =ui/system.menu 283 285
-+		text "Soft Shadows:"
-+		cvar "r_shadowFilter"
-+		cvarFloatList { "Off" 0 "Soft" 1 "Softer" 2 }
++		text "Flashlight Shadow Size:"
++		cvar "r_flashlightShadowSize"
++		cvarFloatList { "512" 512 "1024" 1024 "2048" 2048 }
 =ui/controls.menu 518 522
 =ui/system.menu 156 161
 =ui/system.menu 204 207
 +		name effects
 =ui/system.menu 283 285
++		text "Soft Shadows:"
++		cvar "r_shadowFilter"
++		cvarFloatList { "Off" 0 "Soft" 1 "Softer" 2 }
++		rect 82 200 290 12
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/system.menu 93 94
++		name effects
+=ui/system.menu 283 285
 +		text "Anisotropic Filter:"
 +		cvar "r_ext_texture_filter_anisotropic"
 +		cvarFloatList { "Off" 0 "2x" 2 "4x" 4 "8x" 8 "16x" 16 }
-+		rect 82 200 290 12
+=ui/system.menu 368 369
 =ui/options.menu 97 104
 =ui/quitcredit.menu 405 409

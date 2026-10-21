@@ -143,6 +143,10 @@ cvar_t  *r_postProcess;
 cvar_t  *r_toneMap;
 cvar_t  *r_smaa;
 cvar_t  *r_smaaDebug;
+cvar_t  *r_smaaPredication;
+cvar_t  *r_smaaPredThreshold;
+cvar_t  *r_smaaPredScale;
+cvar_t  *r_smaaPredStrength;
 cvar_t  *r_aa;
 cvar_t  *r_forceToneMap;
 cvar_t  *r_forceToneMapMin;
@@ -185,6 +189,7 @@ cvar_t  *r_cubeMapping;
 cvar_t  *r_cubemapSize;
 cvar_t  *r_deluxeSpecular;
 cvar_t  *r_codSpecular;
+cvar_t  *r_specularAA;
 cvar_t  *r_codSpecDirectional;
 cvar_t  *r_cubemapSpecOnly;
 cvar_t  *r_cubemapMergeDist;
@@ -1500,6 +1505,11 @@ void R_Register( void ) {
 	ri.Cvar_CheckRange( r_smaa, 0, 4, qtrue );
 	r_smaaDebug = ri.Cvar_Get( "r_smaaDebug", "0", 0 );
 	ri.Cvar_CheckRange( r_smaaDebug, 0, 2, qtrue );
+	// codmod: depth-predicated SMAA edge threshold (0 = vanilla); the three tuning values are for experiments
+	r_smaaPredication = ri.Cvar_Get( "r_smaaPredication", "0", 0 );
+	r_smaaPredThreshold = ri.Cvar_Get( "r_smaaPredThreshold", "0.06", 0 );
+	r_smaaPredScale = ri.Cvar_Get( "r_smaaPredScale", "2.0", 0 );
+	r_smaaPredStrength = ri.Cvar_Get( "r_smaaPredStrength", "0.4", 0 );
 	r_aa = ri.Cvar_Get( "r_aa", "0", CVAR_ARCHIVE );   // codmod: off = stock rend2; the mod sets 3 (SMAA High)
 	ri.Cvar_CheckRange( r_aa, -1, 7, qtrue );
 	R_ApplyAA();
@@ -1557,6 +1567,8 @@ void R_Register( void ) {
 	r_cubemapSize = ri.Cvar_Get( "r_cubemapSize", "128", CVAR_ARCHIVE | CVAR_LATCH );
 	r_deluxeSpecular = ri.Cvar_Get( "r_deluxeSpecular", "0.1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_codSpecular = ri.Cvar_Get( "r_codSpecular", "0", CVAR_ARCHIVE | CVAR_LATCH );   // codmod: 0 = no spec maps / light-grid specular / cubemaps (cheap); the mod sets 1
+	// codmod: geometric specular AA strength (widens roughness where the normal varies fast across a pixel); 0 = vanilla, live
+	r_specularAA = ri.Cvar_Get( "r_specularAA", "0", 0 );
 	// codmod: baked/grid specular weighted by light directionality (read at map load); 0 = old behaviour
 	r_codSpecDirectional = ri.Cvar_Get( "r_codSpecDirectional", "1", 0 );
 	r_cubemapSpecOnly = ri.Cvar_Get( "r_cubemapSpecOnly", "1", 0 );
