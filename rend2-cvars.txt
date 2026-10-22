@@ -1,4 +1,4 @@
-r_aa "3"
+r_aa "4"
 r_arb_half_float_pixel "1"
 r_arb_half_float_vertex "1"
 r_arb_seamless_cube_map "0"

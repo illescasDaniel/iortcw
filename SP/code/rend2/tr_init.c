@@ -1376,7 +1376,8 @@ R_Register
 R_ApplyAA
 
 r_aa is the single user-facing anti-aliasing setting:
-0 off, 1-4 SMAA low/medium/high/ultra, 5-7 MSAA 2x/4x/8x, 8 SMAA T2x (High + camera-only temporal).
+0 off, 4 SMAA 1x (Ultra preset), 5-7 MSAA 2x/4x/8x, 8 SMAA T2x (High + camera-only temporal).
+Legacy saved values 1-3 (SMAA low/medium/high) behave as 4 and are normalised to 4.
 It drives r_smaa (live), r_smaaTemporal (live) and r_ext_framebuffer_multisample (latched, needs
 vid_restart). Default 0 (no AA, same as stock rend2 with r_ext_framebuffer_multisample 0;
 the mod turns it on). -1 leaves both cvars alone.
@@ -1386,11 +1387,15 @@ void R_ApplyAA( void ) {
 	int aa = r_aa->integer;
 	int smaa, msaa;
 
+	if ( aa >= 1 && aa <= 3 ) {
+		aa = 4;
+		ri.Cvar_Set( "r_aa", "4" );
+	}
 	r_aa->modified = qfalse;
 	if ( aa < 0 ) {
 		return;
 	}
-	smaa = ( aa >= 1 && aa <= 4 ) ? aa : 0;
+	smaa = ( aa == 4 ) ? 4 : 0;
 	msaa = ( aa >= 5 && aa <= 7 ) ? ( 2 << ( aa - 5 ) ) : 0;
 	if ( aa == 8 ) {
 		smaa = 3;	// T2x is SMAA High plus the temporal resolve; never together with MSAA
@@ -1539,7 +1544,7 @@ void R_Register( void ) {
 	r_smaaPredThreshold = ri.Cvar_Get( "r_smaaPredThreshold", "0.06", 0 );
 	r_smaaPredScale = ri.Cvar_Get( "r_smaaPredScale", "2.0", 0 );
 	r_smaaPredStrength = ri.Cvar_Get( "r_smaaPredStrength", "0.4", 0 );
-	r_aa = ri.Cvar_Get( "r_aa", "0", CVAR_ARCHIVE );   // codmod: off = stock rend2; the mod sets 3 (SMAA High)
+	r_aa = ri.Cvar_Get( "r_aa", "0", CVAR_ARCHIVE );   // codmod: off = stock rend2; the mod sets 4 (SMAA 1x)
 	ri.Cvar_CheckRange( r_aa, -1, 8, qtrue );
 	R_ApplyAA();
 	r_forceToneMap = ri.Cvar_Get( "r_forceToneMap", "0", CVAR_CHEAT );
