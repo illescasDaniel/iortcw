@@ -681,9 +681,6 @@ static struct
 }
 vcq;
 
-#define VAOCACHE_MAX_SURFACES (1 << 16)
-#define VAOCACHE_MAX_BATCHES (1 << 13) // codmod: bevelled maps cache many more batches before a recycle
-
 // srfVert_t is 60 bytes
 // assuming each vert is referenced 4 times, need 16 bytes (4 glIndex_t) per vert
 // -> need about 4/15ths the space for indexes as vertexes
@@ -697,23 +694,9 @@ vcq;
 #define VAOCACHE_INDEX_BUFFER_SIZE (sizeof(glIndex_t) * (1 << 22))
 #endif
 
-typedef struct buffered_s
-{
-	void *data;
-	int size;
-	int bufferOffset;
-}
-buffered_t;
-
 static struct
 {
 	vao_t *vao;
-	buffered_t surfaceIndexSets[VAOCACHE_MAX_SURFACES];
-	int numSurfaces;
-
-	int batchLengths[VAOCACHE_MAX_BATCHES];
-	int numBatches;
-
 	int vertexOffset;
 	int indexOffset;
 
@@ -721,96 +704,166 @@ static struct
 }
 vc;
 
+// codmod: static cache. The stock cache copied every batch's vertexes and rebuilt its indexes whenever a set of
+// surfaces had not been drawn before, which happens every frame while the view moves (tens of MB per frame on the
+// bevelled maps; a still view re-uses its batches and uploads nothing). Now every surface's vertexes and (rebased)
+// indexes are uploaded once, and a batch of surfaces is drawn with one glMultiDrawElements over their index ranges.
+#define VAOCACHE_HASH_SIZE (1 << 18) // power of two
+#define VAOCACHE_HASH_MAX (VAOCACHE_HASH_SIZE * 3 / 4)
+
+typedef struct vtxEntry_s
+{
+	srfVert_t *verts;
+	int numVerts;
+	int base; // index of the first vertex in the vertex buffer
+}
+vtxEntry_t;
+
+typedef struct idxEntry_s
+{
+	glIndex_t *indexes;
+	srfVert_t *verts;
+	int numIndexes;
+	int byteOffset; // of the first (rebased) index in the index buffer
+}
+idxEntry_t;
+
+static vtxEntry_t vtxTable[VAOCACHE_HASH_SIZE];
+static idxEntry_t idxTable[VAOCACHE_HASH_SIZE];
+static int vtxCount, idxCount;
+
+#define VAOCACHE_MULTI_MAX VAOCACHE_QUEUE_MAX_SURFACES
+static GLsizei mdCount[VAOCACHE_MULTI_MAX];
+static const GLvoid *mdOffset[VAOCACHE_MULTI_MAX];
+static int mdNum;
+
+static unsigned int VaoCache_Hash(const void *p)
+{
+	return (unsigned int)(((size_t)p >> 4) * 2654435761u) & (VAOCACHE_HASH_SIZE - 1);
+}
+
+static void VaoCache_ClearTables(void)
+{
+	Com_Memset(vtxTable, 0, sizeof(vtxTable));
+	Com_Memset(idxTable, 0, sizeof(idxTable));
+	vtxCount = idxCount = 0;
+}
+
+// Index of the surface's first vertex in the cache buffer; copies the vertexes to the upload queue if they are new.
+static int VaoCache_StaticVertexBase(srfVert_t *verts, int numVerts)
+{
+	unsigned int h = VaoCache_Hash(verts);
+	vtxEntry_t *e;
+
+	for (;;)
+	{
+		e = &vtxTable[h];
+		if (!e->verts)
+			break;
+		if (e->verts == verts && e->numVerts == numVerts)
+			return e->base;
+		h = (h + 1) & (VAOCACHE_HASH_SIZE - 1);
+	}
+
+	e->verts = verts;
+	e->numVerts = numVerts;
+	e->base = (vc.vertexOffset + vcq.vertexCommitSize) / sizeof(srfVert_t);
+	vtxCount++;
+	Com_Memcpy((byte *)vcq.vertexes + vcq.vertexCommitSize, verts, numVerts * sizeof(srfVert_t));
+	vcq.vertexCommitSize += numVerts * sizeof(srfVert_t);
+	return e->base;
+}
+
+// Byte offset of the surface's rebased indexes in the cache buffer; copies them to the upload queue if they are new.
+static int VaoCache_StaticIndexOffset(queuedSurface_t *surf, int vertexBase)
+{
+	unsigned int h = VaoCache_Hash(surf->indexes);
+	idxEntry_t *e;
+	glIndex_t *dst;
+	int i;
+
+	for (;;)
+	{
+		e = &idxTable[h];
+		if (!e->indexes)
+			break;
+		if (e->indexes == surf->indexes && e->verts == surf->vertexes && e->numIndexes == surf->numIndexes)
+			return e->byteOffset;
+		h = (h + 1) & (VAOCACHE_HASH_SIZE - 1);
+	}
+
+	e->indexes = surf->indexes;
+	e->verts = surf->vertexes;
+	e->numIndexes = surf->numIndexes;
+	e->byteOffset = vc.indexOffset + vcq.indexCommitSize;
+	idxCount++;
+	dst = (glIndex_t *)((byte *)vcq.indexes + vcq.indexCommitSize);
+	for (i = 0; i < surf->numIndexes; i++)
+		dst[i] = surf->indexes[i] + vertexBase;
+	vcq.indexCommitSize += surf->numIndexes * sizeof(glIndex_t);
+	return e->byteOffset;
+}
+
+void VaoCache_Reset(void)
+{
+	// the world's memory is gone after a map change: its vertex and index pointers must not match again
+	VaoCache_ClearTables();
+	vc.vertexOffset = 0;
+	vc.indexOffset = 0;
+	vcq.vertexCommitSize = 0;
+	vcq.indexCommitSize = 0;
+	vcq.numSurfaces = 0;
+	mdNum = 0;
+}
+
+// Draws the batch of the last VaoCache_Commit (more than one surface)
+void VaoCache_MultiDraw(void)
+{
+	qglMultiDrawElements(GL_TRIANGLES, mdCount, GL_INDEX_TYPE, mdOffset, mdNum);
+}
+
 void VaoCache_Commit(void)
 {
-	buffered_t *indexSet;
-	int *batchLength;
 	queuedSurface_t *surf, *end = vcq.surfaces + vcq.numSurfaces;
 
 	R_BindVao(vc.vao);
 
-	// Search for a matching batch
-	// FIXME: Use faster search
-	indexSet = vc.surfaceIndexSets;
-	batchLength = vc.batchLengths;
-	for (; batchLength < vc.batchLengths + vc.numBatches; batchLength++)
+	vcq.vertexCommitSize = 0; // from here on: bytes new to the buffer
+	vcq.indexCommitSize = 0;
+	mdNum = 0;
+	for (surf = vcq.surfaces; surf < end; surf++)
 	{
-		if (*batchLength == vcq.numSurfaces)
-		{
-			buffered_t *indexSet2 = indexSet;
-			for (surf = vcq.surfaces; surf < end; surf++, indexSet2++)
-			{
-				if (surf->indexes != indexSet2->data || (surf->numIndexes * sizeof(glIndex_t)) != indexSet2->size)
-					break;
-			}
+		int base = VaoCache_StaticVertexBase(surf->vertexes, surf->numVerts);
+		int offset = VaoCache_StaticIndexOffset(surf, base);
 
-			if (surf == end)
-				break;
-		}
-
-		indexSet += *batchLength;
+		mdCount[mdNum] = surf->numIndexes;
+		mdOffset[mdNum] = (const GLvoid *)(size_t)offset;
+		mdNum++;
 	}
 
-	// If found, use it
-	if (indexSet < vc.surfaceIndexSets + vc.numSurfaces)
+	if (vcq.vertexCommitSize)
 	{
-		tess.firstIndex = indexSet->bufferOffset / sizeof(glIndex_t);
-		//ri.Printf(PRINT_ALL, "firstIndex %d numIndexes %d as %d\n", tess.firstIndex, tess.numIndexes, (int)(batchLength - vc.batchLengths));
-		//ri.Printf(PRINT_ALL, "vc.numSurfaces %d vc.numBatches %d\n", vc.numSurfaces, vc.numBatches);
+		qglBindBuffer(GL_ARRAY_BUFFER, vc.vao->vertexesVBO);
+		qglBufferSubData(GL_ARRAY_BUFFER, vc.vertexOffset, vcq.vertexCommitSize, vcq.vertexes);
+		vc.vertexOffset += vcq.vertexCommitSize;
 	}
-	// If not, rebuffer the batch
-	// FIXME: keep track of the vertexes so we don't have to reupload them every time
+
+	if (vcq.indexCommitSize)
+	{
+		qglBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vc.vao->indexesIBO);
+		qglBufferSubData(GL_ELEMENT_ARRAY_BUFFER, vc.indexOffset, vcq.indexCommitSize, vcq.indexes);
+		vc.indexOffset += vcq.indexCommitSize;
+	}
+
+	if (mdNum == 1)
+	{
+		tess.firstIndex = (int)((size_t)mdOffset[0] / sizeof(glIndex_t));
+		tess.numMultiDraws = 0;
+	}
 	else
 	{
-		srfVert_t *dstVertex = vcq.vertexes;
-		glIndex_t *dstIndex = vcq.indexes;
-
-		batchLength = vc.batchLengths + vc.numBatches;
-		*batchLength = vcq.numSurfaces;
-		vc.numBatches++;
-
-		tess.firstIndex = vc.indexOffset / sizeof(glIndex_t);
-		vcq.vertexCommitSize = 0;
-		vcq.indexCommitSize = 0;
-		for (surf = vcq.surfaces; surf < end; surf++)
-		{
-			glIndex_t *srcIndex = surf->indexes;
-			int vertexesSize = surf->numVerts * sizeof(srfVert_t);
-			int indexesSize = surf->numIndexes * sizeof(glIndex_t);
-			int i, indexOffset = (vc.vertexOffset + vcq.vertexCommitSize) / sizeof(srfVert_t);
-
-			Com_Memcpy(dstVertex, surf->vertexes, vertexesSize);
-			dstVertex += surf->numVerts;
-
-			vcq.vertexCommitSize += vertexesSize;
-
-			indexSet = vc.surfaceIndexSets + vc.numSurfaces;
-			indexSet->data = surf->indexes;
-			indexSet->size = indexesSize;
-			indexSet->bufferOffset = vc.indexOffset + vcq.indexCommitSize;
-			vc.numSurfaces++;
-
-			for (i = 0; i < surf->numIndexes; i++)
-				*dstIndex++ = *srcIndex++ + indexOffset;
-
-			vcq.indexCommitSize += indexesSize;
-		}
-
-		//ri.Printf(PRINT_ALL, "committing %d to %d, %d to %d as %d\n", vcq.vertexCommitSize, vc.vertexOffset, vcq.indexCommitSize, vc.indexOffset, (int)(batchLength - vc.batchLengths));
-
-		if (vcq.vertexCommitSize)
-		{
-			qglBindBuffer(GL_ARRAY_BUFFER, vc.vao->vertexesVBO);
-			qglBufferSubData(GL_ARRAY_BUFFER, vc.vertexOffset, vcq.vertexCommitSize, vcq.vertexes);
-			vc.vertexOffset += vcq.vertexCommitSize;
-		}
-
-		if (vcq.indexCommitSize)
-		{
-			qglBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vc.vao->indexesIBO);
-			qglBufferSubData(GL_ELEMENT_ARRAY_BUFFER, vc.indexOffset, vcq.indexCommitSize, vcq.indexes);
-			vc.indexOffset += vcq.indexCommitSize;
-		}
+		tess.firstIndex = 0;
+		tess.numMultiDraws = mdNum;
 	}
 }
 
@@ -868,8 +921,6 @@ void VaoCache_Init(void)
 
 	Vao_SetVertexPointers(vc.vao);
 
-	vc.numSurfaces = 0;
-	vc.numBatches = 0;
 	vc.vertexOffset = 0;
 	vc.indexOffset = 0;
 	vcq.vertexCommitSize = 0;
@@ -902,16 +953,10 @@ void VaoCache_CheckAdd(qboolean *endSurface, qboolean *recycleVertexBuffer, qboo
 		*endSurface = qtrue;
 	}
 
-	if (vc.numSurfaces + vcq.numSurfaces >= VAOCACHE_MAX_SURFACES)
+	if (vtxCount + vcq.numSurfaces >= VAOCACHE_HASH_MAX || idxCount + vcq.numSurfaces >= VAOCACHE_HASH_MAX)
 	{
-		//ri.Printf(PRINT_ALL, "out of surfaces in index cache\n");
-		*recycleIndexBuffer = qtrue;
-		*endSurface = qtrue;
-	}
-
-	if (vc.numBatches >= VAOCACHE_MAX_BATCHES)
-	{
-		//ri.Printf(PRINT_ALL, "out of batches in index cache\n");
+		//ri.Printf(PRINT_ALL, "out of surface table entries\n");
+		*recycleVertexBuffer = qtrue;
 		*recycleIndexBuffer = qtrue;
 		*endSurface = qtrue;
 	}
@@ -935,22 +980,28 @@ void VaoCache_CheckAdd(qboolean *endSurface, qboolean *recycleVertexBuffer, qboo
 	}
 }
 
+// Vertexes and indexes are stored together (indexes are rebased to the vertex positions), so either recycle starts both over.
+static void VaoCache_RecycleAll(void)
+{
+	qglBindBuffer(GL_ARRAY_BUFFER, vc.vao->vertexesVBO);
+	qglBufferData(GL_ARRAY_BUFFER, vc.vao->vertexesSize, NULL, GL_DYNAMIC_DRAW);
+	qglBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vc.vao->indexesIBO);
+	qglBufferData(GL_ELEMENT_ARRAY_BUFFER, vc.vao->indexesSize, NULL, GL_DYNAMIC_DRAW);
+	vc.vertexOffset = 0;
+	vc.indexOffset = 0;
+	VaoCache_ClearTables();
+}
+
 void VaoCache_RecycleVertexBuffer(void)
 {
 	vc.recycleVertex++;
-	qglBindBuffer(GL_ARRAY_BUFFER, vc.vao->vertexesVBO);
-	qglBufferData(GL_ARRAY_BUFFER, vc.vao->vertexesSize, NULL, GL_DYNAMIC_DRAW);
-	vc.vertexOffset = 0;
+	VaoCache_RecycleAll();
 }
 
 void VaoCache_RecycleIndexBuffer(void)
 {
 	vc.recycleIndex++;
-	qglBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vc.vao->indexesIBO);
-	qglBufferData(GL_ELEMENT_ARRAY_BUFFER, vc.vao->indexesSize, NULL, GL_DYNAMIC_DRAW);
-	vc.indexOffset = 0;
-	vc.numSurfaces = 0;
-	vc.numBatches = 0;
+	VaoCache_RecycleAll();
 }
 
 // codmod: recycles since the last call (reset) and the current fill in percent
@@ -960,7 +1011,7 @@ void VaoCache_GetStats(int *recycleVertex, int *recycleIndex, int *vertexFill, i
 	*recycleIndex = vc.recycleIndex;
 	*vertexFill = (int)(100.0 * vc.vertexOffset / vc.vao->vertexesSize);
 	*indexFill = (int)(100.0 * vc.indexOffset / vc.vao->indexesSize);
-	*numBatches = vc.numBatches;
+	*numBatches = idxCount;
 	vc.recycleVertex = vc.recycleIndex = 0;
 }
 

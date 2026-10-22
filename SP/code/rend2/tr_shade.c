@@ -46,6 +46,10 @@ R_DrawElements
 
 void R_DrawElements( int numIndexes, int firstIndex )
 {
+	if ( tess.numMultiDraws > 1 && numIndexes == tess.numIndexes && firstIndex == tess.firstIndex ) {
+		VaoCache_MultiDraw();
+		return;
+	}
 	qglDrawElements(GL_TRIANGLES, numIndexes, GL_INDEX_TYPE, BUFFER_OFFSET(firstIndex * sizeof(glIndex_t)));
 }
 
@@ -178,6 +182,7 @@ void RB_BeginSurface( shader_t *shader, int fogNum, int cubemapIndex ) {
 	tess.currentStageIteratorFunc = state->optimalStageIteratorFunc;
 	tess.useInternalVao = qtrue;
 	tess.useCacheVao = qfalse;
+	tess.numMultiDraws = 0;
 
 	tess.shaderTime = backEnd.refdef.floatTime - tess.shader->timeOffset;
 	if (tess.shader->clampTime && tess.shaderTime >= tess.shader->clampTime) {
@@ -2196,6 +2201,7 @@ void RB_EndSurface( void ) {
 	tess.numIndexes = 0;
 	tess.numVertexes = 0;
 	tess.firstIndex = 0;
+	tess.numMultiDraws = 0;
 
 	GLimp_LogComment( "----------\n" );
 }

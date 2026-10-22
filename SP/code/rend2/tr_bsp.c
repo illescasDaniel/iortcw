@@ -2942,6 +2942,8 @@ void RE_LoadWorldMap( const char *name ) {
 		ri.Error( ERR_DROP, "ERROR: attempted to redundantly load world map" );
 	}
 
+	VaoCache_Reset(); // codmod: cached surface pointers of the previous map
+
 	// set default map light scale
 	tr.sunShadowScale = 0.5f;
 

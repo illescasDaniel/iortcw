@@ -249,6 +249,7 @@ extern void (APIENTRYP qglPNTrianglesfATI)(GLenum pname, GLfloat param);
 	GLE(void, GenBuffers, GLsizei n, GLuint *buffers) \
 	GLE(void, BufferData, GLenum target, GLsizeiptr size, const void *data, GLenum usage) \
 	GLE(void, BufferSubData, GLenum target, GLintptr offset, GLsizeiptr size, const void *data) \
+	GLE(void, MultiDrawElements, GLenum mode, const GLsizei *count, GLenum type, const GLvoid * const *indices, GLsizei drawcount) \
 
 // OpenGL 2.0, was GL_ARB_shading_language_100, GL_ARB_vertex_program, GL_ARB_shader_objects, and GL_ARB_vertex_shader
 #define QGL_2_0_PROCS \

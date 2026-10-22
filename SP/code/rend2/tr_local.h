@@ -2445,6 +2445,7 @@ typedef struct shaderCommands_s
 	vao_t       *vao;
 	qboolean    useInternalVao;
 	qboolean    useCacheVao;
+	int         numMultiDraws; // codmod: > 1 when the VAO cache batch is drawn as several index ranges
 
 	stageVars_t	svars QALIGN(16);
 
@@ -2625,6 +2626,8 @@ void            R_VaoList_f(void);
 void            RB_UpdateTessVao(unsigned int attribBits);
 
 void VaoCache_Commit(void);
+void VaoCache_Reset(void);
+void VaoCache_MultiDraw(void);
 void VaoCache_Init(void);
 void VaoCache_BindVao(void);
 void VaoCache_CheckAdd(qboolean *endSurface, qboolean *recycleVertexBuffer, qboolean *recycleIndexBuffer, int numVerts, int numIndexes);
