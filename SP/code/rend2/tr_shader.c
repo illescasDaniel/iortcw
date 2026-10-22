@@ -2597,6 +2597,8 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 	float parallaxTcScale = 1.0f;
 	int tm;
 
+	diffuse->parallaxMaxDepth = 1.0f;
+
 	// codmod: parallax only on opaque stages with plain texture coordinates. Alpha-tested stages would
 	// shift their alpha away from the depth prepass (holes in grates), and rotate/turb/non-texture tcGen
 	// make the tangent-space shift swim.
@@ -2659,7 +2661,11 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 			if (parallaxOK && normal->bundle[0].image[0] && normal->bundle[0].image[0]->heightMaxDepth < r_parallaxMinDepth->value)
 				parallaxOK = qfalse;
 			if (parallaxOK)
+			{
 				defs |= LIGHTDEF_USE_PARALLAXMAP;
+				if (normal->bundle[0].image[0])
+					diffuse->parallaxMaxDepth = normal->bundle[0].image[0]->heightMaxDepth;
+			}
 
 			VectorCopy4(normal->normalScale, diffuse->normalScale);
 			if (parallaxOK)
@@ -2711,7 +2717,10 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 				diffuse->bundle[TB_NORMALMAP].image[0] = normalImg;
 
 				if (parallaxOK)
+				{
 					defs |= LIGHTDEF_USE_PARALLAXMAP;
+					diffuse->parallaxMaxDepth = normalImg->heightMaxDepth;
+				}
 
 				VectorSet4(diffuse->normalScale, r_baseNormalX->value, r_baseNormalY->value, 1.0f, r_baseParallax->value);
 				if (parallaxOK)

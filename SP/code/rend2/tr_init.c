@@ -188,6 +188,9 @@ cvar_t  *r_parallaxMapOffset;
 cvar_t  *r_parallaxMapShadows;
 cvar_t  *r_parallaxMinDepth;
 cvar_t  *r_parallaxMaxSteps;
+cvar_t  *r_parallaxStepDensity;
+cvar_t  *r_parallaxMarchLod;
+cvar_t  *r_parallaxShadowFade;
 cvar_t  *r_parallaxFadeDist;
 cvar_t  *r_parallaxFloorScale;
 cvar_t  *r_parallaxCavity;
@@ -1574,6 +1577,9 @@ void R_Register( void ) {
 	// r_parallaxMinDepth: normalheight images flatter than this (see image_t.heightMaxDepth) skip parallax
 	r_parallaxMinDepth = ri.Cvar_Get( "r_parallaxMinDepth", "0.15", CVAR_LATCH );
 	r_parallaxMaxSteps = ri.Cvar_Get( "r_parallaxMaxSteps", "48", 0 );
+	r_parallaxStepDensity = ri.Cvar_Get( "r_parallaxStepDensity", "1", 0 );
+	r_parallaxMarchLod = ri.Cvar_Get( "r_parallaxMarchLod", "0", 0 );
+	r_parallaxShadowFade = ri.Cvar_Get( "r_parallaxShadowFade", "0", 0 );
 	r_parallaxFadeDist = ri.Cvar_Get( "r_parallaxFadeDist", "1200", 0 );
 	r_parallaxFloorScale = ri.Cvar_Get( "r_parallaxFloorScale", "0.35", 0 );
 	r_parallaxCavity = ri.Cvar_Get( "r_parallaxCavity", "0.5", 0 );

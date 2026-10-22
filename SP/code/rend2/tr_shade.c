@@ -364,13 +364,17 @@ static void ComputeDeformValues(int *deformGen, vec5_t deformParams)
 
 
 // codmod: POM tuning values (programs without parallax have no such uniform and skip the call)
-static void SetParallaxUniform( shaderProgram_t *sp )
+static void SetParallaxUniform( shaderProgram_t *sp, const shaderStage_t *pStage )
 {
 	vec4_t params;
 
 	VectorSet4( params, Com_Clamp( 8.0f, 128.0f, r_parallaxMaxSteps->value ), r_parallaxFadeDist->value,
 		Com_Clamp( 0.0f, 1.0f, r_parallaxFloorScale->value ), Com_Clamp( 0.0f, 1.0f, r_parallaxCavity->value ) );
 	GLSL_SetUniformVec4( sp, UNIFORM_PARALLAXPARAMS, params );
+
+	VectorSet4( params, (pStage->parallaxMaxDepth > 0.0f) ? MIN( 1.0f, pStage->parallaxMaxDepth ) : 1.0f,
+		r_parallaxStepDensity->value, r_parallaxMarchLod->value, Com_Clamp( 0.0f, 1.0f, r_parallaxShadowFade->value ) );
+	GLSL_SetUniformVec4( sp, UNIFORM_PARALLAXPARAMS2, params );
 }
 
 // codmod: bind the flashlight shadow mask (shares the AO texture unit) and flag it for the dlight shaders
@@ -997,7 +1001,7 @@ static void ForwardDlight( void ) {
 			GLSL_SetUniformVec4(sp, UNIFORM_ENABLETEXTURES, enableTextures);
 		}
 
-		SetParallaxUniform(sp);
+		SetParallaxUniform(sp, pStage);
 
 		if (r_dlightMode->integer >= 2)
 			GL_BindToTMU(tr.shadowCubemaps[l], TB_SHADOWMAP);
@@ -1750,7 +1754,7 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 
 			GLSL_SetUniformVec4(sp, UNIFORM_ENABLETEXTURES, enableTextures);
 
-			SetParallaxUniform(sp);
+			SetParallaxUniform(sp, pStage);
 
 			// ambient only AO: opaque stages of the main view
 			{

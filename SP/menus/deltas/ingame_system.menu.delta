@@ -195,11 +195,20 @@
 =ui/ingame_system.menu 53 54
 +		name effects
 =ui/ingame_system.menu 94 96
-+		text "Parallax Mapping:"
-+		cvar "r_parallaxMapping"
-+		cvarFloatList { "Off" 0 "On" 2 }
++		text "Normal Maps:"
++		cvar "r_normalMapping"
++		cvarFloatList { "Off" 0 "On" 1 }
 =ui/controls.menu 891 895
 =ui/ingame_system.menu 130 135
 =ui/ingame_system.menu 489 492
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Parallax Mapping:"
++		cvar "r_parallaxMapping"
++		cvarFloatList { "Off" 0 "On" 2 "On + Self-Shadows" 3 }
++		rect 82 260 290 12
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
 @@ 593 594
 +		rect 181 170 100 20

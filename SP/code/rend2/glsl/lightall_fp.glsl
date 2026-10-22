@@ -80,10 +80,18 @@ varying vec4      var_PrimaryLightDir;
 // depth prepass and the DEPTHFUNC_EQUAL passes keep working).
 // x = max linear steps, y = fade distance (<= 0: no fade), z = floor depth scale, w = cavity strength
 uniform vec4 u_ParallaxParams;
+// phase 2: x = stage max depth (0..1], y = steps per height texel (<= 0: legacy angle-only steps),
+// z = march LOD floor (< 0: legacy textureGrad march), w = shadow fade end as a fraction of the fade distance (0 = off)
+uniform vec4 u_ParallaxParams2;
 
 // derivatives of the undisplaced coordinates, computed once in uniform flow before any branch
 vec2 pomDx;
 vec2 pomDy;
+// footprint data for the march (GLSL >= 130): normal map size, LOD for the march fetches (< 0: use textureGrad)
+// and LOD used to count steps
+vec2 pomTexSize = vec2(1.0);
+float pomMarchLod = -1.0;
+float pomStepLod = 0.0;
 
   #if __VERSION__ >= 130
     #define POM_FETCH(s, t) textureGrad(s, t, pomDx, pomDy)
@@ -101,9 +109,23 @@ float SampleDepth(vec2 t)
   #endif
 }
 
+// height fetch used by the marches: a fixed LOD when enabled (no implicit derivatives, safe in divergent flow)
+float SampleDepthMarch(vec2 t)
+{
+  #if __VERSION__ >= 130
+	if (pomMarchLod >= 0.0)
+	  #if defined(SWIZZLE_NORMALMAP)
+		return 1.0 - textureLod(u_NormalMap, t, pomMarchLod).r;
+	  #else
+		return 1.0 - textureLod(u_NormalMap, t, pomMarchLod).a;
+	  #endif
+  #endif
+	return SampleDepth(t);
+}
+
 // Linear search for the first sample below the surface, then binary refinement and a final secant step.
 // Returns the depth fraction (0..1) along ds.
-float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF)
+float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF, float span)
 {
   #if defined(USE_RELIEFMAP)
 	const int refineSteps = 4;
@@ -115,12 +137,13 @@ float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF)
 	uv0 -= ds * r_parallaxMapOffset;
 
 	// top plateau: nothing recessed here, no march
-	float prevS = SampleDepth(uv0);
+	float prevS = SampleDepthMarch(uv0);
 	if (prevS <= 1.0 / 255.0)
 		return 0.0;
 
+	// the search only spans [0, span] of the depth range (span = the texture's own max depth); d keeps its units
 	int numSteps = int(stepsF);
-	float size = 1.0 / float(numSteps);
+	float size = span / float(numSteps);
 
 	float prevD = 0.0;
 	float d = 0.0;
@@ -134,7 +157,7 @@ float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF)
 
 		d += size;
 
-		float s = SampleDepth(uv0 + ds * d);
+		float s = SampleDepthMarch(uv0 + ds * d);
 		if (d >= s)
 		{
 			hit = true;
@@ -147,7 +170,7 @@ float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF)
 	}
 
 	if (!hit)
-		return 1.0;
+		return span;
 
 	float lo = prevD;
 	float hi = d;
@@ -157,7 +180,7 @@ float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF)
 	for (int i = 0; i < refineSteps; ++i)
 	{
 		float mid = 0.5 * (lo + hi);
-		float midS = SampleDepth(uv0 + ds * mid);
+		float midS = SampleDepthMarch(uv0 + ds * mid);
 		if (mid >= midS)
 		{
 			hi = mid;
@@ -187,6 +210,15 @@ float ParallaxSoftShadow(vec2 uv, vec3 lightTS, float scale, int numSteps, float
 
 	vec2 ds = lightTS.xy * scale / max(lightTS.z, 0.25);
 	float size = 1.0 / float(numSteps);
+  #if __VERSION__ >= 130
+	if (u_ParallaxParams2.y > 0.0)
+	{
+		// steps follow the texel footprint of the shift over the shadow height range; numSteps is the cap
+		float n = clamp(length(ds * pomTexSize) * startDepth * exp2(-pomStepLod) * u_ParallaxParams2.y, 3.0, float(numSteps));
+		numSteps = int(n);
+		size = startDepth / float(numSteps);
+	}
+  #endif
 	float shadow = 1.0;
 	float height = 0.0;
 
@@ -201,7 +233,7 @@ float ParallaxSoftShadow(vec2 uv, vec3 lightTS, float scale, int numSteps, float
 			break;
 
 		// positive when the surface at this point is above the ray
-		float occ = (startDepth - height) - SampleDepth(uv + ds * height);
+		float occ = (startDepth - height) - SampleDepthMarch(uv + ds * height);
 		shadow = min(shadow, 1.0 - clamp(occ * 6.0 / height, 0.0, 1.0));
 	}
 
@@ -369,7 +401,26 @@ void main()
 #else
 	pomDx = dFdx(texCoords);
 	pomDy = dFdy(texCoords);
+  #if __VERSION__ >= 130
+	{
+		// texel footprint of the pixel on the normal map (uniform flow): minor/major axis LODs
+		pomTexSize = vec2(textureSize(u_NormalMap, 0));
+		float fpX = length(pomDx * pomTexSize);
+		float fpY = length(pomDy * pomTexSize);
+		float lodMin = log2(max(min(fpX, fpY), 1.0));
+		float lodMax = log2(max(max(fpX, fpY), 1.0));
+		float lodAvg = 0.5 * (lodMin + lodMax);
+		if (u_ParallaxParams2.z >= 0.0)
+		{
+			pomMarchLod = max(lodAvg, u_ParallaxParams2.z);
+			pomStepLod = pomMarchLod;
+		}
+		else
+			pomStepLod = lodAvg;
+	}
+  #endif
 
+	float pomShadowFade = 1.0; // distance fade of the parallax self shadows
 	float pomScale = 0.0;
 	float pomCavity = 1.0;
 	float pomStartDepth = -1.0; // SampleDepth at the displaced point, fetched at most once
@@ -386,6 +437,11 @@ void main()
 		// fade the depth out toward grazing angles, where the march is least reliable
 		float fade = distFade * smoothstep(0.0, 0.15, tv.z);
 		// shaders shared between floors and walls: floors get shallower depth
+		if (u_ParallaxParams2.w > 0.0 && u_ParallaxParams.y > 0.0)
+		{
+			float shEnd = u_ParallaxParams2.w * u_ParallaxParams.y;
+			pomShadowFade = 1.0 - smoothstep(0.5 * shEnd, shEnd, length(viewDir));
+		}
 		float floorMix = mix(1.0, u_ParallaxParams.z, abs(surfNormal.z));
 		pomScale = u_NormalScale.a * floorMix * fade;
 	  #if defined(USE_LIGHT_VECTOR) && defined(USE_LIGHT) && !defined(USE_FAST_LIGHT)
@@ -400,7 +456,12 @@ void main()
 			float maxSteps = clamp(u_ParallaxParams.x * pomStepFactor, 8.0, 128.0);
 			float steps = mix(maxSteps, max(8.0, maxSteps * 0.25), clamp(tv.z, 0.0, 1.0));
 			vec2 ds = -tv.xy * pomScale / max(tv.z, 0.25);
-			float pomD = ParallaxMarch(texCoords, ds, steps);
+			float pomSpan = (u_ParallaxParams2.x > 0.0) ? min(u_ParallaxParams2.x, 1.0) : 1.0;
+		  #if __VERSION__ >= 130
+			if (u_ParallaxParams2.y > 0.0)
+				steps = clamp(length(ds * pomTexSize) * pomSpan * exp2(-pomStepLod) * u_ParallaxParams2.y, 4.0, steps);
+		  #endif
+			float pomD = ParallaxMarch(texCoords, ds, steps, pomSpan);
 			texCoords += ds * (pomD - r_parallaxMapOffset);
 			pomCavity = 1.0 - clamp(u_ParallaxParams.w, 0.0, 1.0) * pomD * distFade;
 		}
@@ -471,9 +532,9 @@ void main()
 	if (pomScale > 0.0005)
 	{
 	  #if defined(USE_LIGHT_VECTOR)
-		float pomShadowW = 1.0;
+		float pomShadowW = pomShadowFade;
 	  #else
-		float pomShadowW = lightDirectional;
+		float pomShadowW = lightDirectional * pomShadowFade;
 	  #endif
 		if (pomShadowW > 0.05)
 		{
@@ -653,11 +714,11 @@ void main()
 	//lightColor *= CalcLightAttenuation(float(u_PrimaryLightDir.w > 0.0), u_PrimaryLightDir.w / sqrLightDist);
 
   #if defined(USE_PARALLAXMAP) && defined(USE_PARALLAXMAP_SHADOWS) && defined(USE_PARALLAXMAP_SUNSHADOWS)
-	if (pomScale > 0.0005)
+	if (pomScale > 0.0005 && pomShadowFade > 0.0)
 	{
 		if (pomStartDepth < 0.0)
 			pomStartDepth = SampleDepth(texCoords);
-		lightColor *= ParallaxSoftShadow(texCoords, L2 * tangentToWorld, pomScale, int(clamp(u_ParallaxParams.x * 0.4 * pomStepFactor, 8.0, 24.0)), pomStartDepth);
+		lightColor *= mix(1.0, ParallaxSoftShadow(texCoords, L2 * tangentToWorld, pomScale, int(clamp(u_ParallaxParams.x * 0.4 * pomStepFactor, 8.0, 24.0)), pomStartDepth), pomShadowFade);
 	}
   #endif
 

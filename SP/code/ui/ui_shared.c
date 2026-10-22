@@ -2421,6 +2421,16 @@ int Item_Multi_CountSettings( itemDef_t *item ) {
 	return multiPtr->count;
 }
 
+// Parallax Mapping row: one level (0 off, 2 on, 3 on + self-shadows) shown from the two rend2 cvars
+// r_parallaxMapping / r_parallaxMapShadows. Other multi rows read their cvar directly.
+static float Item_Multi_CvarValue( itemDef_t *item ) {
+	float value = DC->getCVarValue( item->cvar );
+	if ( !Q_stricmp( item->cvar, "r_parallaxMapping" ) && value != 0 ) {
+		return ( (int)DC->getCVarValue( "r_parallaxMapShadows" ) & 1 ) ? 3 : 2;
+	}
+	return value;
+}
+
 int Item_Multi_FindCvarByValue( itemDef_t *item ) {
 	char buff[1024];
 	float value = 0;
@@ -2430,7 +2440,7 @@ int Item_Multi_FindCvarByValue( itemDef_t *item ) {
 		if ( multiPtr->strDef ) {
 			DC->getCVarString( item->cvar, buff, sizeof( buff ) );
 		} else {
-			value = DC->getCVarValue( item->cvar );
+			value = Item_Multi_CvarValue( item );
 		}
 		for ( i = 0; i < multiPtr->count; i++ ) {
 			if ( multiPtr->strDef ) {
@@ -2478,7 +2488,7 @@ const char *Item_Multi_Setting( itemDef_t *item ) {
 		if ( multiPtr->strDef ) {
 			DC->getCVarString( item->cvar, buff, sizeof( buff ) );
 		} else {
-			value = DC->getCVarValue( item->cvar );
+			value = Item_Multi_CvarValue( item );
 		}
 		for ( i = 0; i < multiPtr->count; i++ ) {
 			if ( multiPtr->strDef ) {
@@ -2524,18 +2534,28 @@ qboolean Item_Multi_HandleKey( itemDef_t *item, int key ) {
 					DC->setCVar( item->cvar, multiPtr->cvarStr[current] );
 				} else {
 					float value = multiPtr->cvarValue[current];
+					// Parallax Mapping row: level 3 = parallax 2 + self-shadows
+					if ( !Q_stricmp( item->cvar, "r_parallaxMapping" ) && value == 3 ) {
+						value = 2;
+					}
 					if ( ( (float)( (int) value ) ) == value ) {
 						DC->setCVar( item->cvar, va( "%i", (int) value ) );
 					} else {
 						DC->setCVar( item->cvar, va( "%f", value ) );
 					}
 				}
-				// Parallax Mapping row: one toggle drives the grouped rend2 cvars (all CVAR_LATCH, applied by Apply).
-				if ( !Q_stricmp( item->cvar, "r_parallaxMapping" ) && !multiPtr->strDef ) {
-					int on = ( multiPtr->cvarValue[current] != 0 );
-					DC->setCVar( "r_parallaxMapShadows", on ? "1" : "0" );
-					if ( on ) {
-						DC->setCVar( "r_normalMapping", "1" );
+				// Grouped rend2 cvars (all CVAR_LATCH, applied by Apply). Parallax needs normal maps (USE_PARALLAXMAP
+				// compiles only with r_normalMapping on), so parallax on forces them on and normal maps off clears parallax.
+				if ( !multiPtr->strDef ) {
+					if ( !Q_stricmp( item->cvar, "r_parallaxMapping" ) ) {
+						int level = (int)multiPtr->cvarValue[current];
+						DC->setCVar( "r_parallaxMapShadows", level == 3 ? "1" : "0" );
+						if ( level != 0 ) {
+							DC->setCVar( "r_normalMapping", "1" );
+						}
+					} else if ( !Q_stricmp( item->cvar, "r_normalMapping" ) && multiPtr->cvarValue[current] == 0 ) {
+						DC->setCVar( "r_parallaxMapping", "0" );
+						DC->setCVar( "r_parallaxMapShadows", "0" );
 					}
 				}
 				return qtrue;

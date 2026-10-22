@@ -443,6 +443,7 @@ typedef struct {
 	acff_t			adjustColorsForFog;
 
 	qboolean		isDetail;
+	float			parallaxMaxDepth;	// codmod: normalheight image height range (0..1], 1 = unknown
 
 	// Ridah
 	float zFadeBounds[2];
@@ -826,6 +827,7 @@ typedef enum
 	UNIFORM_AOPARAMS, // x = 1 when the lightall AO map is valid for this draw
 	UNIFORM_SSAOMIPS, // x = deepest depth mip GTAO may use (0 = off), y = mip offset in log2 pixels
 	UNIFORM_PARALLAXPARAMS, // x = max steps, y = fade distance, z = floor depth scale, w = cavity strength
+	UNIFORM_PARALLAXPARAMS2, // x = stage max depth, y = step density, z = march min LOD, w = shadow fade fraction
 
 	UNIFORM_COUNT
 } uniform_t;
@@ -2112,6 +2114,9 @@ extern  cvar_t  *r_parallaxMapOffset;
 extern  cvar_t  *r_parallaxMapShadows;
 extern  cvar_t  *r_parallaxMinDepth;
 extern  cvar_t  *r_parallaxMaxSteps;
+extern  cvar_t  *r_parallaxStepDensity;
+extern  cvar_t  *r_parallaxMarchLod;
+extern  cvar_t  *r_parallaxShadowFade;
 extern  cvar_t  *r_parallaxFadeDist;
 extern  cvar_t  *r_parallaxFloorScale;
 extern  cvar_t  *r_parallaxCavity;
