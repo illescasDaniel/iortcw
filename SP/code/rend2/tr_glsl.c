@@ -180,6 +180,7 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_AoMap", GLSL_INT },
 	{ "u_AoParams", GLSL_VEC4 },
 	{ "u_SsaoMips", GLSL_VEC2 },
+	{ "u_ParallaxParams", GLSL_VEC4 },
 };
 
 typedef enum

@@ -186,6 +186,10 @@ cvar_t  *r_deluxeMapping;
 cvar_t  *r_parallaxMapping;
 cvar_t  *r_parallaxMapOffset;
 cvar_t  *r_parallaxMapShadows;
+cvar_t  *r_parallaxMaxSteps;
+cvar_t  *r_parallaxFadeDist;
+cvar_t  *r_parallaxFloorScale;
+cvar_t  *r_parallaxCavity;
 cvar_t  *r_cubeMapping;
 cvar_t  *r_cubemapSize;
 cvar_t  *r_deluxeSpecular;
@@ -1564,6 +1568,11 @@ void R_Register( void ) {
 	r_parallaxMapping = ri.Cvar_Get( "r_parallaxMapping", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_parallaxMapOffset = ri.Cvar_Get( "r_parallaxMapOffset", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_parallaxMapShadows = ri.Cvar_Get( "r_parallaxMapShadows", "0", CVAR_ARCHIVE | CVAR_LATCH );
+	// codmod: POM tuning, live (uniforms)
+	r_parallaxMaxSteps = ri.Cvar_Get( "r_parallaxMaxSteps", "48", 0 );
+	r_parallaxFadeDist = ri.Cvar_Get( "r_parallaxFadeDist", "1200", 0 );
+	r_parallaxFloorScale = ri.Cvar_Get( "r_parallaxFloorScale", "0.35", 0 );
+	r_parallaxCavity = ri.Cvar_Get( "r_parallaxCavity", "0.5", 0 );
 	r_cubeMapping = ri.Cvar_Get( "r_cubeMapping", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_cubemapSize = ri.Cvar_Get( "r_cubemapSize", "128", CVAR_ARCHIVE | CVAR_LATCH );
 	r_deluxeSpecular = ri.Cvar_Get( "r_deluxeSpecular", "0.1", CVAR_ARCHIVE | CVAR_LATCH );

@@ -3,7 +3,6 @@
 #src ui/credit.menu sha256=81fe8de5ee0a324483378209b9a9f3f64697f1cce563d1dad60bfdc5eee77b1e
 #src ui/ingame_system.menu sha256=f652269329ca270062eb23c24696bd61dbcb4b20d29518d6dd872fb60a661491
 #src ui/options.menu sha256=b33b7f4a1186399f52986fa9e56f200bf8c2e516433cb394645186569a035c1b
-#src ui/quitcredit.menu sha256=200d52dc56c734070a78dfc6a961ed8d3f3ee6f1cd439d6b089572aa08e04ff6
 @@ 48 49
 +	rect 6 10 84 12
 @@ 50 51
@@ -192,4 +191,13 @@
 +		cvarFloatList { "Off" 0 "2x" 2 "4x" 4 "8x" 8 "16x" 16 }
 =ui/system.menu 368 369
 =ui/options.menu 97 104
-=ui/quitcredit.menu 405 409
+=ui/credit.menu 414 417
+=ui/system.menu 93 94
++		name effects
+=ui/system.menu 283 285
++		text "Parallax Mapping:"
++		cvar "r_parallaxMapping"
++		cvarFloatList { "Off" 0 "On" 2 }
+=ui/controls.menu 891 895
+=ui/system.menu 156 161
+=ui/system.menu 72 75

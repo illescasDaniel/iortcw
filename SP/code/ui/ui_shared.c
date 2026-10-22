@@ -2530,6 +2530,14 @@ qboolean Item_Multi_HandleKey( itemDef_t *item, int key ) {
 						DC->setCVar( item->cvar, va( "%f", value ) );
 					}
 				}
+				// Parallax Mapping row: one toggle drives the grouped rend2 cvars (all CVAR_LATCH, applied by Apply).
+				if ( !Q_stricmp( item->cvar, "r_parallaxMapping" ) && !multiPtr->strDef ) {
+					int on = ( multiPtr->cvarValue[current] != 0 );
+					DC->setCVar( "r_parallaxMapShadows", on ? "1" : "0" );
+					if ( on ) {
+						DC->setCVar( "r_normalMapping", "1" );
+					}
+				}
 				return qtrue;
 			}
 		}

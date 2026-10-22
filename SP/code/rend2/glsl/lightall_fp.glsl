@@ -76,108 +76,119 @@ varying vec4      var_PrimaryLightDir;
 #define EPSILON 0.00000001
 
 #if defined(USE_PARALLAXMAP)
-float SampleDepth(sampler2D normalMap, vec2 t)
+// codmod: parallax occlusion mapping. No gl_FragDepth writes (the depth buffer stays flat so early-Z, the
+// depth prepass and the DEPTHFUNC_EQUAL passes keep working).
+// x = max linear steps, y = fade distance (<= 0: no fade), z = floor depth scale, w = cavity strength
+uniform vec4 u_ParallaxParams;
+
+// derivatives of the undisplaced coordinates, computed once in uniform flow before any branch
+vec2 pomDx;
+vec2 pomDy;
+
+  #if __VERSION__ >= 130
+    #define POM_FETCH(s, t) textureGrad(s, t, pomDx, pomDy)
+  #else
+    #define POM_FETCH(s, t) texture2D(s, t)
+  #endif
+
+// 0 = top of the volume, 1 = bottom
+float SampleDepth(vec2 t)
 {
   #if defined(SWIZZLE_NORMALMAP)
-	return 1.0 - texture2D(normalMap, t).r;
+	return 1.0 - POM_FETCH(u_NormalMap, t).r;
   #else
-	return 1.0 - texture2D(normalMap, t).a;
+	return 1.0 - POM_FETCH(u_NormalMap, t).a;
   #endif
 }
 
-float RayIntersectDisplaceMap(vec2 dp, vec2 ds, sampler2D normalMap)
+// Linear search for the first sample below the surface, then binary refinement and a final secant step.
+// Returns the depth fraction (0..1) along ds.
+float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF)
 {
-	const int linearSearchSteps = 16;
-	const int binarySearchSteps = 6;
-
-	// current size of search window
-	float size = 1.0 / float(linearSearchSteps);
+  #if defined(USE_RELIEFMAP)
+	const int refineSteps = 8;
+  #else
+	const int refineSteps = 3;
+  #endif
 
 	// adjust position if offset above surface
-	dp -= ds * r_parallaxMapOffset;
+	uv0 -= ds * r_parallaxMapOffset;
 
-	// current depth position
-	float depth = 0.0;
+	int numSteps = int(stepsF);
+	float size = 1.0 / float(numSteps);
 
-	// best match found (starts with last position 1.0)
-	float bestDepth = 1.0;
+	float prevD = 0.0;
+	float d = 0.0;
+	bool hit = false;
 
-	// texture depth at best depth
-	float texDepth = 0.0;
-
-	float prevT = SampleDepth(normalMap, dp);
-	float prevTexDepth = prevT;
-
-	// search front to back for first point inside object
-	for(int i = 0; i < linearSearchSteps - 1; ++i)
+	for (int i = 0; i < 128; ++i)
 	{
-		depth += size;
-		
-		float t = SampleDepth(normalMap, dp + ds * depth);
-		
-		if(bestDepth > 0.996)		// if no depth found yet
-			if(depth >= t)
-			{
-				bestDepth = depth;	// store best depth
-				texDepth = t;
-				prevTexDepth = prevT;
-			}
-		prevT = t;
-	}
+		if (i >= numSteps)
+			break;
 
-	depth = bestDepth;
+		d += size;
 
-#if !defined (USE_RELIEFMAP)
-	float div = 1.0 / (1.0 + (prevTexDepth - texDepth) * float(linearSearchSteps));
-	bestDepth -= (depth - size - prevTexDepth) * div;
-#else
-	// recurse around first point (depth) for closest match
-	for(int i = 0; i < binarySearchSteps; ++i)
-	{
-		size *= 0.5;
-
-		float t = SampleDepth(normalMap, dp + ds * depth);
-		
-		if(depth >= t)
+		if (d >= SampleDepth(uv0 + ds * d))
 		{
-			bestDepth = depth;
-			depth -= 2.0 * size;
+			hit = true;
+			break;
 		}
 
-		depth += size;
+		prevD = d;
 	}
-#endif
 
-	return bestDepth - r_parallaxMapOffset;
+	if (!hit)
+		return 1.0;
+
+	float lo = prevD;
+	float hi = d;
+
+	for (int i = 0; i < refineSteps; ++i)
+	{
+		float mid = 0.5 * (lo + hi);
+		if (mid >= SampleDepth(uv0 + ds * mid))
+			hi = mid;
+		else
+			lo = mid;
+	}
+
+	// secant on the narrowed bracket
+	float a = lo - SampleDepth(uv0 + ds * lo);
+	float b = hi - SampleDepth(uv0 + ds * hi);
+	float denom = a - b;
+	float t = (abs(denom) > 0.00001) ? clamp(a / denom, 0.0, 1.0) : 1.0;
+	return mix(lo, hi, t);
 }
 
-float LightRay(vec2 dp, vec2 ds, sampler2D normalMap)
+// Soft self shadow: marches from the displaced point toward the light. lightTS is the light direction in
+// tangent space, scale the same depth scale used for the view march.
+float ParallaxSoftShadow(vec2 uv, vec3 lightTS, float scale, int numSteps)
 {
-	const int linearSearchSteps = 16;
+	if (lightTS.z <= 0.05)
+		return 1.0;
 
-	// current size of search window
-	float size = 1.0 / float(linearSearchSteps);
-
-	// current height from initial texel depth
+	vec2 ds = lightTS.xy * scale / max(lightTS.z, 0.25);
+	float startDepth = SampleDepth(uv);
+	float size = 1.0 / float(numSteps);
+	float shadow = 1.0;
 	float height = 0.0;
 
-	float startDepth = SampleDepth(normalMap, dp);
-
-	// find a collision or escape
-	for(int i = 0; i < linearSearchSteps - 1; ++i)
+	for (int i = 0; i < 32; ++i)
 	{
+		if (i >= numSteps)
+			break;
+
 		height += size;
 
 		if (startDepth < height)
-			return 1.0;
-		
-		float t = SampleDepth(normalMap, dp + ds * height);
+			break;
 
-		if (startDepth > t + height)
-			return 0.0;
+		// positive when the surface at this point is above the ray
+		float occ = (startDepth - height) - SampleDepth(uv + ds * height);
+		shadow = min(shadow, 1.0 - clamp(occ * 6.0 / height, 0.0, 1.0));
 	}
 
-	return 1.0;
+	return shadow;
 }
 #endif
 
@@ -312,15 +323,44 @@ void main()
 
 	vec2 texCoords = var_TexCoords.xy;
 
-#if defined(USE_PARALLAXMAP)
-	vec3 offsetDir = E * tangentToWorld;
+#if !defined(USE_PARALLAXMAP)
+	#define POM_FETCH(s, t) texture2D(s, t)
+#else
+	pomDx = dFdx(texCoords);
+	pomDy = dFdy(texCoords);
 
-	offsetDir.xy *= -u_NormalScale.a / offsetDir.z;
+	float pomScale = 0.0;
+	float pomCavity = 1.0;
+  #if defined(USE_LIGHT_VECTOR)
+	const float pomStepFactor = 0.5;
+  #else
+	const float pomStepFactor = 1.0;
+  #endif
+	{
+		vec3 tv = E * tangentToWorld;
+		float distFade = (u_ParallaxParams.y > 0.0)
+			? 1.0 - smoothstep(u_ParallaxParams.y * 0.6, u_ParallaxParams.y, length(viewDir))
+			: 1.0;
+		// fade the depth out toward grazing angles, where the march is least reliable
+		float fade = distFade * smoothstep(0.0, 0.15, tv.z);
+		// shaders shared between floors and walls: floors get shallower depth
+		float floorMix = mix(1.0, u_ParallaxParams.z, abs(surfNormal.z));
+		pomScale = u_NormalScale.a * floorMix * fade;
 
-	texCoords += offsetDir.xy * RayIntersectDisplaceMap(texCoords, offsetDir.xy, u_NormalMap);
+		if (pomScale > 0.0005)
+		{
+			// more steps at grazing angles, fewer face-on
+			float maxSteps = clamp(u_ParallaxParams.x * pomStepFactor, 8.0, 128.0);
+			float steps = mix(maxSteps, max(8.0, maxSteps * 0.25), clamp(tv.z, 0.0, 1.0));
+			vec2 ds = -tv.xy * pomScale / max(tv.z, 0.25);
+			float pomD = ParallaxMarch(texCoords, ds, steps);
+			texCoords += ds * (pomD - r_parallaxMapOffset);
+			pomCavity = 1.0 - clamp(u_ParallaxParams.w, 0.0, 1.0) * pomD * distFade;
+		}
+	}
 #endif
 
-	vec4 diffuse = texture2D(u_DiffuseMap, texCoords);
+	vec4 diffuse = POM_FETCH(u_DiffuseMap, texCoords);
 	
 	float alpha = diffuse.a * var_Color.a;
 	if (u_AlphaTest == 1)
@@ -362,9 +402,9 @@ void main()
 
   #if defined(USE_NORMALMAP)
     #if defined(SWIZZLE_NORMALMAP)
-	N.xy = texture2D(u_NormalMap, texCoords).ag - vec2(0.5);
+	N.xy = POM_FETCH(u_NormalMap, texCoords).ag - vec2(0.5);
     #else
-	N.xy = texture2D(u_NormalMap, texCoords).rg - vec2(0.5);
+	N.xy = POM_FETCH(u_NormalMap, texCoords).rg - vec2(0.5);
     #endif
 	N.xy *= u_NormalScale.xy;
 	N.z = sqrt(clamp((0.25 - N.x * N.x) - N.y * N.y, 0.0, 1.0));
@@ -394,9 +434,20 @@ void main()
   #endif
 
   #if defined(USE_PARALLAXMAP) && defined(USE_PARALLAXMAP_SHADOWS)
-	offsetDir = L * tangentToWorld;
-	offsetDir.xy *= u_NormalScale.a / offsetDir.z;
-	lightColor *= LightRay(texCoords, offsetDir.xy, u_NormalMap);
+	// flashlight / dlight, or the baked light direction when it is a real one (|L| ~ 0.25 means no direction)
+	if (pomScale > 0.0005)
+	{
+	  #if defined(USE_LIGHT_VECTOR)
+		float pomShadowW = 1.0;
+	  #else
+		float pomShadowW = lightDirectional;
+	  #endif
+		if (pomShadowW > 0.0)
+		{
+			int shadowSteps = int(clamp(u_ParallaxParams.x * 0.4 * pomStepFactor, 8.0, 24.0));
+			attenuation *= mix(1.0, ParallaxSoftShadow(texCoords, L * tangentToWorld, pomScale, shadowSteps), pomShadowW);
+		}
+	}
   #endif
 
 
@@ -418,6 +469,11 @@ void main()
 	ambientColor = var_ColorAmbient.rgb * aoValue;
   #endif
 
+  #if defined(USE_PARALLAXMAP)
+	// cheap cavity darkening: recessed texels get less ambient
+	ambientColor *= pomCavity;
+  #endif
+
 	NL = clamp(dot(N, L), 0.0, 1.0);
 	NE = clamp(dot(N, E), 0.0, 1.0);
 	H = normalize(L + E);
@@ -426,7 +482,7 @@ void main()
 
   #if defined(USE_SPECULARMAP)
 	// codmod: uniform branch, surfaces without a spec map skip the fetch (white image * scale otherwise)
-	vec4 specular = (u_EnableTextures.z > 0.0) ? texture2D(u_SpecularMap, texCoords) : vec4(1.0);
+	vec4 specular = (u_EnableTextures.z > 0.0) ? POM_FETCH(u_SpecularMap, texCoords) : vec4(1.0);
   #else
 	vec4 specular = vec4(1.0);
   #endif
@@ -562,9 +618,8 @@ void main()
 	//lightColor *= CalcLightAttenuation(float(u_PrimaryLightDir.w > 0.0), u_PrimaryLightDir.w / sqrLightDist);
 
   #if defined(USE_PARALLAXMAP) && defined(USE_PARALLAXMAP_SHADOWS)
-	offsetDir = L2 * tangentToWorld;
-	offsetDir.xy *= u_NormalScale.a / offsetDir.z;
-	lightColor *= LightRay(texCoords, offsetDir.xy, u_NormalMap);
+	if (pomScale > 0.0005)
+		lightColor *= ParallaxSoftShadow(texCoords, L2 * tangentToWorld, pomScale, int(clamp(u_ParallaxParams.x * 0.4 * pomStepFactor, 8.0, 24.0)));
   #endif
 
 	gl_FragColor.rgb += lightColor * reflectance * NL2;

@@ -823,6 +823,7 @@ typedef enum
 	UNIFORM_AOMAP,
 	UNIFORM_AOPARAMS, // x = 1 when the lightall AO map is valid for this draw
 	UNIFORM_SSAOMIPS, // x = deepest depth mip GTAO may use (0 = off), y = mip offset in log2 pixels
+	UNIFORM_PARALLAXPARAMS, // x = max steps, y = fade distance, z = floor depth scale, w = cavity strength
 
 	UNIFORM_COUNT
 } uniform_t;
@@ -2107,6 +2108,10 @@ extern  cvar_t  *r_deluxeMapping;
 extern  cvar_t  *r_parallaxMapping;
 extern  cvar_t  *r_parallaxMapOffset;
 extern  cvar_t  *r_parallaxMapShadows;
+extern  cvar_t  *r_parallaxMaxSteps;
+extern  cvar_t  *r_parallaxFadeDist;
+extern  cvar_t  *r_parallaxFloorScale;
+extern  cvar_t  *r_parallaxCavity;
 extern  cvar_t  *r_cubeMapping;
 extern  cvar_t  *r_cubemapSize;
 extern  cvar_t  *r_deluxeSpecular;

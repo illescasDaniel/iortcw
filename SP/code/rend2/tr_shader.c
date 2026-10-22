@@ -2593,6 +2593,28 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 	qboolean useLightVector, qboolean useLightVertex, qboolean parallax, qboolean tcgen)
 {
 	int defs = 0;
+	qboolean parallaxOK = qfalse;
+	float parallaxTcScale = 1.0f;
+	int tm;
+
+	// codmod: parallax only on opaque stages with plain texture coordinates. Alpha-tested stages would
+	// shift their alpha away from the depth prepass (holes in grates), and rotate/turb/non-texture tcGen
+	// make the tangent-space shift swim.
+	if (parallax && r_parallaxMapping->integer)
+	{
+		parallaxOK = !(diffuse->stateBits & GLS_ATEST_BITS) && diffuse->bundle[0].tcGen == TCGEN_TEXTURE;
+		for (tm = 0; parallaxOK && tm < diffuse->bundle[0].numTexMods; tm++)
+		{
+			const texModInfo_t *tmi = &diffuse->bundle[0].texMods[tm];
+
+			if (tmi->type == TMOD_ROTATE || tmi->type == TMOD_TURBULENT)
+				parallaxOK = qfalse;
+			else if (tmi->type == TMOD_SCALE)
+				parallaxTcScale *= (tmi->scale[0] + tmi->scale[1]) * 0.5f;
+		}
+		if (parallaxTcScale <= 0.0f)
+			parallaxTcScale = 1.0f;
+	}
 
 	//ri.Printf(PRINT_ALL, "shader %s has diffuse %s", shader.name, diffuse->bundle[0].image[0]->imgName);
 
@@ -2621,17 +2643,24 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 		diffuse->bundle[TB_DELUXEMAP].image[0] = tr.deluxemaps[shader.lightmapIndex];
 	}
 
-	if (r_normalMapping->integer)
+	// codmod: with parallax on, an auto-discovered _nh image is usable even with r_normalMapping 0
+	if (r_normalMapping->integer || r_parallaxMapping->integer)
 	{
 		image_t *diffuseImg;
-		if (normal)
+		if (normal && !r_normalMapping->integer)
+		{
+			// explicit normal maps still need r_normalMapping
+		}
+		else if (normal)
 		{
 			//ri.Printf(PRINT_ALL, ", normalmap %s", normal->bundle[0].image[0]->imgName);
 			diffuse->bundle[TB_NORMALMAP] = normal->bundle[0];
-			if (parallax && r_parallaxMapping->integer)
+			if (parallaxOK)
 				defs |= LIGHTDEF_USE_PARALLAXMAP;
 
 			VectorCopy4(normal->normalScale, diffuse->normalScale);
+			if (parallaxOK)
+				diffuse->normalScale[3] *= parallaxTcScale;
 		}
 		else if ((lightmap || useLightVector || useLightVertex) && (diffuseImg = diffuse->bundle[TB_DIFFUSEMAP].image[0]))
 		{
@@ -2647,14 +2676,28 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 
 			if (normalImg)
 			{
-				parallax = qtrue;
+				if (r_parallaxMapping->integer)
+					parallaxOK = !(diffuse->stateBits & GLS_ATEST_BITS) && diffuse->bundle[0].tcGen == TCGEN_TEXTURE;
+				for (tm = 0; parallaxOK && tm < diffuse->bundle[0].numTexMods; tm++)
+				{
+					const texModInfo_t *tmi = &diffuse->bundle[0].texMods[tm];
+
+					if (tmi->type == TMOD_ROTATE || tmi->type == TMOD_TURBULENT)
+						parallaxOK = qfalse;
+					else if (tmi->type == TMOD_SCALE && tmi->scale[0] + tmi->scale[1] > 0.0f)
+						parallaxTcScale *= (tmi->scale[0] + tmi->scale[1]) * 0.5f;
+				}
 			}
-			else
+			else if (r_normalMapping->integer)
 			{
 				// try a normal image ("_n" suffix)
 				normalName[strlen(normalName) - 1] = '\0';
 				normalImg = R_FindImageFile(normalName, IMGTYPE_NORMAL, normalFlags);
 			}
+
+			// without r_normalMapping the _nh image is only usable for parallax
+			if (normalImg && !r_normalMapping->integer && !parallaxOK)
+				normalImg = NULL;
 
 			if (normalImg)
 			{
@@ -2662,10 +2705,12 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 				diffuse->bundle[TB_NORMALMAP].numImageAnimations = 0;
 				diffuse->bundle[TB_NORMALMAP].image[0] = normalImg;
 
-				if (parallax && r_parallaxMapping->integer)
+				if (parallaxOK)
 					defs |= LIGHTDEF_USE_PARALLAXMAP;
 
 				VectorSet4(diffuse->normalScale, r_baseNormalX->value, r_baseNormalY->value, 1.0f, r_baseParallax->value);
+				if (parallaxOK)
+					diffuse->normalScale[3] *= parallaxTcScale;
 			}
 		}
 	}
