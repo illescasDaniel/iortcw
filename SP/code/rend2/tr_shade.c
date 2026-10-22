@@ -993,7 +993,7 @@ static void ForwardDlight( void ) {
 			// codmod: a stage with a specular map must sample it here too. The shader scales diffuse by
 			// (1 - specular), and without the map specular reads as white * specularScale (1 for auto-found
 			// _s maps), which zeroes the albedo: props/doors/metal with a _s map got no flashlight light.
-			VectorSet4(enableTextures, 0.0f, 0.0f, pStage->bundle[TB_SPECULARMAP].image[0] ? 1.0f : 0.0f, 0.0f);
+			VectorSet4(enableTextures, pStage->bundle[TB_NORMALMAP].image[0] ? 1.0f : 0.0f, 0.0f, pStage->bundle[TB_SPECULARMAP].image[0] ? 1.0f : 0.0f, 0.0f);
 			GLSL_SetUniformVec4(sp, UNIFORM_ENABLETEXTURES, enableTextures);
 		}
 

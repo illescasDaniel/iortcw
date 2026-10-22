@@ -1172,8 +1172,11 @@ void GLSL_InitGPUShaders(void)
 					if (r_parallaxMapping->integer > 1)
 						Q_strcat(extradefines, 1024, "#define USE_RELIEFMAP\n");
 
-					if (r_parallaxMapShadows->integer)
+					if (r_parallaxMapShadows->integer & 1)
 						Q_strcat(extradefines, 1024, "#define USE_PARALLAXMAP_SHADOWS\n");
+
+					if ((r_parallaxMapShadows->integer & 2) || ((r_parallaxMapShadows->integer & 1) && r_sunlightMode->integer == 2))
+						Q_strcat(extradefines, 1024, "#define USE_PARALLAXMAP_SUNSHADOWS\n");
 
 					Q_strcat(extradefines, 1024, va("#define r_parallaxMapOffset %f\n", r_parallaxMapOffset->value));
 				}

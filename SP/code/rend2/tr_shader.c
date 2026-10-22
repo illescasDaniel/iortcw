@@ -2643,7 +2643,8 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 		diffuse->bundle[TB_DELUXEMAP].image[0] = tr.deluxemaps[shader.lightmapIndex];
 	}
 
-	// codmod: with parallax on, an auto-discovered _nh image is usable even with r_normalMapping 0
+	// codmod: an auto-discovered _nh image is usable for parallax even with r_normalMapping 0 here, but
+	// USE_PARALLAXMAP only compiles inside the r_normalMapping block (tr_glsl.c), so parallax needs r_normalMapping 1
 	if (r_normalMapping->integer || r_parallaxMapping->integer)
 	{
 		image_t *diffuseImg;
@@ -2655,6 +2656,8 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 		{
 			//ri.Printf(PRINT_ALL, ", normalmap %s", normal->bundle[0].image[0]->imgName);
 			diffuse->bundle[TB_NORMALMAP] = normal->bundle[0];
+			if (parallaxOK && normal->bundle[0].image[0] && normal->bundle[0].image[0]->heightMaxDepth < r_parallaxMinDepth->value)
+				parallaxOK = qfalse;
 			if (parallaxOK)
 				defs |= LIGHTDEF_USE_PARALLAXMAP;
 
@@ -2687,6 +2690,8 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 					else if (tmi->type == TMOD_SCALE && tmi->scale[0] + tmi->scale[1] > 0.0f)
 						parallaxTcScale *= (tmi->scale[0] + tmi->scale[1]) * 0.5f;
 				}
+				if (parallaxOK && normalImg->heightMaxDepth < r_parallaxMinDepth->value)
+					parallaxOK = qfalse;
 			}
 			else if (r_normalMapping->integer)
 			{

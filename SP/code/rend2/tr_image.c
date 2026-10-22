@@ -2205,6 +2205,21 @@ image_t *R_CreateImageExt2( const char *name, byte *pic, int width, int height, 
 
 	image->type = type;
 	image->flags = flags;
+	image->heightMaxDepth = 1.0f;
+
+	// codmod: true depth range of a normalheight alpha channel (mip 0, before resample), used to drop flat height maps
+	if (type == IMGTYPE_NORMALHEIGHT && rgba8 && !cubemap && pic)
+	{
+		int p, np = width * height;
+		int minAlpha = 255;
+
+		for (p = 0; p < np && minAlpha > 0; p++)
+		{
+			if (pic[p * 4 + 3] < minAlpha)
+				minAlpha = pic[p * 4 + 3];
+		}
+		image->heightMaxDepth = (minAlpha == 255) ? 0.0f : MIN(1.0f, (255 - minAlpha + 2) / 255.0f);
+	}
 
 	strcpy (image->imgName, name);
 

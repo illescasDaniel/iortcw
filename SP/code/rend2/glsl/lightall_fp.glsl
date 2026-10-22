@@ -106,19 +106,25 @@ float SampleDepth(vec2 t)
 float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF)
 {
   #if defined(USE_RELIEFMAP)
-	const int refineSteps = 8;
+	const int refineSteps = 4;
   #else
-	const int refineSteps = 3;
+	const int refineSteps = 2;
   #endif
 
 	// adjust position if offset above surface
 	uv0 -= ds * r_parallaxMapOffset;
+
+	// top plateau: nothing recessed here, no march
+	float prevS = SampleDepth(uv0);
+	if (prevS <= 1.0 / 255.0)
+		return 0.0;
 
 	int numSteps = int(stepsF);
 	float size = 1.0 / float(numSteps);
 
 	float prevD = 0.0;
 	float d = 0.0;
+	float hitS = 0.0;
 	bool hit = false;
 
 	for (int i = 0; i < 128; ++i)
@@ -128,13 +134,16 @@ float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF)
 
 		d += size;
 
-		if (d >= SampleDepth(uv0 + ds * d))
+		float s = SampleDepth(uv0 + ds * d);
+		if (d >= s)
 		{
 			hit = true;
+			hitS = s;
 			break;
 		}
 
 		prevD = d;
+		prevS = s;
 	}
 
 	if (!hit)
@@ -142,19 +151,28 @@ float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF)
 
 	float lo = prevD;
 	float hi = d;
+	float loS = prevS;
+	float hiS = hitS;
 
 	for (int i = 0; i < refineSteps; ++i)
 	{
 		float mid = 0.5 * (lo + hi);
-		if (mid >= SampleDepth(uv0 + ds * mid))
+		float midS = SampleDepth(uv0 + ds * mid);
+		if (mid >= midS)
+		{
 			hi = mid;
+			hiS = midS;
+		}
 		else
+		{
 			lo = mid;
+			loS = midS;
+		}
 	}
 
 	// secant on the narrowed bracket
-	float a = lo - SampleDepth(uv0 + ds * lo);
-	float b = hi - SampleDepth(uv0 + ds * hi);
+	float a = lo - loS;
+	float b = hi - hiS;
 	float denom = a - b;
 	float t = (abs(denom) > 0.00001) ? clamp(a / denom, 0.0, 1.0) : 1.0;
 	return mix(lo, hi, t);
@@ -162,13 +180,12 @@ float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF)
 
 // Soft self shadow: marches from the displaced point toward the light. lightTS is the light direction in
 // tangent space, scale the same depth scale used for the view march.
-float ParallaxSoftShadow(vec2 uv, vec3 lightTS, float scale, int numSteps)
+float ParallaxSoftShadow(vec2 uv, vec3 lightTS, float scale, int numSteps, float startDepth)
 {
 	if (lightTS.z <= 0.05)
 		return 1.0;
 
 	vec2 ds = lightTS.xy * scale / max(lightTS.z, 0.25);
-	float startDepth = SampleDepth(uv);
 	float size = 1.0 / float(numSteps);
 	float shadow = 1.0;
 	float height = 0.0;
@@ -323,6 +340,30 @@ void main()
 
 	vec2 texCoords = var_TexCoords.xy;
 
+#if defined(USE_LIGHT) && !defined(USE_FAST_LIGHT)
+	// codmod: light vector and attenuation come first so the parallax march can be skipped for unlit pixels
+	L = var_LightDir.xyz;
+  #if defined(USE_DELUXEMAP)
+	L += (texture2D(u_DeluxeMap, var_TexCoords.zw).xyz - vec3(0.5)) * u_EnableTextures.y;
+  #endif
+	float sqrLightDist = dot(L, L);
+	// codmod: |L| of the baked/grid light vector encodes directionality (tr_light.c R_LightDirForPoint):
+	// 0.25 = no real direction, 1.0 = fully directional
+	float lightDirectional = clamp((sqrt(sqrLightDist) - 0.25) * (1.0 / 0.75), 0.0, 1.0);
+	L /= sqrt(sqrLightDist);
+
+  #if defined(USE_LIGHT_VECTOR)
+	attenuation  = CalcLightAttenuation(float(var_LightDir.w > 0.0), var_LightDir.w / sqrLightDist);
+	attenuation *= CalcSpotAttenuation(-L);
+	// codmod: flashlight shadow mask
+	if (u_AoParams.y > 0.5)
+		attenuation *= texture2D(u_AoMap, gl_FragCoord.xy * r_FBufScale).r;
+  #else
+	attenuation  = 1.0;
+  #endif
+#endif
+
+
 #if !defined(USE_PARALLAXMAP)
 	#define POM_FETCH(s, t) texture2D(s, t)
 #else
@@ -331,6 +372,7 @@ void main()
 
 	float pomScale = 0.0;
 	float pomCavity = 1.0;
+	float pomStartDepth = -1.0; // SampleDepth at the displaced point, fetched at most once
   #if defined(USE_LIGHT_VECTOR)
 	const float pomStepFactor = 0.5;
   #else
@@ -346,6 +388,11 @@ void main()
 		// shaders shared between floors and walls: floors get shallower depth
 		float floorMix = mix(1.0, u_ParallaxParams.z, abs(surfNormal.z));
 		pomScale = u_NormalScale.a * floorMix * fade;
+	  #if defined(USE_LIGHT_VECTOR) && defined(USE_LIGHT) && !defined(USE_FAST_LIGHT)
+		// no dynamic light reaches this pixel: skip both marches
+		if (attenuation <= 0.0)
+			pomScale = 0.0;
+	  #endif
 
 		if (pomScale > 0.0005)
 		{
@@ -380,35 +427,21 @@ void main()
 	}
 
 #if defined(USE_LIGHT) && !defined(USE_FAST_LIGHT)
-	L = var_LightDir.xyz;
-  #if defined(USE_DELUXEMAP)
-	L += (texture2D(u_DeluxeMap, var_TexCoords.zw).xyz - vec3(0.5)) * u_EnableTextures.y;
-  #endif
-	float sqrLightDist = dot(L, L);
-	// codmod: |L| of the baked/grid light vector encodes directionality (tr_light.c R_LightDirForPoint):
-	// 0.25 = no real direction, 1.0 = fully directional
-	float lightDirectional = clamp((sqrt(sqrLightDist) - 0.25) * (1.0 / 0.75), 0.0, 1.0);
-	L /= sqrt(sqrLightDist);
-
-  #if defined(USE_LIGHT_VECTOR)
-	attenuation  = CalcLightAttenuation(float(var_LightDir.w > 0.0), var_LightDir.w / sqrLightDist);
-	attenuation *= CalcSpotAttenuation(-L);
-	// codmod: flashlight shadow mask
-	if (u_AoParams.y > 0.5)
-		attenuation *= texture2D(u_AoMap, gl_FragCoord.xy * r_FBufScale).r;
-  #else
-	attenuation  = 1.0;
-  #endif
-
   #if defined(USE_NORMALMAP)
+	// codmod: uniform branch, stages without a normal map skip the fetch
+	if (u_EnableTextures.x > 0.0)
+	{
     #if defined(SWIZZLE_NORMALMAP)
-	N.xy = POM_FETCH(u_NormalMap, texCoords).ag - vec2(0.5);
+		N.xy = POM_FETCH(u_NormalMap, texCoords).ag - vec2(0.5);
     #else
-	N.xy = POM_FETCH(u_NormalMap, texCoords).rg - vec2(0.5);
+		N.xy = POM_FETCH(u_NormalMap, texCoords).rg - vec2(0.5);
     #endif
-	N.xy *= u_NormalScale.xy;
-	N.z = sqrt(clamp((0.25 - N.x * N.x) - N.y * N.y, 0.0, 1.0));
-	N = tangentToWorld * N;
+		N.xy *= u_NormalScale.xy;
+		N.z = sqrt(clamp((0.25 - N.x * N.x) - N.y * N.y, 0.0, 1.0));
+		N = tangentToWorld * N;
+	}
+	else
+		N = surfNormal;
   #else
 	N = surfNormal;
   #endif
@@ -442,10 +475,12 @@ void main()
 	  #else
 		float pomShadowW = lightDirectional;
 	  #endif
-		if (pomShadowW > 0.0)
+		if (pomShadowW > 0.05)
 		{
 			int shadowSteps = int(clamp(u_ParallaxParams.x * 0.4 * pomStepFactor, 8.0, 24.0));
-			attenuation *= mix(1.0, ParallaxSoftShadow(texCoords, L * tangentToWorld, pomScale, shadowSteps), pomShadowW);
+			if (pomStartDepth < 0.0)
+				pomStartDepth = SampleDepth(texCoords);
+			attenuation *= mix(1.0, ParallaxSoftShadow(texCoords, L * tangentToWorld, pomScale, shadowSteps, pomStartDepth), pomShadowW);
 		}
 	}
   #endif
@@ -617,9 +652,13 @@ void main()
 	// enable when point lights are supported as primary lights
 	//lightColor *= CalcLightAttenuation(float(u_PrimaryLightDir.w > 0.0), u_PrimaryLightDir.w / sqrLightDist);
 
-  #if defined(USE_PARALLAXMAP) && defined(USE_PARALLAXMAP_SHADOWS)
+  #if defined(USE_PARALLAXMAP) && defined(USE_PARALLAXMAP_SHADOWS) && defined(USE_PARALLAXMAP_SUNSHADOWS)
 	if (pomScale > 0.0005)
-		lightColor *= ParallaxSoftShadow(texCoords, L2 * tangentToWorld, pomScale, int(clamp(u_ParallaxParams.x * 0.4 * pomStepFactor, 8.0, 24.0)));
+	{
+		if (pomStartDepth < 0.0)
+			pomStartDepth = SampleDepth(texCoords);
+		lightColor *= ParallaxSoftShadow(texCoords, L2 * tangentToWorld, pomScale, int(clamp(u_ParallaxParams.x * 0.4 * pomStepFactor, 8.0, 24.0)), pomStartDepth);
+	}
   #endif
 
 	gl_FragColor.rgb += lightColor * reflectance * NL2;

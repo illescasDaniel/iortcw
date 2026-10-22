@@ -186,6 +186,7 @@ cvar_t  *r_deluxeMapping;
 cvar_t  *r_parallaxMapping;
 cvar_t  *r_parallaxMapOffset;
 cvar_t  *r_parallaxMapShadows;
+cvar_t  *r_parallaxMinDepth;
 cvar_t  *r_parallaxMaxSteps;
 cvar_t  *r_parallaxFadeDist;
 cvar_t  *r_parallaxFloorScale;
@@ -1569,6 +1570,9 @@ void R_Register( void ) {
 	r_parallaxMapOffset = ri.Cvar_Get( "r_parallaxMapOffset", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_parallaxMapShadows = ri.Cvar_Get( "r_parallaxMapShadows", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	// codmod: POM tuning, live (uniforms)
+	// r_parallaxMapShadows is a bitmask: 1 = baked-light/dlight shadow march (+ sun when r_sunlightMode 2), 2 = sun march also in sunlightMode 1
+	// r_parallaxMinDepth: normalheight images flatter than this (see image_t.heightMaxDepth) skip parallax
+	r_parallaxMinDepth = ri.Cvar_Get( "r_parallaxMinDepth", "0.15", CVAR_LATCH );
 	r_parallaxMaxSteps = ri.Cvar_Get( "r_parallaxMaxSteps", "48", 0 );
 	r_parallaxFadeDist = ri.Cvar_Get( "r_parallaxFadeDist", "1200", 0 );
 	r_parallaxFloorScale = ri.Cvar_Get( "r_parallaxFloorScale", "0.35", 0 );

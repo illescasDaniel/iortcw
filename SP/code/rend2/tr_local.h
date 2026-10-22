@@ -131,6 +131,8 @@ typedef struct image_s {
 	imgType_t   type;
 	imgFlags_t  flags;
 
+	float heightMaxDepth;       // normalheight alpha range: 0 = flat (all 255), 1 = full range or unknown
+
 	qboolean characterMIP;      // independant 'character' mip scale ----(SA)	added
 
 	int hash;           // for fast building of the backupHash
@@ -2108,6 +2110,7 @@ extern  cvar_t  *r_deluxeMapping;
 extern  cvar_t  *r_parallaxMapping;
 extern  cvar_t  *r_parallaxMapOffset;
 extern  cvar_t  *r_parallaxMapShadows;
+extern  cvar_t  *r_parallaxMinDepth;
 extern  cvar_t  *r_parallaxMaxSteps;
 extern  cvar_t  *r_parallaxFadeDist;
 extern  cvar_t  *r_parallaxFloorScale;
