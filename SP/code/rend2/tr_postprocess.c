@@ -144,6 +144,431 @@ qboolean RB_SMAA(FBO_t *srcFbo, FBO_t *dstFbo, ivec4_t srcBox)
 	return qtrue;
 }
 
+/*
+=============
+SMAA T2x helpers: 4x4 column-major matrices in double precision
+=============
+*/
+static void SmaaMatMul(const double *a, const double *b, double *out)
+{
+	int i, j, k;
+
+	for (j = 0; j < 4; j++)
+		for (i = 0; i < 4; i++)
+		{
+			double s = 0.0;
+			for (k = 0; k < 4; k++)
+				s += a[k * 4 + i] * b[j * 4 + k];
+			out[j * 4 + i] = s;
+		}
+}
+
+static qboolean SmaaMatInverse(const double *m, double *inv)
+{
+	double t[4][8];
+	int i, j, k;
+
+	// Gauss-Jordan on [m | I]; row i of t is row i of the matrix (m is column-major: m[col * 4 + row])
+	for (i = 0; i < 4; i++)
+		for (j = 0; j < 4; j++)
+		{
+			t[i][j] = m[j * 4 + i];
+			t[i][j + 4] = (i == j) ? 1.0 : 0.0;
+		}
+
+	for (i = 0; i < 4; i++)
+	{
+		int pivot = i;
+		double div;
+
+		for (k = i + 1; k < 4; k++)
+			if (fabs(t[k][i]) > fabs(t[pivot][i]))
+				pivot = k;
+		if (fabs(t[pivot][i]) < 1e-30)
+			return qfalse;
+		if (pivot != i)
+			for (j = 0; j < 8; j++)
+			{
+				double tmp = t[i][j];
+				t[i][j] = t[pivot][j];
+				t[pivot][j] = tmp;
+			}
+
+		div = 1.0 / t[i][i];
+		for (j = 0; j < 8; j++)
+			t[i][j] *= div;
+
+		for (k = 0; k < 4; k++)
+		{
+			double f;
+			if (k == i)
+				continue;
+			f = t[k][i];
+			for (j = 0; j < 8; j++)
+				t[k][j] -= f * t[i][j];
+		}
+	}
+
+	for (i = 0; i < 4; i++)
+		for (j = 0; j < 4; j++)
+			inv[j * 4 + i] = t[i][j + 4];
+	return qtrue;
+}
+
+// prevVP * inverse(curVP): current NDC (with depth) -> previous frame's NDC
+static qboolean SmaaReprojection(const float *cur, const float *prev, float *out)
+{
+	double c[16], p[16], ci[16], r[16];
+	int i;
+
+	for (i = 0; i < 16; i++)
+	{
+		c[i] = cur[i];
+		p[i] = prev[i];
+	}
+	if (!SmaaMatInverse(c, ci))
+		return qfalse;
+	SmaaMatMul(p, ci, r);
+	for (i = 0; i < 16; i++)
+		out[i] = (float)r[i];
+	return qtrue;
+}
+
+/*
+=============
+SMAA T2x per-entity motion ("3-obj")
+
+The depth prepass writes a motion vector for every pixel of an entity (RB_IterateStagesGeneric picks the
+USE_VELOCITY shader variants). The world has none: those pixels keep the cleared sentinel and the resolve rebuilds
+camera motion from depth. An entity's previous transform is found by matching last frame's records on model handle,
+entity number and nearest position (refdef entity indexes are not stable between frames). No match (new entity,
+teleport, culled last frame) means zero object motion. MD3/MDC vertex animation: the shader moves the vertex along
+(oldframe position - frame position) by the lerp change; the previous lerp is expressed in the current frame pair.
+=============
+*/
+#define SMAAVEL_MAX_RECORDS 512
+
+typedef struct {
+	int			hModel, entityNum, firstPerson;
+	float		xf[16];		// entity -> world (first person: entity -> view)
+	int			frame, oldframe;
+	float		lerp;		// effective backlerp (0 when frame == oldframe)
+	qboolean	claimed;
+} smaaVelRecord_t;
+
+static smaaVelRecord_t	smaaVelPrev[SMAAVEL_MAX_RECORDS], smaaVelCur[SMAAVEL_MAX_RECORDS];
+static int				smaaVelNumPrev, smaaVelNumCur, smaaVelListFrame = -1000;
+static struct {
+	int				stamp, hModel;
+	smaaEntVel_t	v;
+}						smaaVelCache[MAX_REFENTITIES];
+
+extern void myGlMultMatrix( const float *a, const float *b, float *out );
+
+/*
+MDS skeletal characters are skinned on the CPU (RB_SurfaceAnim), so the shader cannot rebuild last frame's limb pose.
+Instead the skinned positions (entity model space) of every MDS surface drawn in the velocity prepass are kept for one
+frame, keyed by (entityNum, model, surface). Next frame the surface uploads them as ATTR_POSITION2 and the shader
+transforms them with the previous entity matrix. Missing entry (new entity, entity record not matched, frame gap,
+surface not drawn last frame) or vertices beyond the previous LOD count: the previous position is the current one, which
+gives entity-transform motion only. Two generations, bump-allocated, no per-frame allocation.
+*/
+#define SMAAMDS_MAX_ENTRIES 1024
+#define SMAAMDS_MAX_VERTS 65536
+
+typedef struct {
+	int			entityNum, hModel, numVerts, offset;
+	const void	*surf;
+} smaaMdsEntry_t;
+
+typedef struct {
+	int				numEntries, numVerts;
+	smaaMdsEntry_t	entries[SMAAMDS_MAX_ENTRIES];
+	float			xyz[SMAAMDS_MAX_VERTS * 3];
+} smaaMdsGen_t;
+
+static smaaMdsGen_t		smaaMds[2];
+static int				smaaMdsCur, smaaMdsFrame = -1000, smaaMdsHint;
+
+void RB_SmaaMdsPrevPositions( const trRefEntity_t *ent, const void *surf, const float *cur, int count, float *prevOut )
+{
+	const smaaEntVel_t *ev = RB_SmaaEntityVelocity( ent );
+	smaaMdsGen_t *c, *p;
+	const smaaMdsEntry_t *prevEntry = NULL;
+	int i, j;
+
+	if ( smaaMdsFrame != tr.frameCount ) {
+		smaaMdsCur ^= 1;
+		if ( smaaMdsFrame != tr.frameCount - 1 ) {
+			smaaMds[smaaMdsCur ^ 1].numEntries = 0;		// frame gap: nothing to compare with
+		}
+		smaaMds[smaaMdsCur].numEntries = smaaMds[smaaMdsCur].numVerts = 0;
+		smaaMdsFrame = tr.frameCount;
+		smaaMdsHint = 0;
+	}
+	c = &smaaMds[smaaMdsCur];
+	p = &smaaMds[smaaMdsCur ^ 1];
+
+	if ( ev && ev->matched ) {
+		for ( i = 0; i < p->numEntries; i++ ) {
+			const smaaMdsEntry_t *e = &p->entries[( smaaMdsHint + i ) % p->numEntries];
+
+			if ( e->surf == surf && e->entityNum == ent->e.entityNum && e->hModel == ent->e.hModel ) {
+				prevEntry = e;
+				smaaMdsHint = ( smaaMdsHint + i + 1 ) % p->numEntries;
+				break;
+			}
+		}
+	}
+
+	for ( j = 0; j < count; j++, cur += 4, prevOut += 4 ) {
+		if ( prevEntry && j < prevEntry->numVerts ) {
+			const float *pp = &p->xyz[( prevEntry->offset + j ) * 3];
+
+			VectorCopy( pp, prevOut );
+		} else {
+			VectorCopy( cur, prevOut );
+		}
+		prevOut[3] = 1.0f;
+	}
+
+	if ( c->numEntries < SMAAMDS_MAX_ENTRIES && c->numVerts + count <= SMAAMDS_MAX_VERTS ) {
+		smaaMdsEntry_t *e = &c->entries[c->numEntries++];
+		float *dst = &c->xyz[c->numVerts * 3];
+
+		e->surf = surf;
+		e->entityNum = ent->e.entityNum;
+		e->hModel = ent->e.hModel;
+		e->numVerts = count;
+		e->offset = c->numVerts;
+		c->numVerts += count;
+		cur -= count * 4;
+		for ( j = 0; j < count; j++, cur += 4, dst += 3 ) {
+			VectorCopy( cur, dst );
+		}
+	}
+}
+
+void RB_SMAAResetMotion( void )
+{
+	smaaVelNumPrev = smaaVelNumCur = 0;
+	smaaVelListFrame = -1000;
+	Com_Memset( smaaVelCache, 0, sizeof( smaaVelCache ) );
+	smaaMds[0].numEntries = smaaMds[1].numEntries = 0;
+	smaaMdsFrame = -1000;
+}
+
+const smaaEntVel_t *RB_SmaaEntityVelocity( const trRefEntity_t *ent )
+{
+	const viewParms_t *vp = &backEnd.viewParms;
+	int idx = (int)( ent - backEnd.refdef.entities );
+	int stamp = tr.frameCount + 1;
+	const float *xf;
+	smaaVelRecord_t cur, *best = NULL;
+	float bestDist = 0.0f, maxDist;
+	smaaVelRecord_t *rec;
+	float prevXf[16];
+	int i;
+
+	if ( idx < 0 || idx >= MAX_REFENTITIES || ent->e.reType != RT_MODEL ) {
+		return NULL;
+	}
+
+	if ( smaaVelListFrame != tr.frameCount ) {
+		if ( smaaVelListFrame == tr.frameCount - 1 ) {
+			Com_Memcpy( smaaVelPrev, smaaVelCur, smaaVelNumCur * sizeof( smaaVelCur[0] ) );
+			smaaVelNumPrev = smaaVelNumCur;
+		} else {
+			smaaVelNumPrev = 0;
+		}
+		smaaVelNumCur = 0;
+		smaaVelListFrame = tr.frameCount;
+	}
+
+	if ( smaaVelCache[idx].stamp == stamp && smaaVelCache[idx].hModel == ent->e.hModel ) {
+		return &smaaVelCache[idx].v;
+	}
+
+	cur.firstPerson = ( ent->e.renderfx & ( RF_DEPTHHACK | RF_FIRST_PERSON ) ) != 0;
+	xf = cur.firstPerson ? backEnd.or.modelMatrix : backEnd.or.transformMatrix;
+	Com_Memcpy( cur.xf, xf, sizeof( cur.xf ) );
+	cur.hModel = ent->e.hModel;
+	cur.entityNum = ent->e.entityNum;
+	cur.frame = ent->e.frame;
+	cur.oldframe = ent->e.oldframe;
+	cur.lerp = ( ent->e.frame == ent->e.oldframe ) ? 0.0f : ent->e.backlerp;
+	cur.claimed = qfalse;
+
+	maxDist = cur.firstPerson ? 48.0f : 100.0f;
+	maxDist *= maxDist;
+	for ( i = 0; i < smaaVelNumPrev; i++ ) {
+		float d[3], dist;
+
+		rec = &smaaVelPrev[i];
+		if ( rec->claimed || rec->hModel != cur.hModel || rec->entityNum != cur.entityNum || rec->firstPerson != cur.firstPerson ) {
+			continue;
+		}
+		VectorSubtract( &rec->xf[12], &cur.xf[12], d );
+		dist = DotProduct( d, d );
+		if ( dist <= maxDist && ( !best || dist < bestDist ) ) {
+			best = rec;
+			bestDist = dist;
+		}
+	}
+
+	{
+		smaaEntVel_t *out = &smaaVelCache[idx].v;
+		float lerpPrev = cur.lerp;
+
+		if ( best ) {
+			best->claimed = qtrue;
+			Com_Memcpy( prevXf, best->xf, sizeof( prevXf ) );
+			// previous vertex-animation lerp in terms of the current frame pair (shader lerp 0 = frame, 1 = oldframe)
+			if ( best->frame == cur.frame ) {
+				lerpPrev = best->lerp;
+			} else if ( best->frame == cur.oldframe ) {
+				lerpPrev = 1.0f + best->lerp;
+			}
+		} else {
+			Com_Memcpy( prevXf, cur.xf, sizeof( prevXf ) );
+		}
+
+		if ( cur.firstPerson ) {
+			myGlMultMatrix( prevXf, vp->smaaProj, out->prevClip );	// camera-attached: view space motion only
+		} else {
+			myGlMultMatrix( prevXf, tr.smaaPrevViewProj, out->prevClip );
+		}
+		out->prevLerp = lerpPrev;
+		out->matched = best != NULL;
+		smaaVelCache[idx].stamp = stamp;
+		smaaVelCache[idx].hModel = ent->e.hModel;
+	}
+
+	if ( smaaVelNumCur < SMAAVEL_MAX_RECORDS ) {
+		smaaVelCur[smaaVelNumCur++] = cur;
+	}
+
+	return &smaaVelCache[idx].v;
+}
+
+/*
+=============
+RB_SMAATemporal
+
+SMAA T2x, camera-only ("3-cam"). The main view was rendered with a +-0.25 px jitter (R_RenderView); the result of
+RB_SMAA is blended with the previous resolved frame, which is looked up by reprojecting each pixel's depth through
+the previous frame's unjittered viewProj, and clamped to the current 3x3 neighborhood (smaa_resolve_fp.glsl).
+Things that move on their own get a wrong history position, so the clamp rejects it and they look like SMAA 1x.
+Runs on the tone-mapped LDR image in srcFbo (= tr.renderImage), result goes back to srcFbo and into the history.
+History is dropped on: a missed frame (map load, pause, no-world frames), r_aa change, camera cut, big FOV change.
+=============
+*/
+void RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox)
+{
+	const viewParms_t *vp = &backEnd.viewParms;
+	vec4_t metrics, params;
+	float reproj[16], reprojRot[16];
+	qboolean valid;
+	vec3_t delta;
+	float ratio0, ratio5;
+	qboolean debug = (r_smaaDebug->integer == 3 || r_smaaDebug->integer == 4);
+	qboolean velocity = backEnd.smaaVelocityDrawn && tr.velocityImage;
+
+	backEnd.smaaVelocityDrawn = qfalse;
+
+	// non-jittered views (sky portal, etc.) neither use nor invalidate the main view's history
+	if (!vp->smaaJitter)
+		return;
+
+	if (!tr.smaaResolveAvailable || !tr.smaaHistoryFbo || !tr.screenScratchFbo || !tr.hdrDepthImage ||
+		srcFbo != tr.renderFbo || !r_smaaTemporal->integer || (r_smaaDebug->integer && !debug) ||
+		srcFbo->width != tr.smaaHistoryFbo->width || srcFbo->height != tr.smaaHistoryFbo->height ||
+		srcBox[0] > 2 || srcBox[1] > 2 || abs(srcBox[2] - srcFbo->width) > 2 || abs(srcBox[3] - srcFbo->height) > 2)
+	{
+		tr.smaaHistoryValid = qfalse;
+		if (debug && !(tr.frameCount & 127))
+			ri.Printf(PRINT_ALL, "T2x resolve skipped: avail %d hist %d scratch %d depth %d srcIsRender %d temporal %d box %d,%d %dx%d fbo %dx%d\n",
+				tr.smaaResolveAvailable, tr.smaaHistoryFbo != NULL, tr.screenScratchFbo != NULL, tr.hdrDepthImage != NULL,
+				srcFbo == tr.renderFbo, r_smaaTemporal->integer, srcBox[0], srcBox[1], srcBox[2], srcBox[3], srcFbo->width, srcFbo->height);
+		return;
+	}
+
+	valid = tr.smaaHistoryValid && (tr.frameCount - tr.smaaHistoryFrame) <= 1 && tr.frameCount >= tr.smaaHistoryFrame;
+
+	if (valid)
+	{
+		VectorSubtract(vp->or.origin, tr.smaaPrevOrigin, delta);
+		ratio0 = vp->projectionMatrix[0] / tr.smaaPrevProj0;
+		ratio5 = vp->projectionMatrix[5] / tr.smaaPrevProj5;
+		if (VectorLength(delta) > 128.0f ||					// teleport, camera cut, respawn
+			DotProduct(vp->or.axis[0], tr.smaaPrevAxis0) < 0.5f ||	// 60+ degrees in one frame
+			ratio0 < 0.5f || ratio0 > 2.0f || ratio5 < 0.5f || ratio5 > 2.0f)	// scope / binocular zoom jump
+			valid = qfalse;
+	}
+
+	if (valid && (!SmaaReprojection(vp->smaaViewProj, tr.smaaPrevViewProj, reproj) ||
+			!SmaaReprojection(vp->smaaViewProjRot, tr.smaaPrevViewProjRot, reprojRot)))
+		valid = qfalse;
+
+	if (debug && !valid && !(tr.frameCount & 63))
+		ri.Printf(PRINT_ALL, "T2x history invalid: histValid %d frame %d/%d\n", tr.smaaHistoryValid, tr.frameCount, tr.smaaHistoryFrame);
+
+	// remember this frame for the next one (before any early-out below)
+	Com_Memcpy(tr.smaaPrevViewProj, vp->smaaViewProj, sizeof(tr.smaaPrevViewProj));
+	Com_Memcpy(tr.smaaPrevViewProjRot, vp->smaaViewProjRot, sizeof(tr.smaaPrevViewProjRot));
+	tr.smaaPrevProj0 = vp->projectionMatrix[0];
+	tr.smaaPrevProj5 = vp->projectionMatrix[5];
+	VectorCopy(vp->or.origin, tr.smaaPrevOrigin);
+	VectorCopy(vp->or.axis[0], tr.smaaPrevAxis0);
+
+	metrics[0] = 1.0f / srcFbo->width;
+	metrics[1] = 1.0f / srcFbo->height;
+	metrics[2] = (float)srcFbo->width;
+	metrics[3] = (float)srcFbo->height;
+
+	params[0] = r_smaaTemporalWeight->value;
+	params[1] = valid ? 1.0f : 0.0f;
+	params[2] = debug ? (float)r_smaaDebug->integer : 0.0f;
+	params[3] = velocity ? 1.0f : 0.0f;
+
+	if (!valid)
+	{
+		// first frame of a history: nothing to blend, just seed it with the current image
+		FBO_FastBlit(srcFbo, srcBox, tr.smaaHistoryFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		tr.smaaHistoryValid = qtrue;
+		tr.smaaHistoryFrame = tr.frameCount;
+		RB_GpuMark("smaa_t2x_reset");
+		return;
+	}
+
+	GL_BindToTMU(tr.smaaHistoryImage, TB_LEVELSMAP);
+	GL_BindToTMU(tr.hdrDepthImage, TB_NORMALMAP);
+	if (velocity)
+		GL_BindToTMU(tr.velocityImage, TB_SPECULARMAP);
+
+	GLSL_BindProgram(&tr.smaaResolveShader);
+	GLSL_SetUniformVec4(&tr.smaaResolveShader, UNIFORM_SMAAMETRICS, metrics);
+	GLSL_SetUniformVec4(&tr.smaaResolveShader, UNIFORM_TEMPORALPARAMS, params);
+	GLSL_SetUniformMat4(&tr.smaaResolveShader, UNIFORM_REPROJMATRIX, reproj);
+	GLSL_SetUniformMat4(&tr.smaaResolveShader, UNIFORM_REPROJROTMATRIX, reprojRot);
+	FBO_Blit(srcFbo, srcBox, NULL, tr.screenScratchFbo, srcBox, &tr.smaaResolveShader, NULL, 0);
+
+	if (debug)
+	{
+		// the debug image must not feed back: the history keeps the plain (unresolved) frame
+		FBO_FastBlit(srcFbo, srcBox, tr.smaaHistoryFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	}
+	else
+	{
+		FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		FBO_FastBlit(tr.screenScratchFbo, srcBox, tr.smaaHistoryFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	}
+	tr.smaaHistoryValid = qtrue;
+	tr.smaaHistoryFrame = tr.frameCount;
+	RB_GpuMark("smaa_t2x");
+}
+
 void RB_ToneMap(FBO_t *hdrFbo, ivec4_t hdrBox, FBO_t *ldrFbo, ivec4_t ldrBox, int autoExposure)
 {
 	ivec4_t srcBox, dstBox;

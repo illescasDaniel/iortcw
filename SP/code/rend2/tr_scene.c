@@ -764,6 +764,28 @@ void RE_RenderScene( const refdef_t *fd ) {
 		parms.flags = VPF_USESUNLIGHT;
 	}
 
+	// codmod: SMAA T2x sub-pixel jitter, main world view only (not shadow/cubemap/portal views, which never
+	// pass through here, and not world-less UI scenes). The viewport must cover the whole render target
+	// because the resolve reprojects in full-screen coordinates (a 1-2 px slack is allowed: at 2560x1600 the
+	// render target is 2561x1601 and the viewport 0,1 2560x1600).
+	if ( r_smaaTemporal->integer && r_smaa->integer && tr.smaaAvailable && tr.smaaResolveAvailable &&
+		tr.smaaHistoryFbo && tr.renderFbo && !tr.msaaResolveFbo && r_depthPrepass->integer && r_postProcess->integer &&
+		r_smaaJitter->value > 0.0f && !( fd->rdflags & ( RDF_NOWORLDMODEL | RDF_SKYBOXPORTAL ) ) && tr.refdef.stereoFrame == STEREO_CENTER &&
+		parms.viewportX <= 2 && parms.viewportY <= 2 &&
+		abs( parms.viewportWidth - tr.renderFbo->width ) <= 2 && abs( parms.viewportHeight - tr.renderFbo->height ) <= 2 ) {
+		parms.smaaJitter = qtrue;
+	}
+
+	// codmod: explain why T2x is not engaging (r_smaaDebug 3/4 only, about once per second)
+	if ( r_smaaDebug->integer >= 3 && !parms.smaaJitter && !( fd->rdflags & RDF_NOWORLDMODEL ) && !( tr.frameCount & 127 ) ) {
+		ri.Printf( PRINT_ALL, "T2x off: temporal %d smaa %d avail %d/%d hist %d fbo %d msaaResolve %d prepass %d post %d jitter %.2f "
+			"rdflags %d stereo %d viewport %d,%d %dx%d fbo %dx%d\n",
+			r_smaaTemporal->integer, r_smaa->integer, tr.smaaAvailable, tr.smaaResolveAvailable, tr.smaaHistoryFbo != NULL,
+			tr.renderFbo != NULL, tr.msaaResolveFbo != NULL, r_depthPrepass->integer, r_postProcess->integer,
+			r_smaaJitter->value, fd->rdflags, tr.refdef.stereoFrame, parms.viewportX, parms.viewportY, parms.viewportWidth,
+			parms.viewportHeight, tr.renderFbo ? tr.renderFbo->width : 0, tr.renderFbo ? tr.renderFbo->height : 0 );
+	}
+
 	R_RenderView( &parms );
 
 	if(!( fd->rdflags & RDF_NOWORLDMODEL ))

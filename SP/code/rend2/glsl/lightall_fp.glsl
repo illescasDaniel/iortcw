@@ -1,5 +1,22 @@
 uniform sampler2D u_DiffuseMap;
 
+#if defined(USE_VELOCITY)
+varying vec4      var_VelCur;
+varying vec4      var_VelPrev;
+
+// NDC motion since the previous frame (jitter removed). Exactly (0,0) is what the cleared buffer holds and
+// means "no velocity here" (the resolve falls back to depth reprojection), so a real zero is nudged off it.
+vec2 CalcVelocity()
+{
+	if (var_VelPrev.w < 0.01 || var_VelCur.w < 0.01)
+		return vec2(0.0);
+	vec2 v = var_VelCur.xy / var_VelCur.w - var_VelPrev.xy / var_VelPrev.w;
+	if (abs(v.x) + abs(v.y) < 1e-4)
+		v = vec2(1e-4, 0.0);
+	return v;
+}
+#endif
+
 #if defined(USE_LIGHTMAP)
 uniform sampler2D u_LightMap;
 #endif
@@ -736,4 +753,8 @@ void main()
 #endif
 
 	gl_FragColor.a = alpha;
+
+#if defined(USE_VELOCITY)
+	out_Velocity = CalcVelocity();
+#endif
 }

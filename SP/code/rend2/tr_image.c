@@ -2834,6 +2834,15 @@ static void R_CreateSmaaImages( int width, int height ) {
 
 	tr.smaaEdgesImage = R_CreateImage( "*smaaEdges", NULL, width, height, IMGTYPE_DELUXE, rtFlags, GL_RGBA8 );
 	tr.smaaBlendImage = R_CreateImage( "*smaaBlend", NULL, width, height, IMGTYPE_DELUXE, rtFlags, GL_RGBA8 );
+	// T2x history: the previous resolved (tone-mapped, LDR) frame
+	tr.smaaHistoryImage = R_CreateImage( "*smaaHistory", NULL, width, height, IMGTYPE_COLORALPHA, rtFlags, GL_RGBA8 );
+	// T2x motion vectors (NDC), colour attachment 1 of renderFbo; renderFbo only exists with HDR and, as a
+	// plain texture target, without MSAA. GLSL 1.30 is needed for the second shader output.
+	tr.velocityImage = NULL;
+	if ( r_hdr->integer && glRefConfig.textureFloat && r_ext_framebuffer_multisample->integer < 2 &&
+		( glRefConfig.glslMajorVersion > 1 || ( glRefConfig.glslMajorVersion == 1 && glRefConfig.glslMinorVersion >= 30 ) ) ) {
+		tr.velocityImage = R_CreateImage( "*velocity", NULL, width, height, IMGTYPE_COLORALPHA, rtFlags, GL_RG16F );
+	}
 
 	tmp = ri.Hunk_AllocateTempMemory( AREATEX_WIDTH * AREATEX_HEIGHT * 4 );
 	for ( i = 0; i < AREATEX_WIDTH * AREATEX_HEIGHT; i++ ) {

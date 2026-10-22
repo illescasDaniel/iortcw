@@ -282,6 +282,7 @@ extern void (APIENTRYP qglPNTrianglesfATI)(GLenum pname, GLfloat param);
 	GLE(void, UniformMatrix4fv, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) \
 	GLE(void, ValidateProgram, GLuint program) \
 	GLE(void, VertexAttribPointer, GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) \
+	GLE(void, DrawBuffers, GLsizei n, const GLenum *bufs) \
 
 // GL_NVX_gpu_memory_info
 #ifndef GL_NVX_gpu_memory_info

@@ -144,6 +144,10 @@ cvar_t  *r_postProcess;
 cvar_t  *r_toneMap;
 cvar_t  *r_smaa;
 cvar_t  *r_smaaDebug;
+cvar_t  *r_smaaTemporal;
+cvar_t  *r_smaaJitter;
+cvar_t  *r_smaaTemporalWeight;
+cvar_t  *r_smaaVelocity;
 cvar_t  *r_smaaPredication;
 cvar_t  *r_smaaPredThreshold;
 cvar_t  *r_smaaPredScale;
@@ -1372,8 +1376,8 @@ R_Register
 R_ApplyAA
 
 r_aa is the single user-facing anti-aliasing setting:
-0 off, 1-4 SMAA low/medium/high/ultra, 5-7 MSAA 2x/4x/8x.
-It drives r_smaa (live) and r_ext_framebuffer_multisample (latched, needs
+0 off, 1-4 SMAA low/medium/high/ultra, 5-7 MSAA 2x/4x/8x, 8 SMAA T2x (High + camera-only temporal).
+It drives r_smaa (live), r_smaaTemporal (live) and r_ext_framebuffer_multisample (latched, needs
 vid_restart). Default 0 (no AA, same as stock rend2 with r_ext_framebuffer_multisample 0;
 the mod turns it on). -1 leaves both cvars alone.
 ==================
@@ -1387,9 +1391,15 @@ void R_ApplyAA( void ) {
 		return;
 	}
 	smaa = ( aa >= 1 && aa <= 4 ) ? aa : 0;
-	msaa = ( aa >= 5 ) ? ( 2 << ( aa - 5 ) ) : 0;
+	msaa = ( aa >= 5 && aa <= 7 ) ? ( 2 << ( aa - 5 ) ) : 0;
+	if ( aa == 8 ) {
+		smaa = 3;	// T2x is SMAA High plus the temporal resolve; never together with MSAA
+	}
 
 	ri.Cvar_Set( "r_smaa", va( "%d", smaa ) );
+	ri.Cvar_Set( "r_smaaTemporal", ( aa == 8 ) ? "1" : "0" );
+	tr.smaaHistoryValid = qfalse;
+	RB_SMAAResetMotion();
 	ri.Cvar_Set( "r_ext_framebuffer_multisample", va( "%d", msaa ) );
 	// at startup the latched MSAA value has to be picked up right away
 	r_ext_framebuffer_multisample = ri.Cvar_Get( "r_ext_framebuffer_multisample", "0", CVAR_ARCHIVE | CVAR_LATCH );
@@ -1514,14 +1524,23 @@ void R_Register( void ) {
 	r_smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_smaa, 0, 4, qtrue );
 	r_smaaDebug = ri.Cvar_Get( "r_smaaDebug", "0", 0 );
-	ri.Cvar_CheckRange( r_smaaDebug, 0, 2, qtrue );
+	ri.Cvar_CheckRange( r_smaaDebug, 0, 4, qtrue );	// 3 = T2x clamp / reprojection view, 4 = T2x velocity buffer
+	// SMAA T2x (camera-only temporal AA). Set by r_aa 8; internal, not archived.
+	r_smaaTemporal = ri.Cvar_Get( "r_smaaTemporal", "0", 0 );
+	ri.Cvar_CheckRange( r_smaaTemporal, 0, 1, qtrue );
+	r_smaaJitter = ri.Cvar_Get( "r_smaaJitter", "0.25", 0 );	// jitter amplitude in pixels (0 = jitter off, debug)
+	ri.Cvar_CheckRange( r_smaaJitter, 0, 1, qfalse );
+	r_smaaTemporalWeight = ri.Cvar_Get( "r_smaaTemporalWeight", "0.5", 0 );	// weight of the history sample
+	ri.Cvar_CheckRange( r_smaaTemporalWeight, 0, 0.95f, qfalse );
+	r_smaaVelocity = ri.Cvar_Get( "r_smaaVelocity", "1", 0 );	// T2x per-object velocity buffer (0 = camera motion only)
+	ri.Cvar_CheckRange( r_smaaVelocity, 0, 1, qtrue );
 	// codmod: depth-predicated SMAA edge threshold (0 = vanilla); the three tuning values are for experiments
 	r_smaaPredication = ri.Cvar_Get( "r_smaaPredication", "0", 0 );
 	r_smaaPredThreshold = ri.Cvar_Get( "r_smaaPredThreshold", "0.06", 0 );
 	r_smaaPredScale = ri.Cvar_Get( "r_smaaPredScale", "2.0", 0 );
 	r_smaaPredStrength = ri.Cvar_Get( "r_smaaPredStrength", "0.4", 0 );
 	r_aa = ri.Cvar_Get( "r_aa", "0", CVAR_ARCHIVE );   // codmod: off = stock rend2; the mod sets 3 (SMAA High)
-	ri.Cvar_CheckRange( r_aa, -1, 7, qtrue );
+	ri.Cvar_CheckRange( r_aa, -1, 8, qtrue );
 	R_ApplyAA();
 	r_forceToneMap = ri.Cvar_Get( "r_forceToneMap", "0", CVAR_CHEAT );
 	r_forceToneMapMin = ri.Cvar_Get( "r_forceToneMapMin", "-8.0", CVAR_CHEAT );

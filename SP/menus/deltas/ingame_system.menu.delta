@@ -111,7 +111,7 @@
 =ui/ingame_system.menu 94 96
 +		text "Anti-Aliasing:"
 +		cvar "r_aa"
-+		cvarFloatList { "Off" 0 "SMAA Low" 1 "SMAA Medium" 2 "SMAA High" 3 "SMAA Ultra" 4 "MSAA 2x" 5 "MSAA 4x" 6 "MSAA 8x" 7 }
++		cvarFloatList { "Off" 0 "SMAA Low" 1 "SMAA Medium" 2 "SMAA High" 3 "SMAA Ultra" 4 "MSAA 2x" 5 "MSAA 4x" 6 "MSAA 8x" 7 "SMAA T2x (test)" 8 }
 +		rect 82 40 290 12
 =ui/options.menu 97 104
 =ui/credit.menu 414 417

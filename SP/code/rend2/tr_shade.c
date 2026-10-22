@@ -183,6 +183,7 @@ void RB_BeginSurface( shader_t *shader, int fogNum, int cubemapIndex ) {
 	tess.useInternalVao = qtrue;
 	tess.useCacheVao = qfalse;
 	tess.numMultiDraws = 0;
+	tess.prevXyzValid = qfalse;
 
 	tess.shaderTime = backEnd.refdef.floatTime - tess.shader->timeOffset;
 	if (tess.shader->clampTime && tess.shaderTime >= tess.shader->clampTime) {
@@ -1254,6 +1255,11 @@ static unsigned int RB_CalcShaderVertexAttribs( shaderCommands_t *input )
 {
 	unsigned int vertexAttribs = input->shader->vertexAttribs;
 
+	if(input->prevXyzValid)
+	{
+		vertexAttribs |= ATTR_POSITION2;	// codmod: SMAA T2x previous skinned positions
+	}
+
 	if(glState.vertexAnimation)
 	{
 		vertexAttribs |= ATTR_POSITION2;
@@ -1287,6 +1293,7 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 		shaderStage_t *pStage = input->xstages[stage];
 		shaderProgram_t *sp;
 		vec4_t texMatrix[8];
+		const smaaEntVel_t *entVel = NULL;	// codmod: SMAA T2x velocity of this entity (depth prepass only)
 
 		if ( !pStage )
 		{
@@ -1297,6 +1304,11 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 
 		if (backEnd.depthFill)
 		{
+			if (backEnd.smaaVelocity && backEnd.currentEntity && backEnd.currentEntity != &tr.worldEntity)
+			{
+				entVel = RB_SmaaEntityVelocity(backEnd.currentEntity);
+			}
+
 			if (pStage->glslShaderGroup == tr.lightallShader)
 			{
 				int index = 0;
@@ -1319,6 +1331,10 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 				}
 
 				sp = &pStage->glslShaderGroup[index];
+				if (entVel && pStage->glslShaderGroup[index | LIGHTDEF_USE_VELOCITY].program)
+					sp = &pStage->glslShaderGroup[index | LIGHTDEF_USE_VELOCITY];
+				else
+					entVel = NULL;
 			}
 			else
 			{
@@ -1344,6 +1360,10 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 				}
 
 				sp = &tr.genericShader[shaderAttribs];
+				if (entVel && tr.genericShader[shaderAttribs | GENERICDEF_USE_VELOCITY].program)
+					sp = &tr.genericShader[shaderAttribs | GENERICDEF_USE_VELOCITY];
+				else
+					entVel = NULL;
 			}
 		}
 		else if (pStage->glslShaderGroup == tr.lightallShader)
@@ -1411,6 +1431,32 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 		GLSL_SetUniformVec3(sp, UNIFORM_LOCALVIEWORIGIN, backEnd.or.viewOrigin);
 
 		GLSL_SetUniformFloat(sp, UNIFORM_VERTEXLERP, glState.vertexAttribsInterpolation);
+
+		if (backEnd.depthFill && backEnd.smaaVelocity)
+		{
+			// colour writes only for the velocity attachment, and only for programs that output to it
+			qboolean velOn = entVel != NULL;
+
+			if (velOn)
+			{
+				vec4_t velParams;
+				// w = 1: ATTR_POSITION2 is last frame's skinned position (MDS), not a vertex-animation frame
+				qboolean prevStream = tess.prevXyzValid && !glState.vertexAnimation && !glState.boneAnimation;
+
+				VectorSet4(velParams, backEnd.viewParms.smaaJitterNdc[0], backEnd.viewParms.smaaJitterNdc[1],
+					glState.vertexAnimation ? entVel->prevLerp : glState.vertexAttribsInterpolation, prevStream ? 1.0f : 0.0f);
+				if (prevStream)
+					GLSL_SetUniformFloat(sp, UNIFORM_VERTEXLERP, 0.0f);	// Position2 must not be blended into the position
+				GLSL_SetUniformMat4(sp, UNIFORM_VELPREVMATRIX, entVel->prevClip);
+				GLSL_SetUniformVec4(sp, UNIFORM_VELPARAMS, velParams);
+			}
+
+			if (backEnd.smaaVelMask != velOn)
+			{
+				qglColorMask(velOn, velOn, velOn, velOn);
+				backEnd.smaaVelMask = velOn;
+			}
+		}
 
 		if (glState.boneAnimation)
 		{

@@ -7,6 +7,8 @@ attribute vec3 attr_Normal2;
 #elif defined(USE_BONE_ANIMATION)
 attribute vec4 attr_BoneIndexes;
 attribute vec4 attr_BoneWeights;
+#elif defined(USE_VELOCITY)
+attribute vec3 attr_Position2;	// previous-frame skinned position (MDS), when u_VelParams.w > 0.5
 #endif
 
 attribute vec4 attr_Color;
@@ -77,6 +79,14 @@ uniform mat4 u_BoneMatrix[MAX_GLSL_BONES];
 
 varying vec2   var_DiffuseTex;
 varying vec4   var_Color;
+
+#if defined(USE_VELOCITY)
+// codmod SMAA T2x: per-pixel motion, written as a second colour output in the depth prepass
+uniform mat4   u_VelPrevMatrix;	// previous frame: model space -> unjittered clip
+uniform vec4   u_VelParams;	// xy = projection jitter in NDC, z = previous vertex-animation lerp, w = 1: attr_Position2 is the previous position
+varying vec4   var_VelCur;
+varying vec4   var_VelPrev;
+#endif
 
 #if defined(USE_DEFORM_VERTEXES)
 vec3 DeformPosition(const vec3 pos, const vec3 normal, const vec2 st)
@@ -306,6 +316,24 @@ void main()
 #endif
 
 	gl_Position = u_ModelViewProjectionMatrix * vec4(position, 1.0);
+
+#if defined(USE_VELOCITY)
+	{
+		vec3 prevPos = position;
+  #if defined(USE_VERTEX_ANIMATION)
+		if (u_VelParams.w > 0.5)
+			prevPos = attr_Position2;
+		else
+			prevPos += (attr_Position2 - attr_Position) * (u_VelParams.z - u_VertexLerp);
+  #elif !defined(USE_BONE_ANIMATION)
+		if (u_VelParams.w > 0.5)
+			prevPos = attr_Position2;
+  #endif
+		var_VelCur = gl_Position;
+		var_VelCur.xy -= u_VelParams.xy * gl_Position.w;
+		var_VelPrev = u_VelPrevMatrix * vec4(prevPos, 1.0);
+	}
+#endif
 
 #if defined(USE_TCGEN)
 	vec2 tex = GenTexCoords(u_TCGen0, position, normal, u_TCGen0Vector0, u_TCGen0Vector1);

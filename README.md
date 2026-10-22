@@ -9,6 +9,30 @@ The fork keeps ioRTCW's single-player engine, renderer choice and game logic, an
 changes are gated behind `cod_enable` (default 1; `0` restores vanilla feel) and live in a separate `fs_game codmod`
 folder, so vanilla RTCW keeps working side by side. The campaign, maps, enemies and scripting stay RTCW.
 
+### rend2 additions in this fork
+
+Renderer features added on top of ioRTCW's rend2 (SP only; the classic OpenGL1 renderer was removed). They default to
+vanilla behaviour, and the `codmod` mod in the outer repo switches them on. All `r_*` cvars and their defaults are listed
+in [rend2-cvars.txt](rend2-cvars.txt); the mod, menus, scripts and asset-baking tools live in the
+[outer repo](https://github.com/illescasDaniel/castle-operations-definitive).
+
+- **Parallax occlusion mapping** with self-shadowing and normal maps (`r_parallaxMapping`, `r_normalMapping`; reads
+  `<texture>_nh` height/normal maps; tuning `r_parallax*`)
+- **Specular**: directional baked-light specular fix (`r_codSpecDirectional`), geometric specular anti-aliasing (`r_specularAA`)
+- **Geometry**: support for bevelled and smoothed world and prop meshes (larger BSP face and VAO-cache limits, no plane
+  cull on non-coplanar faces); the static VAO store with `glMultiDrawElements` removes a per-frame re-upload that cost
+  GPU time while turning the view
+- **SMAA** 1x (`r_aa` 1-4), depth-predicated edges (`r_smaaPredication`), and experimental **SMAA T2x** (`r_aa 8`):
+  jittered projection, reprojected history with a colour clamp, per-object velocity buffer (`r_smaaTemporal`,
+  `r_smaaVelocity`, `r_smaaDebug`)
+- **GTAO** ambient occlusion (`r_ao`), **bloom** and **colour grade** with a tonemap highlight roll-off (`r_bloom*`, `r_grade*`)
+- **Stable sun shadows** (`r_sunShadowStable` bitmask: texel-snapped cascades, bilinear PCF, cascade blend)
+- **Flashlight / dynamic lights**: per-pixel lights on models, spot shadow map with a screen-space mask (`r_flashlightShadow`)
+- **Performance**: GPU pass profiler (`r_gpuProfile`), no per-frame `glFinish`, async flare queries, SMAA without copies
+
+Design notes for each feature are in the outer repo's `docs/` (`parallax.md`, `smaa.md`, `smaa-motion-plan.md`, `ssao.md`,
+`sun-shadows.md`, `flashlight-shadows.md`, `post-effects.md`, `performance.md`).
+
 ### Changes in this fork
 
 **Game and cgame (`bg_cod`, a shared tuning table)**

@@ -2937,6 +2937,8 @@ void RE_LoadWorldMap( const char *name ) {
 	byte		*startMarker;
 
 	skyboxportal = 0;
+	RB_SMAAResetMotion();
+	tr.smaaHistoryValid = qfalse;	// codmod: SMAA T2x history belongs to the previous map
 
 	if ( tr.worldMapLoaded ) {
 		ri.Error( ERR_DROP, "ERROR: attempted to redundantly load world map" );

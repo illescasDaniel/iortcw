@@ -1480,11 +1480,45 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 		VectorSet4(viewInfo, backEnd.viewParms.zFar / r_znear->value, backEnd.viewParms.zFar, 0.0, 0.0);
 
-		backEnd.depthFill = qtrue;
-		qglColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-		RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
-		qglColorMask(!backEnd.colorMask[0], !backEnd.colorMask[1], !backEnd.colorMask[2], !backEnd.colorMask[3]);
-		backEnd.depthFill = qfalse;
+		// codmod SMAA T2x: the main jittered view also writes per-entity motion vectors into colour
+		// attachment 1 (cleared to 0 = "no velocity, rebuild camera motion from depth")
+		if (!isShadowView && backEnd.viewParms.smaaJitter)
+			backEnd.smaaVelocityDrawn = qfalse;
+		if (!isShadowView && backEnd.viewParms.smaaJitter && r_smaaVelocity->integer && tr.velocityShaders && tr.velocityImage &&
+			tr.renderFbo && oldFbo == tr.renderFbo && tr.renderFbo->colorImage[1] == tr.velocityImage &&
+			tr.smaaHistoryValid && tr.frameCount - tr.smaaHistoryFrame <= 1 && tr.frameCount >= tr.smaaHistoryFrame)
+		{
+			static const GLenum velBufs[2] = { GL_NONE, GL_COLOR_ATTACHMENT1 };
+			static const GLenum colorBuf[1] = { GL_COLOR_ATTACHMENT0 };
+
+			qglDrawBuffers(2, velBufs);
+			qglColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+			qglClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+			qglClear(GL_COLOR_BUFFER_BIT);
+			qglClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
+			backEnd.smaaVelocity = qtrue;
+			backEnd.smaaVelMask = qtrue;
+			qglColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+			backEnd.smaaVelMask = qfalse;
+
+			backEnd.depthFill = qtrue;
+			RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
+			backEnd.depthFill = qfalse;
+
+			qglDrawBuffers(1, colorBuf);
+			backEnd.smaaVelocity = qfalse;
+			backEnd.smaaVelocityDrawn = qtrue;
+			qglColorMask(!backEnd.colorMask[0], !backEnd.colorMask[1], !backEnd.colorMask[2], !backEnd.colorMask[3]);
+		}
+		else
+		{
+			backEnd.depthFill = qtrue;
+			qglColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+			RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
+			qglColorMask(!backEnd.colorMask[0], !backEnd.colorMask[1], !backEnd.colorMask[2], !backEnd.colorMask[3]);
+			backEnd.depthFill = qfalse;
+		}
 
 		if (isShadowView)
 			RB_GpuMark( (backEnd.viewParms.flags & VPF_ORTHOGRAPHIC) ? "sunshadow" : (backEnd.viewParms.flags & VPF_NOPLAYER) ? "flashshadow" : "shadowmap" );
@@ -1506,7 +1540,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 					qglCopyTextureSubImage2DEXT(tr.renderDepthImage->texnum, GL_TEXTURE_2D, 0, 0, 0, 0, 0, glConfig.vidWidth, glConfig.vidHeight);
 			}
 
-			if (tr.hdrDepthFbo && (r_ssao->integer || r_shadowBlur->integer || (r_smaa->integer && r_smaaPredication->integer)))
+			if (tr.hdrDepthFbo && (r_ssao->integer || r_shadowBlur->integer || (r_smaa->integer && (r_smaaPredication->integer || backEnd.viewParms.smaaJitter))))
 			{
 				// need the depth in a texture we can do GL_LINEAR sampling on, so copy it to an HDR image
 				vec4_t srcTexCoords;
@@ -2370,6 +2404,8 @@ const void *RB_PostProcess(const void *data)
 			// result straight back, instead of copying scratch -> srcFbo before and after it
 			if (!(r_smaa->integer && RB_SMAA(tr.screenScratchFbo, srcFbo, srcBox)))
 				FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+			else
+				RB_SMAATemporal(srcFbo, srcBox);	// codmod: SMAA T2x, no-op unless this view was jittered
 			tonemapped = qtrue;
 		}
 		else if (r_cameraExposure->value != 0.0f)

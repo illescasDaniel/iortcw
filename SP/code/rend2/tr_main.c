@@ -1541,6 +1541,7 @@ qboolean R_MirrorViewBySurface( drawSurf_t *drawSurf, int entityNum ) {
 
 	newParms = tr.viewParms;
 	newParms.isPortal = qtrue;
+	newParms.smaaJitter = qfalse;	// codmod: portal/mirror views are never jittered
 	newParms.zFar = 0.0f;
 	newParms.flags &= ~VPF_FARPLANEFRUSTUM;
 	if ( !R_GetPortalOrientations( drawSurf, entityNum, &surface, &camera,
@@ -2024,6 +2025,7 @@ or a mirror / remote location
 void R_RenderView( viewParms_t *parms ) {
 	int firstDrawSurf;
 	int numDrawSurfs;
+	float jitterX = 0.0f, jitterY = 0.0f;
 
 	if ( parms->viewportWidth <= 0 || parms->viewportHeight <= 0 ) {
 		return;
@@ -2044,6 +2046,16 @@ void R_RenderView( viewParms_t *parms ) {
 
 	R_SetupProjection(&tr.viewParms, r_zproj->value, tr.viewParms.zFar, qtrue);
 
+	// codmod SMAA T2x: shift the image by +-r_smaaJitter pixels (diagonal, alternating per rendered frame).
+	// Applied after the frustum is built, so culling is unaffected. ndc' = ndc + j  <=>  m[8] -= j.
+	if ( tr.viewParms.smaaJitter ) {
+		float sign = ( tr.smaaJitterIndex++ & 1 ) ? -1.0f : 1.0f;
+		jitterX = sign * r_smaaJitter->value * 2.0f / (float)tr.viewParms.viewportWidth;
+		jitterY = sign * r_smaaJitter->value * 2.0f / (float)tr.viewParms.viewportHeight;
+		tr.viewParms.projectionMatrix[8] -= jitterX;
+		tr.viewParms.projectionMatrix[9] -= jitterY;
+	}
+
 	R_GenerateDrawSurfs();
 
 	// if we overflowed MAX_DRAWSURFS, the drawsurfs
@@ -2058,6 +2070,25 @@ void R_RenderView( viewParms_t *parms ) {
 
 	// draw main system development information (surface outlines, etc)
 	R_DebugGraphics();
+
+	// codmod SMAA T2x: unjittered projection*view of this frame for the temporal resolve (the
+	// projection now has its final z terms; tr.viewParms is the main view again after any portal)
+	if ( tr.viewParms.smaaJitter ) {
+		float proj[16], rot[16];
+
+		Com_Memcpy( proj, tr.viewParms.projectionMatrix, sizeof( proj ) );
+		proj[8] += jitterX;
+		proj[9] += jitterY;
+		myGlMultMatrix( tr.viewParms.world.modelMatrix, proj, tr.viewParms.smaaViewProj );
+
+		Com_Memcpy( rot, tr.viewParms.world.modelMatrix, sizeof( rot ) );
+		rot[12] = rot[13] = rot[14] = 0.0f;
+		myGlMultMatrix( rot, proj, tr.viewParms.smaaViewProjRot );
+
+		Com_Memcpy( tr.viewParms.smaaProj, proj, sizeof( proj ) );
+		tr.viewParms.smaaJitterNdc[0] = jitterX;
+		tr.viewParms.smaaJitterNdc[1] = jitterY;
+	}
 }
 
 void R_RenderDlightCubemaps(const refdef_t *fd)

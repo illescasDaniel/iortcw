@@ -1909,6 +1909,8 @@ Q3R2STRINGOBJ = \
   $(B)/rend2/glsl/smaa_edge_fp.o \
   $(B)/rend2/glsl/smaa_edge_vp.o \
   $(B)/rend2/glsl/smaa_lib.o \
+  $(B)/rend2/glsl/smaa_resolve_fp.o \
+  $(B)/rend2/glsl/smaa_resolve_vp.o \
   $(B)/rend2/glsl/smaa_weights_fp.o \
   $(B)/rend2/glsl/smaa_weights_vp.o \
   $(B)/rend2/glsl/shadowmask_fp.o \

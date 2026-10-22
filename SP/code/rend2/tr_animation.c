@@ -1212,6 +1212,13 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 
 	DBG_SHOWTIME
 
+	// codmod: SMAA T2x, last frame's skinned positions of this surface for the velocity prepass
+	if ( backEnd.depthFill && backEnd.smaaVelocity && !tess.shader->numDeforms &&
+		 backEnd.currentEntity != &tr.worldEntity && backEnd.currentEntity->e.reType == RT_MODEL ) {
+		RB_SmaaMdsPrevPositions( backEnd.currentEntity, surface, tess.xyz[baseVertex], render_count, tess.xyzPrev[baseVertex] );
+		tess.prevXyzValid = qtrue;
+	}
+
 #if 0 // FIXME: implement this
 	if ( r_bonesDebug->integer ) {
 		if ( r_bonesDebug->integer < 3 ) {

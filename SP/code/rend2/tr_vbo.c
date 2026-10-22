@@ -431,6 +431,7 @@ void R_InitVaos(void)
 	vertexesSize += sizeof(tess.texCoords[0]);
 	vertexesSize += sizeof(tess.lightCoords[0]);
 	vertexesSize += sizeof(tess.lightdir[0]);
+	vertexesSize += sizeof(tess.xyzPrev[0]);
 	vertexesSize *= SHADER_MAX_VERTEXES;
 
 	indexesSize = sizeof(tess.indexes[0]) * SHADER_MAX_INDEXES;
@@ -446,6 +447,7 @@ void R_InitVaos(void)
 	tess.vao->attribs[ATTR_INDEX_LIGHTCOORD    ].enabled = 1;
 	tess.vao->attribs[ATTR_INDEX_COLOR         ].enabled = 1;
 	tess.vao->attribs[ATTR_INDEX_LIGHTDIRECTION].enabled = 1;
+	tess.vao->attribs[ATTR_INDEX_POSITION2     ].enabled = 1;
 
 	tess.vao->attribs[ATTR_INDEX_POSITION      ].count = 3;
 	tess.vao->attribs[ATTR_INDEX_NORMAL        ].count = 4;
@@ -454,6 +456,7 @@ void R_InitVaos(void)
 	tess.vao->attribs[ATTR_INDEX_LIGHTCOORD    ].count = 2;
 	tess.vao->attribs[ATTR_INDEX_COLOR         ].count = 4;
 	tess.vao->attribs[ATTR_INDEX_LIGHTDIRECTION].count = 4;
+	tess.vao->attribs[ATTR_INDEX_POSITION2     ].count = 3;
 
 	tess.vao->attribs[ATTR_INDEX_POSITION      ].type = GL_FLOAT;
 	tess.vao->attribs[ATTR_INDEX_NORMAL        ].type = GL_SHORT;
@@ -462,6 +465,7 @@ void R_InitVaos(void)
 	tess.vao->attribs[ATTR_INDEX_LIGHTCOORD    ].type = GL_FLOAT;
 	tess.vao->attribs[ATTR_INDEX_COLOR         ].type = GL_UNSIGNED_SHORT;
 	tess.vao->attribs[ATTR_INDEX_LIGHTDIRECTION].type = GL_SHORT;
+	tess.vao->attribs[ATTR_INDEX_POSITION2     ].type = GL_FLOAT;
 
 	tess.vao->attribs[ATTR_INDEX_POSITION      ].normalized = GL_FALSE;
 	tess.vao->attribs[ATTR_INDEX_NORMAL        ].normalized = GL_TRUE;
@@ -470,6 +474,7 @@ void R_InitVaos(void)
 	tess.vao->attribs[ATTR_INDEX_LIGHTCOORD    ].normalized = GL_FALSE;
 	tess.vao->attribs[ATTR_INDEX_COLOR         ].normalized = GL_TRUE;
 	tess.vao->attribs[ATTR_INDEX_LIGHTDIRECTION].normalized = GL_TRUE;
+	tess.vao->attribs[ATTR_INDEX_POSITION2     ].normalized = GL_FALSE;
 
 	tess.vao->attribs[ATTR_INDEX_POSITION      ].offset = offset; offset += sizeof(tess.xyz[0])         * SHADER_MAX_VERTEXES;
 	tess.vao->attribs[ATTR_INDEX_NORMAL        ].offset = offset; offset += sizeof(tess.normal[0])      * SHADER_MAX_VERTEXES;
@@ -477,7 +482,8 @@ void R_InitVaos(void)
 	tess.vao->attribs[ATTR_INDEX_TEXCOORD      ].offset = offset; offset += sizeof(tess.texCoords[0])   * SHADER_MAX_VERTEXES;
 	tess.vao->attribs[ATTR_INDEX_LIGHTCOORD    ].offset = offset; offset += sizeof(tess.lightCoords[0]) * SHADER_MAX_VERTEXES;
 	tess.vao->attribs[ATTR_INDEX_COLOR         ].offset = offset; offset += sizeof(tess.color[0])       * SHADER_MAX_VERTEXES;
-	tess.vao->attribs[ATTR_INDEX_LIGHTDIRECTION].offset = offset;
+	tess.vao->attribs[ATTR_INDEX_LIGHTDIRECTION].offset = offset; offset += sizeof(tess.lightdir[0])      * SHADER_MAX_VERTEXES;
+	tess.vao->attribs[ATTR_INDEX_POSITION2     ].offset = offset;
 
 	tess.vao->attribs[ATTR_INDEX_POSITION      ].stride = sizeof(tess.xyz[0]);
 	tess.vao->attribs[ATTR_INDEX_NORMAL        ].stride = sizeof(tess.normal[0]);
@@ -486,6 +492,7 @@ void R_InitVaos(void)
 	tess.vao->attribs[ATTR_INDEX_LIGHTCOORD    ].stride = sizeof(tess.lightCoords[0]);
 	tess.vao->attribs[ATTR_INDEX_COLOR         ].stride = sizeof(tess.color[0]);
 	tess.vao->attribs[ATTR_INDEX_LIGHTDIRECTION].stride = sizeof(tess.lightdir[0]);
+	tess.vao->attribs[ATTR_INDEX_POSITION2     ].stride = sizeof(tess.xyzPrev[0]);
 
 	tess.attribPointers[ATTR_INDEX_POSITION]       = tess.xyz;
 	tess.attribPointers[ATTR_INDEX_NORMAL]         = tess.normal;
@@ -494,6 +501,7 @@ void R_InitVaos(void)
 	tess.attribPointers[ATTR_INDEX_LIGHTCOORD]     = tess.lightCoords;
 	tess.attribPointers[ATTR_INDEX_COLOR]          = tess.color;
 	tess.attribPointers[ATTR_INDEX_LIGHTDIRECTION] = tess.lightdir;
+	tess.attribPointers[ATTR_INDEX_POSITION2]      = tess.xyzPrev;
 
 	Vao_SetVertexPointers(tess.vao);
 

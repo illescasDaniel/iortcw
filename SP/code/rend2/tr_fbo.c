@@ -300,6 +300,19 @@ void FBO_Init(void)
 		FBO_AttachImage(tr.renderFbo, tr.renderImage, GL_COLOR_ATTACHMENT0, 0);
 		FBO_AttachImage(tr.renderFbo, tr.renderDepthImage, GL_DEPTH_ATTACHMENT, 0);
 		R_CheckFBO(tr.renderFbo);
+
+		// codmod: SMAA T2x motion vectors as a second colour target (only written with draw buffers set by the depth prepass)
+		if (tr.velocityImage)
+		{
+			FBO_AttachImage(tr.renderFbo, tr.velocityImage, GL_COLOR_ATTACHMENT1, 0);
+			if (!R_CheckFBO(tr.renderFbo))
+			{
+				qglNamedFramebufferTexture2DEXT(tr.renderFbo->frameBuffer, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0);
+				tr.renderFbo->colorImage[1] = NULL;
+				tr.velocityImage = NULL;
+				ri.Printf(PRINT_WARNING, "SMAA T2x velocity buffer unsupported, object motion disabled.\n");
+			}
+		}
 	}
 
 	// clear render buffer
@@ -338,6 +351,13 @@ void FBO_Init(void)
 			qglNamedFramebufferRenderbufferEXT(tr.smaaBlendFbo->frameBuffer, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, tr.smaaEdgesFbo->packedDepthStencilBuffer);
 		}
 		R_CheckFBO(tr.smaaBlendFbo);
+	}
+
+	if (tr.smaaHistoryImage)
+	{
+		tr.smaaHistoryFbo = FBO_Create("smaaHistory", tr.smaaHistoryImage->width, tr.smaaHistoryImage->height);
+		FBO_AttachImage(tr.smaaHistoryFbo, tr.smaaHistoryImage, GL_COLOR_ATTACHMENT0, 0);
+		R_CheckFBO(tr.smaaHistoryFbo);
 	}
 
 	if (tr.sunRaysImage)

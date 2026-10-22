@@ -62,7 +62,7 @@ typedef unsigned int glIndex_t;
 #define SHADERNUM_BITS	11
 #define MAX_SHADERS		(1<<SHADERNUM_BITS)
 
-#define	MAX_FBOS      64
+#define	MAX_FBOS      80
 #define MAX_VISCOUNTS 5
 #define MAX_VAOS      4096
 
@@ -660,8 +660,9 @@ enum
 	GENERICDEF_USE_WOLF_FOG_LINEAR  = 0x0020,
 	GENERICDEF_USE_WOLF_FOG_EXPONENTIAL = 0x0040,
 	GENERICDEF_USE_BONE_ANIMATION   = 0x0080,
-	GENERICDEF_ALL                  = 0x00FF,
-	GENERICDEF_COUNT                = 0x0100,
+	GENERICDEF_USE_VELOCITY         = 0x0100,	// codmod: SMAA T2x velocity MRT, depth-fill variants only
+	GENERICDEF_ALL                  = 0x01FF,
+	GENERICDEF_COUNT                = 0x0200,
 };
 
 enum
@@ -693,8 +694,9 @@ enum
 	LIGHTDEF_USE_PARALLAXMAP     = 0x0010,
 	LIGHTDEF_USE_SHADOWMAP       = 0x0020,
 	LIGHTDEF_ENTITY_BONE_ANIMATION = 0x0040,
-	LIGHTDEF_ALL                 = 0x007F,
-	LIGHTDEF_COUNT               = 0x0080
+	LIGHTDEF_USE_VELOCITY        = 0x0080,	// codmod: SMAA T2x velocity MRT, depth-fill variants only
+	LIGHTDEF_ALL                 = 0x00FF,
+	LIGHTDEF_COUNT               = 0x0100
 };
 
 enum
@@ -828,6 +830,13 @@ typedef enum
 	UNIFORM_SSAOMIPS, // x = deepest depth mip GTAO may use (0 = off), y = mip offset in log2 pixels
 	UNIFORM_PARALLAXPARAMS, // x = max steps, y = fade distance, z = floor depth scale, w = cavity strength
 	UNIFORM_PARALLAXPARAMS2, // x = stage max depth, y = step density, z = march min LOD, w = shadow fade fraction
+
+	UNIFORM_REPROJMATRIX, // SMAA T2x: current NDC -> previous NDC
+	UNIFORM_REPROJROTMATRIX, // same, camera rotation only (sky)
+	UNIFORM_TEMPORALPARAMS, // x = history weight, y = history valid, z = debug mode, w = velocity buffer valid
+	UNIFORM_VELPREVMATRIX, // SMAA T2x velocity: previous frame model space -> unjittered clip
+	UNIFORM_VELPARAMS, // xy = projection jitter in NDC, z = previous vertex lerp
+	UNIFORM_VELOCITYMAP, // SMAA T2x resolve: motion vector buffer
 
 	UNIFORM_COUNT
 } uniform_t;
@@ -984,6 +993,13 @@ typedef struct {
 	int         targetFboCubemapIndex;
 	float		fovX, fovY;
 	float		projectionMatrix[16];
+	// codmod SMAA T2x: set on the main world view only. projectionMatrix carries the sub-pixel jitter;
+	// the two matrices below are projection*view WITHOUT it (full, and with the view translation removed for the sky)
+	qboolean	smaaJitter;
+	float		smaaViewProj[16];
+	float		smaaViewProjRot[16];
+	float		smaaProj[16];		// unjittered projection (viewmodel velocity)
+	float		smaaJitterNdc[2];	// jitter applied to projectionMatrix, in NDC
 	cplane_t	frustum[5];
 	vec3_t		visBounds[2];
 	float		zFar;
@@ -1664,6 +1680,9 @@ typedef struct {
 	qboolean    ssaoApplied;	// multiply AO already applied after opaques (skip in post)
 	qboolean    fogDefer;		// codmod: skip the volume fog pass in the opaque list (drawn after the AO instead)
 	qboolean    fogOnly;		// codmod: drawing only the volume fog pass of already-drawn opaque surfaces
+	qboolean    smaaVelocity;	// codmod: this depth prepass writes the velocity buffer (colour attachment 1)
+	qboolean    smaaVelocityDrawn;	// codmod: the current main view has a valid velocity buffer (consumed by RB_SMAATemporal)
+	qboolean    smaaVelMask;	// codmod: colour writes are currently enabled for the velocity attachment
 } backEndState_t;
 
 /*
@@ -1716,6 +1735,8 @@ typedef struct {
 	image_t					*smaaBlendImage;
 	image_t					*smaaAreaImage;
 	image_t					*smaaSearchImage;
+	image_t					*smaaHistoryImage;	// SMAA T2x: previous resolved frame (RGBA8)
+	image_t					*velocityImage;		// SMAA T2x: RG16F motion vectors written in the depth prepass (colour attachment 1 of renderFbo)
 	image_t					*textureScratchImage[2];
 	image_t                 *quarterImage[2];
 	image_t                 *bloomImage[BLOOM_LEVELS];
@@ -1743,6 +1764,7 @@ typedef struct {
 	FBO_t					*screenScratchFbo;
 	FBO_t					*smaaEdgesFbo;
 	FBO_t					*smaaBlendFbo;
+	FBO_t					*smaaHistoryFbo;
 	FBO_t					*textureScratchFbo[2];
 	FBO_t                   *quarterFbo[2];
 	FBO_t                   *bloomFbo[BLOOM_LEVELS];
@@ -1805,6 +1827,16 @@ typedef struct {
 	shaderProgram_t smaaWeightsShader[4];
 	shaderProgram_t smaaBlendShader;
 	qboolean        smaaAvailable;       // shaders compiled and images/FBOs exist
+	shaderProgram_t smaaResolveShader;   // T2x temporal resolve
+	qboolean        smaaResolveAvailable;
+	qboolean        velocityShaders;     // USE_VELOCITY depth-fill variants compiled
+	qboolean        smaaHistoryValid;    // smaaHistoryImage holds the previous frame (cleared on map load, cvar change)
+	int             smaaHistoryFrame;    // tr.frameCount the history was written in
+	int             smaaJitterIndex;     // alternates the jitter sign per rendered frame
+	float           smaaPrevViewProj[16];
+	float           smaaPrevViewProjRot[16];
+	float           smaaPrevProj0, smaaPrevProj5;
+	vec3_t          smaaPrevOrigin, smaaPrevAxis0;
 	shaderProgram_t calclevels4xShader[2];
 	shaderProgram_t shadowmaskShader;
 	shaderProgram_t flashShadowmaskShader;
@@ -2066,6 +2098,10 @@ extern  cvar_t  *r_postProcess;
 extern  cvar_t  *r_toneMap;
 extern  cvar_t  *r_smaa;
 extern  cvar_t  *r_smaaDebug;
+extern  cvar_t  *r_smaaTemporal;
+extern  cvar_t  *r_smaaJitter;
+extern  cvar_t  *r_smaaTemporalWeight;
+extern  cvar_t  *r_smaaVelocity;
 extern  cvar_t  *r_smaaPredication;
 extern  cvar_t  *r_smaaPredThreshold;
 extern  cvar_t  *r_smaaPredScale;
@@ -2434,6 +2470,7 @@ typedef struct shaderCommands_s
 {
 	glIndex_t	indexes[SHADER_MAX_INDEXES] QALIGN(16);
 	vec4_t		xyz[SHADER_MAX_VERTEXES] QALIGN(16);
+	vec4_t		xyzPrev[SHADER_MAX_VERTEXES] QALIGN(16);	// codmod: SMAA T2x, previous-frame skinned positions (MDS, depth prepass only)
 	int16_t		normal[SHADER_MAX_VERTEXES][4] QALIGN(16);
 	int16_t		tangent[SHADER_MAX_VERTEXES][4] QALIGN(16);
 	vec2_t		texCoords[SHADER_MAX_VERTEXES] QALIGN(16);
@@ -2446,6 +2483,7 @@ typedef struct shaderCommands_s
 	vao_t       *vao;
 	qboolean    useInternalVao;
 	qboolean    useCacheVao;
+	qboolean    prevXyzValid;	// codmod: xyzPrev holds data for every vertex of this batch (uploaded as ATTR_POSITION2)
 	int         numMultiDraws; // codmod: > 1 when the VAO cache batch is drawn as several index ranges
 
 	stageVars_t	svars QALIGN(16);
@@ -2767,6 +2805,17 @@ float	RB_CalcWaveAlphaSingle( const waveForm_t *wf );
 float	RB_CalcWaveColorSingle( const waveForm_t *wf );
 
 void    RB_ZombieFXInit( void );
+// codmod SMAA T2x per-entity velocity (tr_postprocess.c)
+typedef struct {
+	float	prevClip[16];	// previous frame: entity model space -> unjittered clip space
+	float	prevLerp;		// previous vertex-animation lerp expressed in this frame's frame pair
+	qboolean matched;		// a previous-frame record of this entity was found (prevClip is real, not a copy of the current one)
+} smaaEntVel_t;
+const smaaEntVel_t *RB_SmaaEntityVelocity( const trRefEntity_t *ent );
+// MDS (CPU skinned) characters: fills prevOut (vec4 stride) with last frame's skinned positions of this surface, or a copy of cur
+void RB_SmaaMdsPrevPositions( const trRefEntity_t *ent, const void *surf, const float *cur, int count, float *prevOut );
+void RB_SMAAResetMotion( void );
+
 void    RB_ZombieFXAddNewHit( int entityNum, const vec3_t hitPos, const vec3_t hitDir );
 
 

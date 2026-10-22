@@ -60,6 +60,8 @@ extern const char *fallbackShader_smaa_weights_vp;
 extern const char *fallbackShader_smaa_weights_fp;
 extern const char *fallbackShader_smaa_blend_vp;
 extern const char *fallbackShader_smaa_blend_fp;
+extern const char *fallbackShader_smaa_resolve_vp;
+extern const char *fallbackShader_smaa_resolve_fp;
 extern const char *fallbackShader_tonemap_vp;
 extern const char *fallbackShader_tonemap_fp;
 
@@ -182,6 +184,13 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_SsaoMips", GLSL_VEC2 },
 	{ "u_ParallaxParams", GLSL_VEC4 },
 	{ "u_ParallaxParams2", GLSL_VEC4 },
+
+	{ "u_ReprojMatrix", GLSL_MAT16 },
+	{ "u_ReprojRotMatrix", GLSL_MAT16 },
+	{ "u_TemporalParams", GLSL_VEC4 },
+	{ "u_VelPrevMatrix", GLSL_MAT16 },
+	{ "u_VelParams", GLSL_VEC4 },
+	{ "u_VelocityMap", GLSL_INT },
 };
 
 typedef enum
@@ -289,7 +298,17 @@ static void GLSL_GetShaderHeader( GLenum shaderType, const GLchar *extra, char *
 		{
 			Q_strcat(dest, size, "#define varying in\n");
 
-			Q_strcat(dest, size, "out vec4 out_Color;\n");
+			if (extra && strstr(extra, "USE_VELOCITY"))
+			{
+				// codmod: depth-fill variants of the SMAA T2x velocity pass write a second colour output
+				Q_strcat(dest, size, "#extension GL_ARB_explicit_attrib_location : enable\n");
+				Q_strcat(dest, size, "layout(location = 0) out vec4 out_Color;\n");
+				Q_strcat(dest, size, "layout(location = 1) out vec2 out_Velocity;\n");
+			}
+			else
+			{
+				Q_strcat(dest, size, "out vec4 out_Color;\n");
+			}
 			Q_strcat(dest, size, "#define gl_FragColor out_Color\n");
 			Q_strcat(dest, size, "#define texture2D texture\n");
 			Q_strcat(dest, size, "#define textureCubeLod textureLod\n");
@@ -964,12 +983,23 @@ void GLSL_InitGPUShaders(void)
 
 	startTime = ri.Milliseconds();
 
+	// codmod: SMAA T2x velocity variants of the depth-fill shaders; they write a second colour output
+	// (explicit locations, GLSL 1.30+) into renderFbo, which only exists with HDR and without MSAA
+	tr.velocityShaders = (glRefConfig.framebufferObject && r_hdr->integer && r_ext_framebuffer_multisample->integer < 2 &&
+		(glRefConfig.glslMajorVersion > 1 || (glRefConfig.glslMajorVersion == 1 && glRefConfig.glslMinorVersion >= 30)));
+
 	for (i = 0; i < GENERICDEF_COUNT; i++)
 	{	
 		if ((i & GENERICDEF_USE_VERTEX_ANIMATION) && (i & GENERICDEF_USE_BONE_ANIMATION))
 			continue;
 
 		if ((i & GENERICDEF_USE_BONE_ANIMATION) && !glRefConfig.glslMaxAnimatedBones)
+			continue;
+
+		// velocity variants exist only for what the depth prepass can select
+		if ((i & GENERICDEF_USE_VELOCITY) &&
+			((i & ~(GENERICDEF_USE_VELOCITY | GENERICDEF_USE_DEFORM_VERTEXES | GENERICDEF_USE_TCGEN_AND_TCMOD |
+					GENERICDEF_USE_VERTEX_ANIMATION | GENERICDEF_USE_BONE_ANIMATION)) || !tr.velocityShaders))
 			continue;
 
 		attribs = ATTR_POSITION | ATTR_TEXCOORD | ATTR_LIGHTCOORD | ATTR_NORMAL | ATTR_COLOR;
@@ -1007,8 +1037,22 @@ void GLSL_InitGPUShaders(void)
 		if (i & GENERICDEF_USE_WOLF_FOG_EXPONENTIAL)
 			Q_strcat(extradefines, 1024, "#define USE_WOLF_FOG_EXPONENTIAL\n");
 
+		if (i & GENERICDEF_USE_VELOCITY)
+		{
+			Q_strcat(extradefines, 1024, "#define USE_VELOCITY\n");
+			if (!(i & (GENERICDEF_USE_VERTEX_ANIMATION | GENERICDEF_USE_BONE_ANIMATION)))
+				attribs |= ATTR_POSITION2;	// MDS: previous skinned position stream
+		}
+
 		if (!GLSL_InitGPUShader(&tr.genericShader[i], "generic", attribs, qtrue, extradefines, qtrue, fallbackShader_generic_vp, fallbackShader_generic_fp))
 		{
+			if (i & GENERICDEF_USE_VELOCITY)
+			{
+				ri.Printf(PRINT_WARNING, "SMAA T2x velocity shaders failed to compile, object motion disabled.\n");
+				tr.velocityShaders = qfalse;
+				Com_Memset(&tr.genericShader[i], 0, sizeof(tr.genericShader[i]));
+				continue;
+			}
 			ri.Error(ERR_FATAL, "Could not load generic shader!");
 		}
 
@@ -1125,6 +1169,12 @@ void GLSL_InitGPUShaders(void)
 		if ((i & LIGHTDEF_ENTITY_BONE_ANIMATION) && !glRefConfig.glslMaxAnimatedBones)
 			continue;
 
+		// velocity variants exist only for the unlit depth-fill ones
+		if ((i & LIGHTDEF_USE_VELOCITY) &&
+			((i & ~(LIGHTDEF_USE_VELOCITY | LIGHTDEF_ENTITY_VERTEX_ANIMATION | LIGHTDEF_ENTITY_BONE_ANIMATION |
+					LIGHTDEF_USE_TCGEN_AND_TCMOD)) || !tr.velocityShaders))
+			continue;
+
 		attribs = ATTR_POSITION | ATTR_TEXCOORD | ATTR_COLOR | ATTR_NORMAL;
 
 		extradefines[0] = '\0';
@@ -1233,6 +1283,9 @@ void GLSL_InitGPUShaders(void)
 			Q_strcat(extradefines, 1024, "#define USE_TCMOD\n");
 		}
 
+		if (i & LIGHTDEF_USE_VELOCITY)
+			Q_strcat(extradefines, 1024, "#define USE_VELOCITY\n");
+
 		if (i & LIGHTDEF_ENTITY_VERTEX_ANIMATION)
 		{
 			Q_strcat(extradefines, 1024, "#define USE_VERTEX_ANIMATION\n#define USE_MODELMATRIX\n");
@@ -1252,6 +1305,13 @@ void GLSL_InitGPUShaders(void)
 
 		if (!GLSL_InitGPUShader(&tr.lightallShader[i], "lightall", attribs, qtrue, extradefines, qtrue, fallbackShader_lightall_vp, fallbackShader_lightall_fp))
 		{
+			if (i & LIGHTDEF_USE_VELOCITY)
+			{
+				ri.Printf(PRINT_WARNING, "SMAA T2x velocity shaders failed to compile, object motion disabled.\n");
+				tr.velocityShaders = qfalse;
+				Com_Memset(&tr.lightallShader[i], 0, sizeof(tr.lightallShader[i]));
+				continue;
+			}
 			ri.Error(ERR_FATAL, "Could not load lightall shader!");
 		}
 
@@ -1457,6 +1517,26 @@ void GLSL_InitGPUShaders(void)
 		if (smaaOk)
 		{
 			tr.smaaAvailable = qtrue;
+
+			// SMAA T2x temporal resolve (reprojection + neighborhood clamp); a failure only disables T2x
+			tr.smaaResolveAvailable = qfalse;
+			if (GLSL_InitGPUShader(&tr.smaaResolveShader, "smaa_resolve", ATTR_POSITION | ATTR_TEXCOORD, qtrue, "", qtrue,
+					fallbackShader_smaa_resolve_vp, fallbackShader_smaa_resolve_fp))
+			{
+				GLSL_InitUniforms(&tr.smaaResolveShader);
+				GLSL_SetUniformInt(&tr.smaaResolveShader, UNIFORM_TEXTUREMAP, TB_COLORMAP);
+				GLSL_SetUniformInt(&tr.smaaResolveShader, UNIFORM_LEVELSMAP, TB_LEVELSMAP);
+				GLSL_SetUniformInt(&tr.smaaResolveShader, UNIFORM_SCREENIMAGEMAP, TB_NORMALMAP);
+				GLSL_SetUniformInt(&tr.smaaResolveShader, UNIFORM_VELOCITYMAP, TB_SPECULARMAP);
+				GLSL_FinishGPUShader(&tr.smaaResolveShader);
+				numEtcShaders++;
+				tr.smaaResolveAvailable = qtrue;
+			}
+			else
+			{
+				Com_Memset(&tr.smaaResolveShader, 0, sizeof(tr.smaaResolveShader));
+				ri.Printf(PRINT_WARNING, "SMAA T2x resolve shader failed to compile, T2x disabled.\n");
+			}
 		}
 		else
 		{
@@ -1468,6 +1548,7 @@ void GLSL_InitGPUShaders(void)
 				GLSL_DeleteGPUShader(&tr.smaaWeightsShader[i]);
 			}
 			GLSL_DeleteGPUShader(&tr.smaaBlendShader);
+	GLSL_DeleteGPUShader(&tr.smaaResolveShader);
 		}
 	}
 
@@ -1738,6 +1819,7 @@ void GLSL_ShutdownGPUShaders(void)
 		GLSL_DeleteGPUShader(&tr.smaaWeightsShader[i]);
 	}
 	GLSL_DeleteGPUShader(&tr.smaaBlendShader);
+	GLSL_DeleteGPUShader(&tr.smaaResolveShader);
 
 	for ( i = 0; i < 2; i++)
 		GLSL_DeleteGPUShader(&tr.calclevels4xShader[i]);
