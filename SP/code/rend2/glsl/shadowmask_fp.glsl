@@ -41,6 +41,62 @@ float random( const vec2 p )
   return mod( 123456789., 1e-7 + 256. * dot(p,r) );  
 }
 
+#if defined(USE_SHADOW_SMOOTH)
+// codmod: optimized bilinear PCF (Castano, "Shadow Mapping Summary", The Witness). Weighted
+// hardware 2x2 PCF taps give a smooth tent kernel with no per-pixel noise, so the result is
+// stable under camera motion. 1: 3x3 kernel (4 taps), 2: 5x5 (9 taps), 3: 7x7 (16 taps).
+// Needs GL_LINEAR on the shadow map (tr_image.c).
+float PCF(const sampler2DShadow shadowmap, const vec2 st, const float dist)
+{
+#if defined(USE_SHADOW_FILTER)
+	vec2 uv = st * r_shadowMapSize;
+	vec2 base = floor(uv + 0.5);
+	float s = uv.x + 0.5 - base.x;
+	float t = uv.y + 0.5 - base.y;
+	const float inv = 1.0 / r_shadowMapSize;
+	base = (base - 0.5) * inv;
+
+  #define TAP(u, v) shadow2D(shadowmap, vec3(base + vec2(u, v) * inv, dist))
+
+  #if defined(USE_SHADOW_FILTER3)
+	float uw0 = 5.0 * s - 6.0, uw1 = 11.0 * s - 28.0, uw2 = -(11.0 * s + 17.0), uw3 = -(5.0 * s + 1.0);
+	float u0 = (4.0 * s - 5.0) / uw0 - 3.0, u1 = (4.0 * s - 16.0) / uw1 - 1.0;
+	float u2 = -(7.0 * s + 5.0) / uw2 + 1.0, u3 = -s / uw3 + 3.0;
+	float vw0 = 5.0 * t - 6.0, vw1 = 11.0 * t - 28.0, vw2 = -(11.0 * t + 17.0), vw3 = -(5.0 * t + 1.0);
+	float v0 = (4.0 * t - 5.0) / vw0 - 3.0, v1 = (4.0 * t - 16.0) / vw1 - 1.0;
+	float v2 = -(7.0 * t + 5.0) / vw2 + 1.0, v3 = -t / vw3 + 3.0;
+
+	float sum = uw0 * vw0 * TAP(u0, v0) + uw1 * vw0 * TAP(u1, v0) + uw2 * vw0 * TAP(u2, v0) + uw3 * vw0 * TAP(u3, v0)
+	          + uw0 * vw1 * TAP(u0, v1) + uw1 * vw1 * TAP(u1, v1) + uw2 * vw1 * TAP(u2, v1) + uw3 * vw1 * TAP(u3, v1)
+	          + uw0 * vw2 * TAP(u0, v2) + uw1 * vw2 * TAP(u1, v2) + uw2 * vw2 * TAP(u2, v2) + uw3 * vw2 * TAP(u3, v2)
+	          + uw0 * vw3 * TAP(u0, v3) + uw1 * vw3 * TAP(u1, v3) + uw2 * vw3 * TAP(u2, v3) + uw3 * vw3 * TAP(u3, v3);
+	return sum * (1.0 / 2704.0);
+  #elif defined(USE_SHADOW_FILTER2)
+	float uw0 = 4.0 - 3.0 * s, uw1 = 7.0, uw2 = 1.0 + 3.0 * s;
+	float u0 = (3.0 - 2.0 * s) / uw0 - 2.0, u1 = (3.0 + s) / uw1, u2 = s / uw2 + 2.0;
+	float vw0 = 4.0 - 3.0 * t, vw1 = 7.0, vw2 = 1.0 + 3.0 * t;
+	float v0 = (3.0 - 2.0 * t) / vw0 - 2.0, v1 = (3.0 + t) / vw1, v2 = t / vw2 + 2.0;
+
+	float sum = uw0 * vw0 * TAP(u0, v0) + uw1 * vw0 * TAP(u1, v0) + uw2 * vw0 * TAP(u2, v0)
+	          + uw0 * vw1 * TAP(u0, v1) + uw1 * vw1 * TAP(u1, v1) + uw2 * vw1 * TAP(u2, v1)
+	          + uw0 * vw2 * TAP(u0, v2) + uw1 * vw2 * TAP(u1, v2) + uw2 * vw2 * TAP(u2, v2);
+	return sum * (1.0 / 144.0);
+  #else
+	float uw0 = 3.0 - 2.0 * s, uw1 = 1.0 + 2.0 * s;
+	float u0 = (2.0 - s) / uw0 - 1.0, u1 = s / uw1 + 1.0;
+	float vw0 = 3.0 - 2.0 * t, vw1 = 1.0 + 2.0 * t;
+	float v0 = (2.0 - t) / vw0 - 1.0, v1 = t / vw1 + 1.0;
+
+	float sum = uw0 * vw0 * TAP(u0, v0) + uw1 * vw0 * TAP(u1, v0)
+	          + uw0 * vw1 * TAP(u0, v1) + uw1 * vw1 * TAP(u1, v1);
+	return sum * (1.0 / 16.0);
+  #endif
+  #undef TAP
+#else
+	return shadow2D(shadowmap, vec3(st, dist));
+#endif
+}
+#else
 float PCF(const sampler2DShadow shadowmap, const vec2 st, const float dist)
 {
 	float mult;
@@ -87,6 +143,7 @@ float PCF(const sampler2DShadow shadowmap, const vec2 st, const float dist)
 
 	return mult;
 }
+#endif
 
 float getLinearDepth(sampler2D depthMap, vec2 tex, float zFarDivZNear)
 {
@@ -121,6 +178,67 @@ void main()
 					result += shadow2D(u_ShadowMap, vec3(sp.xy + vec2(float(x), float(y)) * t, sp.z));
 			result *= (1.0 / 9.0);
 		}
+	}
+
+	gl_FragColor = vec4(vec3(result), 1.0);
+}
+#elif defined(USE_SHADOW_CASCADE_BLEND) && defined(USE_SHADOW_CASCADE)
+// codmod: cascade lookup that fades into the next cascade over the last CASCADE_BLEND of the
+// map's half-width, so the change in texel size (and filter width) has no hard seam.
+#define CASCADE_BLEND 0.1
+
+bool InCascade(const vec4 sp)
+{
+	return all(lessThan(abs(sp.xyz), vec3(abs(sp.w))));
+}
+
+float CascadeEdge(const vec4 sp)
+{
+	vec2 a = abs(sp.xy / sp.w);
+	return clamp((max(a.x, a.y) - (1.0 - CASCADE_BLEND)) * (1.0 / CASCADE_BLEND), 0.0, 1.0);
+}
+
+float SampleCascade(const sampler2DShadow shadowmap, vec4 sp)
+{
+	sp.xyz = sp.xyz * (0.5 / sp.w) + vec3(0.5);
+	return PCF(shadowmap, sp.xy, sp.z);
+}
+
+void main()
+{
+	float result;
+
+	float depth = getLinearDepth(u_ScreenDepthMap, var_DepthTex, u_ViewInfo.x);
+	vec4 biasPos = vec4(u_ViewOrigin + var_ViewDir * (depth - 0.5 / u_ViewInfo.x), 1.0);
+
+	vec4 sp1 = u_ShadowMvp  * biasPos;
+	vec4 sp2 = u_ShadowMvp2 * biasPos;
+	vec4 sp3 = u_ShadowMvp3 * biasPos;
+
+	if (InCascade(sp1))
+	{
+		result = SampleCascade(u_ShadowMap, sp1);
+		float f = CascadeEdge(sp1);
+		if (f > 0.0 && InCascade(sp2))
+			result = mix(result, SampleCascade(u_ShadowMap2, sp2), f);
+	}
+	else if (InCascade(sp2))
+	{
+		result = SampleCascade(u_ShadowMap2, sp2);
+		float f = CascadeEdge(sp2);
+		if (f > 0.0 && InCascade(sp3))
+			result = mix(result, SampleCascade(u_ShadowMap3, sp3), f);
+	}
+	else if (InCascade(sp3))
+	{
+		result = SampleCascade(u_ShadowMap3, sp3);
+		float f = CascadeEdge(sp3);
+		if (f > 0.0)
+			result = mix(result, SampleCascade(u_ShadowMap4, u_ShadowMvp4 * biasPos), f);
+	}
+	else
+	{
+		result = SampleCascade(u_ShadowMap4, u_ShadowMvp4 * biasPos);
 	}
 
 	gl_FragColor = vec4(vec3(result), 1.0);

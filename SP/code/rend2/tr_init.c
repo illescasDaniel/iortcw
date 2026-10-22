@@ -232,6 +232,7 @@ cvar_t  *r_shadowMapSize;
 cvar_t  *r_shadowCascadeZNear;
 cvar_t  *r_shadowCascadeZFar;
 cvar_t  *r_shadowCascadeZBias;
+cvar_t  *r_sunShadowStable;
 cvar_t  *r_ignoreDstAlpha;
 
 cvar_t  *r_ignoreGLErrors;
@@ -1630,6 +1631,9 @@ void R_Register( void ) {
 	r_shadowCascadeZNear = ri.Cvar_Get( "r_shadowCascadeZNear", "8", CVAR_ARCHIVE | CVAR_LATCH );
 	r_shadowCascadeZFar = ri.Cvar_Get( "r_shadowCascadeZFar", "1024", CVAR_ARCHIVE | CVAR_LATCH );
 	r_shadowCascadeZBias = ri.Cvar_Get( "r_shadowCascadeZBias", "0", CVAR_ARCHIVE | CVAR_LATCH );
+	// codmod: stable sun shadows, bitmask. 1 = rotation-invariant texel-snapped cascades,
+	// 2 = bilinear-PCF filter without screen noise, 4 = blend across cascade edges. 0 = vanilla rend2.
+	r_sunShadowStable = ri.Cvar_Get( "r_sunShadowStable", "0", CVAR_LATCH );
 	r_ignoreDstAlpha = ri.Cvar_Get( "r_ignoreDstAlpha", "1", CVAR_ARCHIVE | CVAR_LATCH );
 
 	//

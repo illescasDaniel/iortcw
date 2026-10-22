@@ -1504,6 +1504,15 @@ void GLSL_InitGPUShaders(void)
 	if (r_shadowFilter->integer >= 2)
 		Q_strcat(extradefines, 1024, "#define USE_SHADOW_FILTER2\n");
 
+	if (r_shadowFilter->integer >= 3)
+		Q_strcat(extradefines, 1024, "#define USE_SHADOW_FILTER3\n");
+
+	if (r_sunShadowStable->integer & 2)
+		Q_strcat(extradefines, 1024, "#define USE_SHADOW_SMOOTH\n");
+
+	if (r_sunShadowStable->integer & 4)
+		Q_strcat(extradefines, 1024, "#define USE_SHADOW_CASCADE_BLEND\n");
+
 	if (r_shadowCascadeZFar->integer != 0)
 		Q_strcat(extradefines, 1024, "#define USE_SHADOW_CASCADE\n");
 

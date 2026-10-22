@@ -2502,6 +2502,12 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 	float viewZNear, viewZFar;
 	vec3_t lightviewBounds[2];
 	qboolean lightViewIndependentOfCameraView = qfalse;
+	// codmod: stable cascades. Fixed world-up light axes, a world-anchored light view,
+	// a cascade size that does not change when the camera turns, and texel snapping.
+	qboolean stableCascade = (level != 3 && (r_sunShadowStable->integer & 1));
+
+	if (stableCascade)
+		lightViewIndependentOfCameraView = qtrue;
 
 	if (r_forceSun->integer == 2)
 	{
@@ -2563,7 +2569,9 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 			break;
 	}
 			
-	if (level != 3)
+	if (stableCascade)
+		VectorClear(lightOrigin);
+	else if (level != 3)
 		VectorCopy(fd->vieworg, lightOrigin);
 	else
 		VectorCopy(tr.world->lightGridOrigin, lightOrigin);
@@ -2739,13 +2747,47 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 			AddPointToBounds(lightViewPoint, lightviewBounds[0], lightviewBounds[1]);
 		}
 
+		if (stableCascade)
+		{
+			// Square of the slice's bounding-sphere diameter: the slice's light-space extent never
+			// exceeds it, so its size (texel density) is the same for every camera rotation.
+			// Centred on the slice's light-space box, then snapped to whole texels so a moving
+			// camera shifts the map by exact texels and edges do not crawl.
+			float tx = tan(fd->fov_x * M_PI / 360.0f);
+			float ty = tan(fd->fov_y * M_PI / 360.0f);
+			float k2 = tx * tx + ty * ty;
+			float zc = (splitZNear + splitZFar) * (1.0f + k2) * 0.5f;
+			float radius, half, texel, size = tr.sunShadowFbo[level]->width;
+			vec3_t center;
+
+			if (zc >= splitZFar)
+				radius = splitZFar * sqrt(k2);
+			else
+				radius = sqrt((zc - splitZNear) * (zc - splitZNear) + splitZNear * splitZNear * k2);
+
+			// one spare texel on each side covers the snap offset
+			half = radius * size / (size - 2.0f);
+			texel = 2.0f * half / size;
+
+			center[0] = (lightviewBounds[0][0] + lightviewBounds[1][0]) * 0.5f;
+			center[1] = floor((lightviewBounds[0][1] + lightviewBounds[1][1]) * 0.5f / texel) * texel;
+			center[2] = floor((lightviewBounds[0][2] + lightviewBounds[1][2]) * 0.5f / texel) * texel;
+
+			lightviewBounds[0][0] = center[0] - half;
+			lightviewBounds[1][0] = center[0] + half;
+			lightviewBounds[0][1] = center[1] - half;
+			lightviewBounds[1][1] = center[1] + half;
+			lightviewBounds[0][2] = center[2] - half;
+			lightviewBounds[1][2] = center[2] + half;
+		}
+
 		if (!glRefConfig.depthClamp)
 			lightviewBounds[0][0] = lightviewBounds[1][0] - 8192;
 
 		// Moving the Light in Texel-Sized Increments
 		// from http://msdn.microsoft.com/en-us/library/windows/desktop/ee416324%28v=vs.85%29.aspx
 		//
-		if (lightViewIndependentOfCameraView)
+		if (lightViewIndependentOfCameraView && !stableCascade)
 		{
 			float cascadeBound, worldUnitsPerTexel, invWorldUnitsPerTexel;
 
@@ -2807,7 +2849,8 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 		VectorCopy(lightViewAxis[1], shadowParms.or.axis[1]);
 		VectorCopy(lightViewAxis[2], shadowParms.or.axis[2]);
 
-		VectorCopy(lightOrigin, shadowParms.pvsOrigin );
+		// codmod: a stable cascade's light view is anchored at the world origin; cull with the camera's PVS
+		VectorCopy(stableCascade ? fd->vieworg : lightOrigin, shadowParms.pvsOrigin );
 
 		{
 			tr.viewCount++;

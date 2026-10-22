@@ -44,7 +44,13 @@ void main()
 	color.g = FilmicTonemap(color.g);
 	color.b = FilmicTonemap(color.b);
 
-	color.rgb = clamp(color.rgb * var_InvWhite, 0.0, 1.0);
+	color.rgb = max(color.rgb * var_InvWhite, vec3(0.0));
+
+	// codmod: soft highlight shoulder instead of a hard clamp at white. Above SHOULDER_KNEE values roll off
+	// (Reinhard-style, slow) to 1, so bright sky/windows keep their gradient and detail instead of clipping flat white.
+	const float SHOULDER_KNEE = 0.7;
+	vec3 over = max(color.rgb - SHOULDER_KNEE, vec3(0.0));
+	color.rgb = min(color.rgb, vec3(SHOULDER_KNEE)) + (1.0 - SHOULDER_KNEE) * over / (over + (1.0 - SHOULDER_KNEE));
 
 #if defined(USE_PBR)
 	color.rgb = sqrt(color.rgb);
