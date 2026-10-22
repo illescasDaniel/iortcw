@@ -1771,6 +1771,24 @@ void CL_ForwardToServer_f( void ) {
 CL_Disconnect_f
 ==================
 */
+/*
+=================
+CL_UIClick_f
+
+Dev/test helper (scripts/shot-at.sh): synthesise a left click (`uiclick [x y]`) so a script can dismiss
+the mission briefing, which only accepts a mouse click.
+=================
+*/
+static void CL_UIClick_f( void ) {
+	if ( Cmd_Argc() == 3 && uivm ) {
+		// optional x y in 640x480 menu space: park the cursor in the corner, then move it there
+		VM_Call( uivm, UI_MOUSE_EVENT, -2000, -2000 );
+		VM_Call( uivm, UI_MOUSE_EVENT, atoi( Cmd_Argv( 1 ) ), atoi( Cmd_Argv( 2 ) ) );
+	}
+	CL_KeyEvent( K_MOUSE1, qtrue, Sys_Milliseconds() );
+	CL_KeyEvent( K_MOUSE1, qfalse, Sys_Milliseconds() );
+}
+
 void CL_Disconnect_f( void ) {
 	SCR_StopCinematic();
 	// RF, make sure loading variables are turned off
@@ -4015,6 +4033,7 @@ void CL_Init( void ) {
 	Cmd_AddCommand( "snd_restart", CL_Snd_Restart_f );
 	Cmd_AddCommand( "vid_restart", CL_Vid_Restart_f );
 	Cmd_AddCommand( "disconnect", CL_Disconnect_f );
+	Cmd_AddCommand( "uiclick", CL_UIClick_f );
 	Cmd_AddCommand( "record", CL_Record_f );
 	Cmd_AddCommand( "demo", CL_PlayDemo_f );
 	Cmd_SetCommandCompletionFunc( "demo", CL_CompleteDemoName );

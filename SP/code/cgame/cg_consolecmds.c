@@ -89,6 +89,10 @@ static void CG_Viewpos_f( void ) {
 	CG_Printf( "(%i %i %i) : %i\n", (int)cg.refdef.vieworg[0],
 			   (int)cg.refdef.vieworg[1], (int)cg.refdef.vieworg[2],
 			   (int)cg.refdefViewAngles[YAW] );
+	// copy-paste line for setviewpos: player origin (not eye) plus yaw and pitch, one decimal
+	CG_Printf( "setviewpos %.1f %.1f %.1f %.1f %.1f\n", cg.predictedPlayerState.origin[0],
+			   cg.predictedPlayerState.origin[1], cg.predictedPlayerState.origin[2],
+			   cg.predictedPlayerState.viewangles[YAW], cg.predictedPlayerState.viewangles[PITCH] );
 }
 
 
