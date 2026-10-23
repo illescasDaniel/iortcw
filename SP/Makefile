@@ -1730,6 +1730,7 @@ Q3OBJ = \
   $(B)/client/cl_net_chan.o \
   $(B)/client/cl_parse.o \
   $(B)/client/cl_scrn.o \
+  $(B)/client/cl_loadthread.o \
   $(B)/client/cl_ui.o \
   $(B)/client/cl_avi.o \
   \

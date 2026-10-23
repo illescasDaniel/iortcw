@@ -601,7 +601,7 @@ CM_LoadMap
 Loads in the map and all submodels
 ==================
 */
-void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
+static void CM_LoadMapImpl( const char *name, qboolean clientload, int *checksum ) {
 	union {
 		int				*i;
 		void			*v;
@@ -695,6 +695,42 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	if ( !clientload ) {
 		Q_strncpyz( cm.name, name, sizeof( cm.name ) );
 	}
+}
+
+#ifndef BSPC
+typedef struct {
+	const char *name;
+	qboolean clientload;
+	int *checksum;
+} cmLoadMapJob_t;
+
+static void CM_LoadMapJob( void *data ) {
+	cmLoadMapJob_t *job = (cmLoadMapJob_t *)data;
+
+	CM_LoadMapImpl( job->name, job->clientload, job->checksum );
+}
+#endif
+
+/*
+==================
+CM_LoadMap
+
+Pure CPU (file read + hunk allocations + patch collision), so with com_loadingThread it runs on
+the loading worker thread while the loading screen keeps presenting (Com_RunOffloaded).
+Errors raised inside are re-raised on the calling thread.
+==================
+*/
+void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
+#ifndef BSPC
+	cmLoadMapJob_t job;
+
+	job.name = name;
+	job.clientload = clientload;
+	job.checksum = checksum;
+	Com_RunOffloaded( CM_LoadMapJob, &job );
+#else
+	CM_LoadMapImpl( name, clientload, checksum );
+#endif
 }
 
 /*

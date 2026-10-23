@@ -215,6 +215,8 @@ typedef struct {
 	void	(*LoadingReplayTick)( void );
 	// names the asset being loaded for the load profiler (no-op unless com_loadProfile); may be NULL
 	void	(*LoadProfileHint)( const char *what );
+	// runs fn(arg) on the loading worker thread while the loading screen keeps presenting; CPU-only fn; may be NULL
+	void	(*RunOffloaded)( void ( *fn )( void * ), void *arg );
 } refimport_t;
 
 

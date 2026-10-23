@@ -1047,6 +1047,7 @@ void CL_InitCGame( void ) {
 	if ( !Sys_LowPhysicalMemory() ) {
 		Com_TouchMemory();
 	}
+	Com_LoadProfileMark( "cl:touch_mem" );
 	CL_LoadingReplayTick();
 
 	// clear anything that got printed
@@ -1054,6 +1055,7 @@ void CL_InitCGame( void ) {
 
 	// Ridah, update the memory usage file
 	CL_UpdateLevelHunkUsage();
+	Com_LoadProfileMark( "cl:hunk_usage" );
 }
 
 
@@ -1171,6 +1173,7 @@ void CL_FirstSnapshot( void ) {
 	}
 	clc.state = CA_ACTIVE;
 	CL_LoadingEnd();
+	Com_LoadProfileMark( "cl:first_snap" );
 
 	// set the timedelta so we are exactly on this first frame
 	cl.serverTimeDelta = cl.snap.serverTime - cls.realtime;

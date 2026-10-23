@@ -1319,16 +1319,24 @@ void CL_ShutdownAll(qboolean shutdownRef)
 #endif
 	// clear sounds
 	S_DisableSounds();
+	Com_LoadProfileMark( "cl:sd_sound" );
+	CL_LoadingReplayTick();
 	// shutdown CGame
 	CL_ShutdownCGame();
+	Com_LoadProfileMark( "cl:sd_cgame" );
+	CL_LoadingReplayTick();
 	// shutdown UI
 	CL_ShutdownUI();
+	Com_LoadProfileMark( "cl:sd_ui" );
+	CL_LoadingReplayTick();
 
 	// shutdown the renderer
 	if(shutdownRef)
 		CL_ShutdownRef();
 	else if(re.Shutdown)
 		re.Shutdown(qfalse);		// don't destroy window or context
+	Com_LoadProfileMark( "cl:sd_ref" );
+	CL_LoadingReplayTick();
 
 	cls.uiStarted = qfalse;
 	cls.cgameStarted = qfalse;
@@ -1358,6 +1366,7 @@ void CL_ClearMemory(qboolean shutdownRef)
 		// clear all the client data on the hunk
 		Hunk_ClearToMark();
 	}
+	Com_LoadProfileMark( "cl:hunk_clear" );
 }
 
 /*
@@ -2285,6 +2294,7 @@ Called when all downloading has been completed
 =================
 */
 void CL_DownloadsComplete( void ) {
+	Com_LoadProfileMark( "cl:dl_complete" );
 
 #ifdef USE_CURL
 	// if we downloaded with cURL
@@ -2350,6 +2360,7 @@ void CL_DownloadsComplete( void ) {
 	CL_WritePacket();
 	CL_WritePacket();
 	CL_WritePacket();
+	Com_LoadProfileMark( "cl:packets" );
 }
 
 /*
@@ -3629,6 +3640,7 @@ void CL_InitRef( void ) {
 	ri.LoadingTick = CL_LoadingTick;
 	ri.LoadingReplayTick = CL_LoadingReplayTick;
 	ri.LoadProfileHint = Com_LoadProfileHint;
+	ri.RunOffloaded = Com_RunOffloaded;
 
 	ri.Z_Malloc = Z_Malloc;
 	ri.Free = Z_Free;
@@ -4136,6 +4148,8 @@ void CL_Shutdown( char *finalmsg, qboolean disconnect, qboolean quit ) {
 		return;
 	}
 	recursive = qtrue;
+
+	Com_OffloadShutdown();      // join the idle loading worker (no-op if none)
 
 	noGameRestart = quit;
 

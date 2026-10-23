@@ -296,6 +296,16 @@ void QDECL Com_Error( int code, const char *fmt, ... ) {
 	int currentTime;
 	qboolean restartClient;
 
+	if ( Com_OffloadIsWorker() ) {
+		// raised inside an offloaded job: never longjmp across threads, the main thread re-raises it
+		char workerMsg[MAXPRINTMSG];
+
+		va_start( argptr, fmt );
+		Q_vsnprintf( workerMsg, sizeof( workerMsg ), fmt, argptr );
+		va_end( argptr );
+		Com_OffloadWorkerError( code, workerMsg );  // does not return
+	}
+
 	if(com_errorEntered)
 		Sys_Error("recursive error after: %s", com_errorMessage);
 
@@ -3088,6 +3098,9 @@ void Com_LoadProfileBegin( const char *why ) {
 }
 
 void Com_LoadProfileMark( const char *stage ) {
+	if ( Com_OffloadIsWorker() ) {
+		return;     // the profiler state belongs to the main thread
+	}
 	if ( !com_loadProfile || !com_loadProfile->integer || !lp.active || lp.numMarks >= LP_MAXMARKS ) {
 		return;
 	}
@@ -3101,7 +3114,7 @@ Cheap: copies the asset name into a fixed buffer, only while profiling. Not a ma
 A gap line carries the latest hint set before the ending present, i.e. the asset whose load blocked.
 */
 void Com_LoadProfileHint( const char *what ) {
-	if ( !lp.active || !what ) {
+	if ( !lp.active || !what || Com_OffloadIsWorker() ) {
 		return;
 	}
 	Q_strncpyz( lp.hint, what, LP_HINTLEN );

@@ -775,6 +775,7 @@ static void SV_SendClientGameState( client_t *client ) {
 
 	// deliver this to the client
 	SV_SendMessageToClient( &msg, client );
+	Com_LoadProfileMark( "sv:gs_sent" );
 }
 
 

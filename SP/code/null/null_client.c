@@ -67,6 +67,20 @@ void CL_MapLoading( void ) {
 void CL_LoadingReplayTick( void ) {
 }
 
+void Com_RunOffloaded( void ( *fn )( void * ), void *arg ) {
+	fn( arg );
+}
+
+qboolean Com_OffloadIsWorker( void ) {
+	return qfalse;
+}
+
+void Com_OffloadWorkerError( int code, const char *msg ) {
+}
+
+void Com_OffloadShutdown( void ) {
+}
+
 qboolean CL_GameCommand( void ) {
 	return qfalse;
 }

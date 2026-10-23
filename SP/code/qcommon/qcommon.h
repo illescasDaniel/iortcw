@@ -1036,6 +1036,18 @@ void CL_ConsolePrint( char *text );
 void CL_MapLoading( void );
 // re-present the last loading frame with a spinner (rate limited, no-op unless com_loadingFps > 0 and a local load is running)
 void CL_LoadingReplayTick( void );
+
+// Offload with keepalive (cl_loadthread.c): while a local map load is on screen and com_loadingThread > 0, runs
+// fn(arg) on ONE persistent worker thread and keeps re-presenting the loading frame on the calling (main) thread
+// until it returns. Synchronous hand-off: only one thread runs engine code at a time. fn must be CPU only (no GL,
+// no OpenAL, no VM calls). Otherwise (and in dedicated builds) it is just fn(arg).
+void Com_RunOffloaded( void ( *fn )( void * ), void *arg );
+// qtrue on the offload worker thread (loading ticks are no-ops there; GL is main thread only)
+qboolean Com_OffloadIsWorker( void );
+// Com_Error / Sys_Error raised on the worker: hands the error to the main thread, which re-raises it. Never returns.
+void Com_OffloadWorkerError( int code, const char *msg );
+// clean up the worker at client shutdown
+void Com_OffloadShutdown( void );
 // do a screen update before starting to load a map
 // when the server is going to load a new map, the entire hunk
 // will be cleared, so the client must shutdown cgame, ui, and

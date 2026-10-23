@@ -1485,6 +1485,8 @@ extern refimport_t ri;
 #define R_LOADING_TICK() do { if ( ri.LoadingTick ) { ri.LoadingTick(); } } while ( 0 )
 // re-present the last loading frame (raw GL, safe anywhere, even mid-shader/image load)
 #define R_LOADING_REPLAY() do { if ( ri.LoadingReplayTick ) { ri.LoadingReplayTick(); } } while ( 0 )
+// run a CPU-only job on the loading worker thread with the loading screen kept alive (or directly if unavailable)
+#define R_RUN_OFFLOADED( fn, arg ) do { if ( ri.RunOffloaded ) { ri.RunOffloaded( ( fn ), ( arg ) ); } else { ( fn )( arg ); } } while ( 0 )
 // name the asset being loaded (load profiler gap attribution)
 #define R_LOADING_HINT( what ) do { if ( ri.LoadProfileHint ) { ri.LoadProfileHint( what ); } } while ( 0 )
 

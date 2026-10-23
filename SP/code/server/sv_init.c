@@ -877,6 +877,8 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 
 	// create a baseline for more efficient communications
 	SV_CreateBaseline();
+	Com_LoadProfileMark( "sv:baseline" );
+	CL_LoadingReplayTick();
 
 	for ( i = 0 ; i < sv_maxclients->integer ; i++ ) {
 		// send the new gamestate to all connected clients
@@ -923,11 +925,15 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 		}
 	}
 
+	Com_LoadProfileMark( "sv:clients" );
+	CL_LoadingReplayTick();
+
 	// run another frame to allow things to look at all the players
 	VM_Call (gvm, GAME_RUN_FRAME, sv.time);
 	SV_BotFrame (sv.time);
 	sv.time += 100;
 	svs.time += 100;
+	Com_LoadProfileMark( "sv:last_frame" );
 	CL_LoadingReplayTick();
 
 	if ( sv_pure->integer ) {
@@ -974,6 +980,9 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 	SV_Heartbeat_f();
 
 	Hunk_SetMark();
+	Com_LoadProfileMark( "sv:end" );
+	CL_LoadingReplayTick();
+	sv_loadFrameMarks = 3;      // profile the first server frames after the load
 
 /*
 #ifndef DEDICATED

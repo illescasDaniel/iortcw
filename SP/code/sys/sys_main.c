@@ -438,6 +438,10 @@ void Sys_Error( const char *error, ... )
 	Q_vsnprintf (string, sizeof(string), error, argptr);
 	va_end (argptr);
 
+	if ( Com_OffloadIsWorker() ) {
+		Com_OffloadWorkerError( ERR_FATAL, string );    // main thread re-raises it; does not return
+	}
+
 	Sys_ErrorDialog( string );
 
 	Sys_Exit( 3 );

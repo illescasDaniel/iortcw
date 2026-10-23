@@ -1082,6 +1082,8 @@ Player movement occurs as a result of packet events, which
 happen before SV_Frame is called
 ==================
 */
+int sv_loadFrameMarks;      // > 0: mark the next SV_Frame calls for the load profiler (set at the end of SV_SpawnServer)
+
 void SV_Frame( int msec ) {
 	int frameMsec;
 	int startTime;
@@ -1184,6 +1186,10 @@ void SV_Frame( int msec ) {
 		time_game = Sys_Milliseconds() - startTime;
 	}
 
+	if ( sv_loadFrameMarks > 0 ) {
+		Com_LoadProfileMark( "sv:frame_sim" );
+	}
+
 	// check timeouts
 	SV_CheckTimeouts();
 
@@ -1192,6 +1198,10 @@ void SV_Frame( int msec ) {
 
 	// send a heartbeat to the master if needed
 	SV_MasterHeartbeat(HEARTBEAT_FOR_MASTER);
+	if ( sv_loadFrameMarks > 0 ) {
+		sv_loadFrameMarks--;
+		Com_LoadProfileMark( "sv:frame_end" );
+	}
 }
 
 /*

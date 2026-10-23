@@ -470,6 +470,8 @@ void SCR_Init( void ) {
 	cl_graphshift = Cvar_Get( "graphshift", "0", CVAR_CHEAT );
 	// internal: loading screen redraw rate during cgame init (0 = vanilla, only at CG_LoadingString)
 	com_loadingFps = Cvar_Get( "com_loadingFps", "0", 0 );
+	// internal: run CPU-only asset decodes on a worker thread while the loading screen keeps presenting (0 = off)
+	Cvar_Get( "com_loadingThread", "0", 0 );
 
 	scr_initialized = qtrue;
 }
@@ -677,6 +679,9 @@ void CL_LoadingTick( void ) {
 	if ( com_loadingFps == NULL || com_loadingFps->integer <= 0 ) {
 		return;
 	}
+	if ( Com_OffloadIsWorker() ) {
+		return;     // GL is main thread only: offloaded code never presents
+	}
 	if ( loadingTickBusy || scr_recursive > 0 ) {
 		return;
 	}
@@ -717,6 +722,9 @@ void CL_LoadingReplayTick( void ) {
 
 	if ( com_loadingFps == NULL || com_loadingFps->integer <= 0 ) {
 		return;
+	}
+	if ( Com_OffloadIsWorker() ) {
+		return;     // GL is main thread only: offloaded code never presents
 	}
 	if ( loadingReplayBusy || loadingTickBusy || scr_recursive > 0 || !CL_LoadingStateOk() ) {
 		return;

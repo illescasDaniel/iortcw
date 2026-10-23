@@ -2485,6 +2485,43 @@ void R_LoadImage( const char *name, byte **pic, int *width, int *height, GLenum 
 }
 
 
+typedef struct {
+	const char *name;
+	byte **pic;
+	int *width, *height;
+	GLenum *picFormat;
+	int *numMips;
+} loadImageJob_t;
+
+static void R_LoadImageJob( void *data )
+{
+	loadImageJob_t *job = (loadImageJob_t *)data;
+
+	R_LoadImage( job->name, job->pic, job->width, job->height, job->picFormat, job->numMips );
+}
+
+/*
+=================
+R_LoadImageOffloaded
+
+R_LoadImage (file read + decode, CPU only: the loaders touch no GL, only FS/Z/Hunk/cvar reads)
+on the loading worker thread while the loading screen keeps presenting. Falls back to a
+direct call when the engine offers no worker. The GL upload stays on the calling thread.
+=================
+*/
+static void R_LoadImageOffloaded( const char *name, byte **pic, int *width, int *height, GLenum *picFormat, int *numMips )
+{
+	loadImageJob_t job;
+
+	job.name = name;
+	job.pic = pic;
+	job.width = width;
+	job.height = height;
+	job.picFormat = picFormat;
+	job.numMips = numMips;
+	R_RUN_OFFLOADED( R_LoadImageJob, &job );
+}
+
 //----(SA)	modified
 /*
 ===============
@@ -2532,7 +2569,7 @@ image_t	*R_FindImageFileExt( const char *name, imgType_t type, imgFlags_t flags,
 	// load the pic from disk
 	//
 	R_LOADING_HINT( name );
-	R_LoadImage( name, &pic, &width, &height, &picFormat, &picNumMips );
+	R_LoadImageOffloaded( name, &pic, &width, &height, &picFormat, &picNumMips );
 	if ( pic == NULL ) {
 		return NULL;
 	}

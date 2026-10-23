@@ -369,6 +369,20 @@ static qboolean S_AL_GenBuffers(ALsizei numBuffers, ALuint *buffers, const char 
 	return qtrue;
 }
 
+typedef struct {
+	const char *filename;
+	snd_info_t *info;
+	void *data;
+} codecLoadJob_t;
+
+// CPU only (FS read + decode into hunk temp memory, no AL calls): may run on the loading worker thread
+static void S_AL_CodecLoadJob(void *arg)
+{
+	codecLoadJob_t *job = (codecLoadJob_t *)arg;
+
+	job->data = S_CodecLoad(job->filename, job->info);
+}
+
 /*
 =================
 S_AL_BufferLoad
@@ -397,7 +411,15 @@ static void S_AL_BufferLoad(sfxHandle_t sfx, qboolean cache)
 
 	// Try to load
 	Com_LoadProfileHint(curSfx->filename);
-	data = S_CodecLoad(curSfx->filename, &info);
+	{
+		codecLoadJob_t job;
+
+		job.filename = curSfx->filename;
+		job.info = &info;
+		job.data = NULL;
+		Com_RunOffloaded(S_AL_CodecLoadJob, &job);
+		data = job.data;
+	}
 	CL_LoadingReplayTick();     // file read + decode done (no-op outside a local map load)
 	if(!data)
 	{

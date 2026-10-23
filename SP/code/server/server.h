@@ -300,6 +300,7 @@ extern cvar_t  *sv_reconnectlimit;
 extern cvar_t  *sv_showloss;
 extern cvar_t  *sv_padPackets;
 extern cvar_t  *sv_killserver;
+extern int sv_loadFrameMarks;
 extern cvar_t  *sv_mapname;
 extern cvar_t  *sv_mapChecksum;
 extern cvar_t  *sv_serverid;
