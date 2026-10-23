@@ -474,8 +474,10 @@ void CL_ParseGamestate( msg_t *msg ) {
 
 	clc.connectPacketCount = 0;
 
+	Com_LoadProfileFrameMark( "gs:begin" );
 	// wipe local client state
 	CL_ClearState();
+	Com_LoadProfileFrameMark( "gs:clearstate" );
 
 	// a gamestate always marks a server command sequence
 	clc.serverCommandSequence = MSG_ReadLong( msg );
@@ -520,6 +522,7 @@ void CL_ParseGamestate( msg_t *msg ) {
 		}
 	}
 
+	Com_LoadProfileFrameMark( "gs:strings" );
 	clc.clientNum = MSG_ReadLong( msg );
 	// read the checksum feed
 	clc.checksumFeed = MSG_ReadLong( msg );
@@ -532,6 +535,7 @@ void CL_ParseGamestate( msg_t *msg ) {
 
 	// parse serverId and other cvars
 	CL_SystemInfoChanged();
+	Com_LoadProfileFrameMark( "gs:sysinfo" );
 
 	// stop recording now so the demo won't have an unnecessary level load at the end.
 	if(cl_autoRecordDemo->integer && clc.demorecording)

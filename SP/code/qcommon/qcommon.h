@@ -1179,6 +1179,7 @@ extern long long com_lastPresentUs;
 // Opt-in load-time profiler (cvar com_loadProfile); all no-ops when 0
 void Com_LoadProfileBegin( const char *why );
 void Com_LoadProfileMark( const char *stage );
+void Com_LoadProfileFrameMark( const char *stage );   // budgeted marks for the first frames after the server spawn
 void Com_LoadProfileEnd( void );
 void Com_LoadProfileHint( const char *what );   // names the asset being loaded (shown on LOADPROFILE_GAP lines)
 

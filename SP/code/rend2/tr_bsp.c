@@ -2944,6 +2944,20 @@ RE_LoadWorldMap
 Called directly from cgame
 =================
 */
+#define HINT( what ) do { if ( ri.LoadProfileHint ) { ri.LoadProfileHint( what ); } } while ( 0 )
+
+typedef struct {
+	const char *name;
+	void *data;
+} bspReadJob_t;
+
+// CPU only (FS read + pk3 inflate into hunk temp memory): may run on the loading worker thread
+static void R_ReadBspJob( void *arg ) {
+	bspReadJob_t *job = (bspReadJob_t *)arg;
+
+	ri.FS_ReadFile( job->name, &job->data );
+}
+
 void RE_LoadWorldMap( const char *name ) {
 	int			i;
 	dheader_t	*header;
@@ -3003,8 +3017,19 @@ void RE_LoadWorldMap( const char *name ) {
 
 	tr.worldMapLoaded = qtrue;
 
-	// load it
-    ri.FS_ReadFile( name, &buffer.v );
+	// load it (the multi-MB read + inflate runs on the loading worker while the spinner keeps presenting)
+	{
+		bspReadJob_t job;
+
+		job.name = name;
+		job.data = NULL;
+		if ( ri.LoadProfileHint ) {
+			ri.LoadProfileHint( "bsp:read" );
+		}
+		R_RUN_OFFLOADED( R_ReadBspJob, &job );
+		buffer.v = job.data;
+	}
+	R_LOADING_REPLAY();
 	if ( !buffer.b ) {
 		ri.Error (ERR_DROP, "RE_LoadWorldMap: %s not found", name);
 	}
@@ -3040,26 +3065,32 @@ void RE_LoadWorldMap( const char *name ) {
 
 	// load into heap
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
+	HINT( "bsp:entities" );
 	R_LoadEntities( &header->lumps[LUMP_ENTITIES] );
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
+	HINT( "bsp:shaders" );
 	R_LoadShaders( &header->lumps[LUMP_SHADERS] );
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
+	HINT( "bsp:lightmaps" );
 	R_LoadLightmaps( &header->lumps[LUMP_LIGHTMAPS], &header->lumps[LUMP_SURFACES] );
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
 	R_LoadPlanes (&header->lumps[LUMP_PLANES]);
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
 	R_LoadFogs( &header->lumps[LUMP_FOGS], &header->lumps[LUMP_BRUSHES], &header->lumps[LUMP_BRUSHSIDES] );
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
+	HINT( "bsp:surfaces" );
 	R_LoadSurfaces( &header->lumps[LUMP_SURFACES], &header->lumps[LUMP_DRAWVERTS], &header->lumps[LUMP_DRAWINDEXES] );
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
 	R_LoadMarksurfaces (&header->lumps[LUMP_LEAFSURFACES]);
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
+	HINT( "bsp:nodes" );
 	R_LoadNodesAndLeafs (&header->lumps[LUMP_NODES], &header->lumps[LUMP_LEAFS]);
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
 	R_LoadSubmodels (&header->lumps[LUMP_MODELS]);
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
 	R_LoadVisibility( &header->lumps[LUMP_VISIBILITY] );
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
+	HINT( "bsp:lightgrid" );
 	R_LoadLightGrid( &header->lumps[LUMP_LIGHTGRID] );
 	ri.Cmd_ExecuteText( EXEC_NOW, "updatescreen\n" );
 

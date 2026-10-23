@@ -3067,7 +3067,7 @@ the one after it, see the mark list at level 2).
 =================
 */
 #define LP_MAXGAPS  8192
-#define LP_MAXMARKS 128
+#define LP_MAXMARKS 192
 #define LP_NAMELEN  40
 #define LP_HINTLEN  36
 
@@ -3097,6 +3097,8 @@ void Com_LoadProfileBegin( const char *why ) {
 	lp.cur = -1;
 }
 
+static int lpFrameBudget;
+
 void Com_LoadProfileMark( const char *stage ) {
 	if ( Com_OffloadIsWorker() ) {
 		return;     // the profiler state belongs to the main thread
@@ -3107,6 +3109,27 @@ void Com_LoadProfileMark( const char *stage ) {
 	lp.markUs[lp.numMarks] = Sys_Microseconds();
 	Q_strncpyz( lp.markName[lp.numMarks], stage, LP_NAMELEN );
 	lp.cur = lp.numMarks++;
+	if ( !strcmp( stage, "sv:end" ) ) {
+		lpFrameBudget = 100;     // Com_LoadProfileFrameMark: the first Com_Frame passes after the server spawn
+	}
+}
+
+/*
+Marks inside Com_Frame / the gamestate path, only for the first frames after sv:end (a fixed budget, so the
+slots are not flooded). Shows what runs between the last server frame and the client's gamestate parse.
+*/
+void Com_LoadProfileFrameMark( const char *stage ) {
+	if ( lpFrameBudget <= 0 ) {
+		return;
+	}
+	if ( !Com_OffloadIsWorker() && com_loadProfile && com_loadProfile->integer && lp.active && lp.numMarks < LP_MAXMARKS ) {
+		// only stretches of 4 ms or more are worth a slot (the pacer waits and idle passes would flood them)
+		if ( lp.numMarks > 0 && Sys_Microseconds() - lp.markUs[lp.numMarks - 1] < 4000 ) {
+			return;
+		}
+		lpFrameBudget--;
+		Com_LoadProfileMark( stage );
+	}
 }
 
 /*
@@ -3302,6 +3325,7 @@ void Com_Frame( void ) {
 
 	// write config file if anything changed
 	Com_WriteConfiguration();
+	Com_LoadProfileFrameMark( "f:writecfg" );
 
 	//
 	// main event loop
@@ -3367,6 +3391,8 @@ void Com_Frame( void ) {
 			NET_Sleep(timeVal - 1);
 	} while(Com_TimeVal(minMsec));
 
+	CL_LoadingReplayTick();     // idle frames of the local connect handshake keep the loading screen alive (no-op outside a load)
+	Com_LoadProfileFrameMark( "f:wait" );
 	IN_Frame();
 	
 	lastTime = com_frameTime;
@@ -3374,8 +3400,10 @@ void Com_Frame( void ) {
 	
 	msec = com_frameTime - lastTime;
 	msec = Com_PacedMsec( msec );
+	Com_LoadProfileFrameMark( "f:events" );
 
 	Cbuf_Execute();
+	Com_LoadProfileFrameMark( "f:cbuf" );
 
 	if (com_altivec->modified)
 	{
@@ -3394,6 +3422,7 @@ void Com_Frame( void ) {
 	}
 
 	SV_Frame( msec );
+	Com_LoadProfileFrameMark( "f:sv" );
 
 	// if "dedicated" has been modified, start up
 	// or shut down the client system.
@@ -3422,7 +3451,9 @@ void Com_Frame( void ) {
 		timeBeforeEvents = Sys_Milliseconds ();
 	}
 	Com_EventLoop();
+	Com_LoadProfileFrameMark( "f:events2" );
 	Cbuf_Execute ();
+	Com_LoadProfileFrameMark( "f:cbuf2" );
 
 	//
 	// client side
@@ -3432,6 +3463,7 @@ void Com_Frame( void ) {
 	}
 
 	CL_Frame( msec );
+	Com_LoadProfileFrameMark( "f:cl" );
 
 	if ( com_speeds->integer ) {
 		timeAfter = Sys_Milliseconds ();

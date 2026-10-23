@@ -3285,6 +3285,7 @@ void CL_Frame( int msec ) {
 	CL_SetCGameTime();
 
 	// update the screen
+	if ( clc.state == CA_ACTIVE ) { Com_LoadProfileMark( "cl:first_frame_begin" ); }    // no-op once the profile ended
 	SCR_UpdateScreen();
 	if ( clc.state == CA_ACTIVE ) { Com_LoadProfileEnd(); }
 

@@ -297,6 +297,13 @@ SV_GameSystemCalls
 The module is making a system call
 ====================
 */
+/*
+Keeps the loading screen alive while G_InitGame runs (SS_LOADING only, so it costs one compare during play).
+The replay is raw GL on the main thread and touches no server, VM or FS state; rate limited and gated on
+com_loadingFps inside CL_LoadingReplayTick.
+*/
+#define SV_LOADING_TICK() do { if ( sv.state == SS_LOADING ) { CL_LoadingReplayTick(); } } while ( 0 )
+
 intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	switch ( args[0] ) {
 	case G_PRINT:
@@ -334,6 +341,7 @@ intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return 0;
 
 	case G_FS_FOPEN_FILE:
+		SV_LOADING_TICK();
 		return FS_FOpenFileByMode( VMA( 1 ), VMA( 2 ), args[3] );
 	case G_FS_READ:
 		FS_Read( VMA( 1 ), args[2], args[3] );
@@ -345,6 +353,7 @@ intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return 0;
 	case G_FS_FCLOSE_FILE:
 		FS_FCloseFile( args[1] );
+		SV_LOADING_TICK();
 		return 0;
 	case G_FS_COPY_FILE:
 		FS_CopyFileOS( VMA( 1 ), VMA( 2 ) );    //DAJ
@@ -363,6 +372,7 @@ intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return 0;
 	case G_LINKENTITY:
 		SV_LinkEntity( VMA( 1 ) );
+		SV_LOADING_TICK();
 		return 0;
 	case G_UNLINKENTITY:
 		SV_UnlinkEntity( VMA( 1 ) );
@@ -383,6 +393,7 @@ intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return SV_PointContents( VMA( 1 ), args[2] );
 	case G_SET_BRUSH_MODEL:
 		SV_SetBrushModel( VMA( 1 ), VMA( 2 ) );
+		SV_LOADING_TICK();
 		return 0;
 	case G_IN_PVS:
 		return SV_inPVS( VMA( 1 ), VMA( 2 ) );
@@ -391,6 +402,7 @@ intptr_t SV_GameSystemCalls( intptr_t *args ) {
 
 	case G_SET_CONFIGSTRING:
 		SV_SetConfigstring( args[1], VMA( 2 ) );
+		SV_LOADING_TICK();
 		return 0;
 	case G_GET_CONFIGSTRING:
 		SV_GetConfigstring( args[1], VMA( 2 ), args[3] );
@@ -470,6 +482,7 @@ intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case BOTLIB_START_FRAME:
 		return botlib_export->BotLibStartFrame( VMF( 1 ) );
 	case BOTLIB_LOAD_MAP:
+		SV_LOADING_TICK();
 		return botlib_export->BotLibLoadMap( VMA( 1 ) );
 	case BOTLIB_UPDATENTITY:
 		return botlib_export->BotLibUpdateEntity( args[1], VMA( 2 ) );

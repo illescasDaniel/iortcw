@@ -3265,7 +3265,9 @@ void FS_AddGameDirectory( const char *path, const char *dir ) {
 			}
 			// jpw
 			pakfile = FS_BuildOSPath( path, dir, sorted[i] );
-			if ( ( pak = FS_LoadZipFile( pakfile, sorted[i] ) ) == 0 ) {
+			pak = FS_LoadZipFile( pakfile, sorted[i] );
+			CL_LoadingReplayTick();     // one pk3 directory read (raw GL + swap, touches no FS state; no-op outside a map load)
+			if ( pak == 0 ) {
 				continue;
 			}
 			// store the game name for downloading
@@ -4323,6 +4325,7 @@ void FS_Restart( int checksumFeed ) {
 
 	// free anything we currently have loaded
 	FS_Shutdown( qfalse );
+	CL_LoadingReplayTick();
 
 	// set the checksum feed
 	fs_checksumFeed = checksumFeed;
@@ -4332,6 +4335,7 @@ void FS_Restart( int checksumFeed ) {
 
 	// try to start up normally
 	FS_Startup(com_basegame->string);
+	CL_LoadingReplayTick();
 
 #ifndef STANDALONE
 	FS_CheckPak0( );
