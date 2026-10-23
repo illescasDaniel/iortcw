@@ -1862,6 +1862,7 @@ Q3R2OBJ = \
   $(B)/rend2/tr_image_dds.o \
   $(B)/rend2/tr_init.o \
   $(B)/rend2/tr_light.o \
+  $(B)/rend2/tr_loadscreen.o \
   $(B)/rend2/tr_main.o \
   $(B)/rend2/tr_marks.o \
   $(B)/rend2/tr_mesh.o \

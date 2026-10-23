@@ -824,6 +824,7 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 	// Destroy existing state if it exists
 	if( SDL_glContext != NULL )
 	{
+		R_LoadScreenInvalidate();	// loading snapshot GL objects die with the context
 		GLimp_ClearProcAddresses();
 		SDL_GL_DeleteContext( SDL_glContext );
 		SDL_glContext = NULL;
@@ -1510,6 +1511,39 @@ success:
 	ri.IN_Init( SDL_window );
 }
 
+
+/*
+===============
+GLimp_GetDrawableSize
+
+Current drawable size of the window, independent of glConfig / tr state.
+===============
+*/
+qboolean GLimp_GetDrawableSize( int *w, int *h )
+{
+	*w = *h = 0;
+	if ( !SDL_window || !SDL_glContext )
+		return qfalse;
+	SDL_GL_GetDrawableSize( SDL_window, w, h );
+	return *w > 0 && *h > 0;
+}
+
+/*
+===============
+GLimp_SwapOnly
+
+Plain swap for the loading screen replay: no pacing wait, no fullscreen/vsync
+cvar handling (those read renderer cvars that may not exist yet mid-init).
+===============
+*/
+void GLimp_SwapOnly( void )
+{
+	if ( !SDL_window || !SDL_glContext )
+		return;
+	SDL_GL_SwapWindow( SDL_window );
+	if ( ri.PresentDone )
+		ri.PresentDone( GLimp_Finish );
+}
 
 /*
 ===============

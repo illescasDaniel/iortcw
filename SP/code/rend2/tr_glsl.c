@@ -739,6 +739,7 @@ void GLSL_FinishGPUShader(shaderProgram_t *program)
 {
 	GLSL_ShowProgramUniforms(program->program);
 	GL_CheckErrors();
+	R_LOADING_REPLAY();     // one program done (linking dominates R_Init)
 }
 
 void GLSL_SetUniformInt(shaderProgram_t *program, int uniformNum, GLint value)

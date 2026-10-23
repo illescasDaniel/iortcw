@@ -803,6 +803,7 @@ intptr_t CL_UISystemCalls( intptr_t *args ) {
 		return 0;
 
 	case UI_FS_FOPENFILE:
+		CL_LoadingReplayTick();     // UI_INIT opens many menu files while a map loads (no-op otherwise)
 		return FS_FOpenFileByMode( VMA( 1 ), VMA( 2 ), args[3] );
 
 	case UI_FS_READ:
@@ -1071,6 +1072,7 @@ intptr_t CL_UISystemCalls( intptr_t *args ) {
 	case UI_PC_ADD_GLOBAL_DEFINE:
 		return botlib_export->PC_AddGlobalDefine( VMA( 1 ) );
 	case UI_PC_LOAD_SOURCE:
+		CL_LoadingReplayTick();
 		return botlib_export->PC_LoadSourceHandle( VMA( 1 ) );
 	case UI_PC_FREE_SOURCE:
 		return botlib_export->PC_FreeSourceHandle( args[1] );
@@ -1161,6 +1163,7 @@ void CL_InitUI( void ) {
 	if ( !uivm ) {
 		Com_Error( ERR_FATAL, "VM_Create on UI failed" );
 	}
+	CL_LoadingReplayTick();
 
 	// sanity check
 	v = VM_Call( uivm, UI_GETAPIVERSION );

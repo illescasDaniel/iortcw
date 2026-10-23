@@ -483,9 +483,12 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		// We can't call Com_EventLoop here, a restart will crash and this _does_ happen
 		// if there is a map change while we are downloading a pk3.
 		// ZOID
+		Com_LoadProfileMark( "cg:update" );
 		SCR_UpdateScreen();
+		CL_LoadingTickArm( qtrue );
 		return 0;
 	case CG_CM_LOADMAP:
+		CL_LoadingTick();
 		CL_CM_LoadMap( VMA( 1 ) );
 		return 0;
 	case CG_CM_NUMINLINEMODELS:
@@ -559,6 +562,7 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		S_Respatialize( args[1], VMA( 2 ), VMA( 3 ), args[4] );
 		return 0;
 	case CG_S_REGISTERSOUND:
+		CL_LoadingTick();
 #ifdef DOOMSOUND    ///// (SA) DOOMSOUND
 		return S_RegisterSound( VMA( 1 ) );
 #else
@@ -578,11 +582,15 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		S_FadeAllSounds( VMF( 1 ), args[2] );   //----(SA)	added
 		return 0;
 	case CG_R_LOADWORLDMAP:
+		Com_LoadProfileMark( "cg:world_begin" );
 		re.LoadWorld( VMA( 1 ) );
+		Com_LoadProfileMark( "cg:world_end" );
 		return 0;
 	case CG_R_REGISTERMODEL:
+		CL_LoadingTick();
 		return re.RegisterModel( VMA( 1 ) );
 	case CG_R_REGISTERSKIN:
+		CL_LoadingTick();
 		return re.RegisterSkin( VMA( 1 ) );
 
 		//----(SA)	added
@@ -593,11 +601,14 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		//----(SA)	end
 
 	case CG_R_REGISTERSHADER:
+		CL_LoadingTick();
 		return re.RegisterShader( VMA( 1 ) );
 	case CG_R_REGISTERFONT:
+		CL_LoadingTick();
 		re.RegisterFont( VMA( 1 ), args[2], VMA( 3 ) );
 		return 0;
 	case CG_R_REGISTERSHADERNOMIP:
+		CL_LoadingTick();
 		return re.RegisterShaderNoMip( VMA( 1 ) );
 	case CG_R_CLEARSCENE:
 		re.ClearScene();
@@ -1008,6 +1019,8 @@ void CL_InitCGame( void ) {
 	// init for this gamestate
 	// use the lastExecutedServerCommand instead of the serverCommandSequence
 	// otherwise server commands sent just before a gamestate are dropped
+	Com_LoadProfileMark( "cg:init_begin" );
+	CL_LoadingTickArm( qfalse );
 	VM_Call( cgvm, CG_INIT, clc.serverMessageSequence, clc.lastExecutedServerCommand, clc.clientNum );
 
 	// reset any CVAR_CHEAT cvars registered by cgame
@@ -1017,6 +1030,7 @@ void CL_InitCGame( void ) {
 	// we will send a usercmd this frame, which
 	// will cause the server to send us the first snapshot
 	clc.state = CA_PRIMED;
+	CL_LoadingTickArm( qfalse );
 
 	t2 = Sys_Milliseconds();
 
@@ -1024,12 +1038,16 @@ void CL_InitCGame( void ) {
 
 	// have the renderer touch all its images, so they are present
 	// on the card even if the driver does deferred loading
+	Com_LoadProfileMark( "cg:init_end" );
 	re.EndRegistration();
+	Com_LoadProfileMark( "cl:end_registration" );
+	CL_LoadingReplayTick();
 
 	// make sure everything is paged in
 	if ( !Sys_LowPhysicalMemory() ) {
 		Com_TouchMemory();
 	}
+	CL_LoadingReplayTick();
 
 	// clear anything that got printed
 	Con_ClearNotify();
@@ -1152,6 +1170,7 @@ void CL_FirstSnapshot( void ) {
 		return;
 	}
 	clc.state = CA_ACTIVE;
+	CL_LoadingEnd();
 
 	// set the timedelta so we are exactly on this first frame
 	cl.serverTimeDelta = cl.snap.serverTime - cls.realtime;

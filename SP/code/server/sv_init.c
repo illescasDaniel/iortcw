@@ -690,6 +690,8 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 	char systemInfo[16384];
 	const char  *p;
 
+	Com_LoadProfileBegin( "map" );
+
 	// Ridah, enforce maxclients in single player, so there is enough room for AI characters
 	{
 		static cvar_t   *g_gametype, *bot_enable;
@@ -735,6 +737,7 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 
 	// make sure all the client stuff is unloaded
 	CL_ShutdownAll(qfalse);
+	CL_LoadingReplayTick();     // renderer + UI are down: keep presenting the loading frame
 
 	// clear the whole hunk because we're (re)loading the server
 	Hunk_Clear();
@@ -804,6 +807,8 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 		Hunk_FreeTempMemory( buffer );
 	}
 	// done.
+	Com_LoadProfileMark( "sv:savegame" );
+	CL_LoadingReplayTick();
 
 	// allocate empty config strings
 	for ( i = 0 ; i < MAX_CONFIGSTRINGS ; i++ ) {
@@ -825,8 +830,12 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 	sv.checksumFeed = ( ( (unsigned int)rand() << 16 ) ^ (unsigned int)rand() ) ^ Com_Milliseconds();
 
 	FS_Restart( sv.checksumFeed );
+	Com_LoadProfileMark( "sv:fs_restart" );
+	CL_LoadingReplayTick();
 
 	CM_LoadMap( va( "maps/%s.bsp", server ), qfalse, &checksum );
+	Com_LoadProfileMark( "sv:cm_loadmap" );
+	CL_LoadingReplayTick();
 
 	// set serverinfo visible name
 	Cvar_Set( "mapname", server );
@@ -847,7 +856,10 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 	sv.state = SS_LOADING;
 
 	// load and spawn all other entities
+	CL_LoadingReplayTick();
 	SV_InitGameProgs();
+	Com_LoadProfileMark( "sv:gameprogs" );
+	CL_LoadingReplayTick();
 
 	// don't allow a map_restart if game is modified
 	sv_gametype->modified = qfalse;
@@ -859,7 +871,9 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 		SV_BotFrame (sv.time);
 		sv.time += 100;
 		svs.time += 100;
+		CL_LoadingReplayTick();
 	}
+	Com_LoadProfileMark( "sv:settle" );
 
 	// create a baseline for more efficient communications
 	SV_CreateBaseline();
@@ -914,6 +928,7 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 	SV_BotFrame (sv.time);
 	sv.time += 100;
 	svs.time += 100;
+	CL_LoadingReplayTick();
 
 	if ( sv_pure->integer ) {
 		// the server sends these to the clients so they will only

@@ -396,7 +396,9 @@ static void S_AL_BufferLoad(sfxHandle_t sfx, qboolean cache)
 		return;
 
 	// Try to load
+	Com_LoadProfileHint(curSfx->filename);
 	data = S_CodecLoad(curSfx->filename, &info);
+	CL_LoadingReplayTick();     // file read + decode done (no-op outside a local map load)
 	if(!data)
 	{
 		S_AL_BufferUseDefault(sfx);
@@ -434,6 +436,7 @@ static void S_AL_BufferLoad(sfxHandle_t sfx, qboolean cache)
 		qalBufferData(curSfx->buffer, format, data, info.size, info.rate);
 
 	error = qalGetError();
+	CL_LoadingReplayTick();
 
 	// If we ran out of memory, start evicting the least recently used sounds
 	while(error == AL_OUT_OF_MEMORY)

@@ -2106,6 +2106,7 @@ void RB_ShowImages( void ) {
 
 	for ( i=0 ; i<tr.numImages ; i++ ) {
 		image = tr.images[i];
+		R_LOADING_REPLAY();     // EndRegistration touches every image (no-op outside a load)
 
 		w = glConfig.vidWidth / 40;
 		h = glConfig.vidHeight / 30;
@@ -2258,6 +2259,9 @@ const void	*RB_SwapBuffers( const void *data ) {
 		{
 			FBO_FastBlit(tr.renderFbo, NULL, NULL, NULL, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		}
+
+		// loading frames only (no-op otherwise): keep a copy for the loading screen replay
+		R_LoadScreenCapture();
 	}
 
 	// stock Q3 waited for the GPU to go idle here every frame, so the next frame's CPU work

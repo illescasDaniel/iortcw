@@ -1034,6 +1034,8 @@ void CL_PacketEvent( netadr_t from, msg_t *msg );
 void CL_ConsolePrint( char *text );
 
 void CL_MapLoading( void );
+// re-present the last loading frame with a spinner (rate limited, no-op unless com_loadingFps > 0 and a local load is running)
+void CL_LoadingReplayTick( void );
 // do a screen update before starting to load a map
 // when the server is going to load a new map, the entire hunk
 // will be cleared, so the client must shutdown cgame, ui, and
@@ -1162,6 +1164,11 @@ extern int com_frameFracUs;
 extern long long com_frameClockUs;
 // Sys_Microseconds time right after the last buffer swap (bench: present cadence)
 extern long long com_lastPresentUs;
+// Opt-in load-time profiler (cvar com_loadProfile); all no-ops when 0
+void Com_LoadProfileBegin( const char *why );
+void Com_LoadProfileMark( const char *stage );
+void Com_LoadProfileEnd( void );
+void Com_LoadProfileHint( const char *what );   // names the asset being loaded (shown on LOADPROFILE_GAP lines)
 
 qboolean Sys_RandomBytes( byte *string, int len );
 

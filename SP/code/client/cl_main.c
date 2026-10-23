@@ -1405,6 +1405,7 @@ void CL_MapLoading( void ) {
 		Com_Memset( clc.serverMessage, 0, sizeof( clc.serverMessage ) );
 		Com_Memset( &cl.gameState, 0, sizeof( cl.gameState ) );
 		clc.lastPacketSentTime = -9999;
+		CL_LoadingBegin();
 		SCR_UpdateScreen();
 	} else {
 		// clear nextmap so the cinematic shutdown doesn't execute it
@@ -1413,6 +1414,7 @@ void CL_MapLoading( void ) {
 		Q_strncpyz( clc.servername, "localhost", sizeof(clc.servername) );
 		clc.state = CA_CHALLENGING;		// so the connect screen is drawn
 		Key_SetCatcher( 0 );
+		CL_LoadingBegin();      // after CL_Disconnect, which ends any load
 		SCR_UpdateScreen();
 		clc.connectTime = -RETRANSMIT_TIMEOUT;
 		NET_StringToAdr( clc.servername, &clc.serverAddress, NA_UNSPEC);
@@ -1486,6 +1488,8 @@ void CL_Disconnect( qboolean showMainMenu ) {
 	if ( !com_cl_running || !com_cl_running->integer ) {
 		return;
 	}
+
+	CL_LoadingEnd();
 
 	// shutting down the client so enter full screen ui mode
 	Cvar_Set( "r_uiFullScreen", "1" );
@@ -2088,6 +2092,7 @@ void CL_Vid_Restart_f( void ) {
 		return;
 	}
 
+	Com_LoadProfileBegin( "vid_restart" );
 	hardContext = CL_Vid_RestartNeedsHardContext();
 
 	// RF, don't show percent bar, since the memory usage will just sit at the same level anyway
@@ -2330,10 +2335,13 @@ void CL_DownloadsComplete( void ) {
 	// this will also (re)load the UI
 	// if this is a local client then only the client part of the hunk
 	// will be cleared, note that this is done after the hunk mark has been set
+	Com_LoadProfileMark( "cl:flush_begin" );
 	CL_FlushMemory();
+	Com_LoadProfileMark( "cl:flush_end" );
 
 	// initialize the CGame
 	cls.cgameStarted = qtrue;
+	Com_LoadProfileMark( "cl:cgame_begin" );
 	CL_InitCGame();
 
 	// set pure checksums
@@ -3267,6 +3275,7 @@ void CL_Frame( int msec ) {
 
 	// update the screen
 	SCR_UpdateScreen();
+	if ( clc.state == CA_ACTIVE ) { Com_LoadProfileEnd(); }
 
 	// update audio
 	S_Update();
@@ -3501,12 +3510,14 @@ CL_InitRenderer
 void CL_InitRenderer( void ) {
 	// this sets up the renderer and calls R_Init
 	re.BeginRegistration( &cls.glconfig );
+	CL_LoadingReplayTick();
 
 	// load character sets
 	cls.charSetShader = re.RegisterShader( "gfx/2d/bigchars" );
 	cls.whiteShader = re.RegisterShader( "white" );
 	cls.consoleShader = re.RegisterShader( "console" );
 	cls.consoleShader2 = re.RegisterShader( "console2" );
+	CL_LoadingReplayTick();
 	g_console_field_width = cls.glconfig.vidWidth / SMALLCHAR_WIDTH - 2;
 	g_consoleField.widthInChars = g_console_field_width;
 	CL_SyncDisplayMode();
@@ -3531,7 +3542,10 @@ void CL_StartHunkUsers( qboolean rendererOnly ) {
 
 	if ( !cls.rendererStarted ) {
 		cls.rendererStarted = qtrue;
+		Com_LoadProfileMark( "cl:r_init_begin" );
 		CL_InitRenderer();
+		Com_LoadProfileMark( "cl:r_init_end" );
+		CL_LoadingReplayTick();
 	}
 
 	if ( rendererOnly ) {
@@ -3541,11 +3555,15 @@ void CL_StartHunkUsers( qboolean rendererOnly ) {
 	if ( !cls.soundStarted ) {
 		cls.soundStarted = qtrue;
 		S_Init();
+		Com_LoadProfileMark( "cl:s_init" );
+		CL_LoadingReplayTick();
 	}
 
 	if ( !cls.soundRegistered ) {
 		cls.soundRegistered = qtrue;
 		S_BeginRegistration();
+		Com_LoadProfileMark( "cl:s_beginreg" );
+		CL_LoadingReplayTick();
 	}
 
 	if( com_dedicated->integer ) {
@@ -3554,7 +3572,10 @@ void CL_StartHunkUsers( qboolean rendererOnly ) {
 
 	if ( !cls.uiStarted ) {
 		cls.uiStarted = qtrue;
+		Com_LoadProfileMark( "cl:ui_begin" );
 		CL_InitUI();
+		Com_LoadProfileMark( "cl:ui_end" );
+		CL_LoadingReplayTick();
 	}
 }
 
@@ -3605,6 +3626,9 @@ void CL_InitRef( void ) {
 	ri.Milliseconds = CL_ScaledMilliseconds;
 	ri.PresentWait = Com_PresentWait;
 	ri.PresentDone = Com_PresentDone;
+	ri.LoadingTick = CL_LoadingTick;
+	ri.LoadingReplayTick = CL_LoadingReplayTick;
+	ri.LoadProfileHint = Com_LoadProfileHint;
 
 	ri.Z_Malloc = Z_Malloc;
 	ri.Free = Z_Free;

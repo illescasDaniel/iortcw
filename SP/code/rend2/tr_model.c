@@ -380,7 +380,9 @@ qhandle_t RE_RegisterModel( const char *name ) {
 		mod->ATI_tess = qtrue;
 	}
 
+	R_LOADING_HINT( name );
 	R_IssuePendingRenderCommands();
+	R_LOADING_REPLAY();
  
 	mod->type = MOD_BAD;
 	mod->numLods = 0;

@@ -149,6 +149,7 @@ extern void (APIENTRYP qglPNTrianglesfATI)(GLenum pname, GLfloat param);
 	GLE(void, Flush, void) \
 	GLE(void, GenTextures, GLsizei n, GLuint *textures ) \
 	GLE(void, GetBooleanv, GLenum pname, GLboolean *params) \
+	GLE(void, GetFloatv, GLenum pname, GLfloat *params) \
 	GLE(GLenum, GetError, void) \
 	GLE(void, GetIntegerv, GLenum pname, GLint *params) \
 	GLE(const GLubyte *, GetString, GLenum name) \

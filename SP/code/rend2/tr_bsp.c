@@ -309,6 +309,10 @@ static	void R_LoadLightmaps( lump_t *l, lump_t *surfs ) {
 	for(i = 0; i < numLightmaps; i++)
 	{
 		int xoff = 0, yoff = 0;
+
+		// safe point: the previous lightmap is fully uploaded
+		R_LOADING_TICK();
+
 		int lightmapnum = i;
 		// expand the 24 bit on-disk to 32 bit
 
@@ -1853,6 +1857,8 @@ static	void R_LoadSurfaces( lump_t *surfs, lump_t *verts, lump_t *indexLump ) {
 		default:
 			ri.Error( ERR_DROP, "Bad surfaceType" );
 		}
+		// safe point: the surface (and its shader lookup) is fully parsed
+		R_LOADING_TICK();       // cheap: rate limited
 	}
 
 	if (hdrVertColors)
@@ -1863,8 +1869,10 @@ static	void R_LoadSurfaces( lump_t *surfs, lump_t *verts, lump_t *indexLump ) {
 #ifdef PATCH_STITCHING
 	R_StitchAllPatches();
 #endif
+	R_LOADING_TICK();
 
 	R_FixSharedVertexLodError();
+	R_LOADING_TICK();
 
 #ifdef PATCH_STITCHING
 	R_MovePatchSurfacesToHunk();
@@ -2858,6 +2866,7 @@ void R_LoadCubemaps(void)
 		Com_sprintf(filename, MAX_QPATH, "cubemaps/%s/%03d.dds", tr.world->baseName, i);
 
 		cubemap->image = R_FindImageFile(filename, IMGTYPE_COLORALPHA, flags);
+		R_LOADING_TICK();
 	}
 }
 
@@ -2881,6 +2890,10 @@ void R_RenderMissingCubemaps(void)
 				R_RenderCubemapSide(i, j, qfalse);
 				R_IssuePendingRenderCommands();
 				R_InitNextFrame();
+				// safe point: the command buffer is empty and the cubemap side is complete. The loading
+				// frame binds its own FBOs (RB_DrawBuffer, 2D draws, swap blit) and the next side's view
+				// rebinds the cube FBO and viewport, so no state needs restoring.
+				R_LOADING_TICK();
 			}
 		}
 	}
@@ -2895,6 +2908,10 @@ void R_CalcVertexLightDirs( void )
 	for(k = 0, surface = &s_worldData.surfaces[0]; k < s_worldData.numsurfaces /* s_worldData.numWorldSurfaces */; k++, surface++)
 	{
 		srfBspSurface_t *bspSurf = (srfBspSurface_t *) surface->data;
+
+		if ( !( k & 63 ) ) {
+			R_LOADING_TICK();
+		}
 
 		switch(bspSurf->surfaceType)
 		{
@@ -3048,6 +3065,7 @@ void RE_LoadWorldMap( const char *name ) {
 
 	// determine vertex light directions
 	R_CalcVertexLightDirs();
+	R_LOADING_TICK();
 
 	// determine which parts of the map are in sunlight
 	if (0)

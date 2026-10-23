@@ -1902,27 +1902,35 @@ void R_Init( void ) {
 	R_InitNextFrame();
 
 	InitOpenGL();
+	R_LOADING_REPLAY();
 
 	R_InitImages();
+	R_LOADING_REPLAY();
 
 	if (glRefConfig.framebufferObject)
 		FBO_Init();
+	R_LOADING_REPLAY();
 
 	GLSL_InitGPUShaders();
+	R_LOADING_REPLAY();
 
 	R_InitVaos();
+	R_LOADING_REPLAY();
 
 	R_InitShaders();
+	R_LOADING_REPLAY();
 
 	R_InitSkins();
 
 	R_ModelInit();
+	R_LOADING_REPLAY();
 
 	R_InitFreeType();
 
 	R_InitQueries();
 
 	RB_ZombieFXInit();
+	R_LOADING_REPLAY();
 
 	err = qglGetError();
 	if ( err != GL_NO_ERROR ) {
@@ -1960,6 +1968,10 @@ void RE_Shutdown( qboolean destroyWindow ) {
 	// Ridah
 	ri.Cmd_RemoveCommand( "cropimages" );
 	// done.
+
+	if ( destroyWindow ) {
+		R_LoadScreenShutdown();     // free the loading snapshot while the context is alive
+	}
 
 	if ( tr.registered ) {
 		R_IssuePendingRenderCommands();
@@ -2002,9 +2014,11 @@ Touch all images to make sure they are resident
 */
 void RE_EndRegistration( void ) {
 	R_IssuePendingRenderCommands();
+	R_LOADING_REPLAY();
 	if (!ri.Sys_LowPhysicalMemory()) {
 		RB_ShowImages();
 	}
+	R_LOADING_REPLAY();
 }
 
 
@@ -2078,6 +2092,8 @@ refexport_t *GetRefAPI( int apiVersion, refimport_t *rimp ) {
 	re.RemapShader      = R_RemapShader;
 	re.GetEntityToken   = R_GetEntityToken;
 	re.TakeVideoFrame = RE_TakeVideoFrame;
+	re.LoadingSnapshot = RE_LoadingSnapshot;
+	re.PresentLoadingSnapshot = RE_PresentLoadingSnapshot;
 
 	// RF
 	re.ZombieFXAddNewHit = RB_ZombieFXAddNewHit;

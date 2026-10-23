@@ -658,6 +658,12 @@ void CL_SaveConsoleHistory( void );
 //
 void    SCR_Init( void );
 void    SCR_UpdateScreen( void );
+void    CL_LoadingTick( void );
+void    CL_LoadingTickArm( qboolean armed );
+void    CL_LoadingBegin( void );
+void    CL_LoadingEnd( void );
+qboolean CL_LoadingFrameWanted( void );
+void    IN_PumpEvents( void );
 
 void	SCR_DebugGraph (float value);
 

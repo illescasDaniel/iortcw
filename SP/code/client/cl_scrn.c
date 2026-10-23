@@ -37,6 +37,17 @@ cvar_t      *cl_debuggraph;
 cvar_t      *cl_graphheight;
 cvar_t      *cl_graphscale;
 cvar_t      *cl_graphshift;
+static cvar_t *com_loadingFps;
+
+// SCR_UpdateScreen nesting depth (file scope so CL_LoadingTick can see it)
+static int scr_recursive;
+// CL_LoadingTick state: armed once cgame has started reporting loading progress
+static qboolean loadingTickArmed;
+static qboolean loadingTickBusy;
+static int loadingLastPresent;
+// a local map load is in progress (set by CL_MapLoading, cleared at the first snapshot / disconnect)
+static qboolean loadingActive;
+static qboolean loadingReplayBusy;
 
 /*
 ================
@@ -457,6 +468,8 @@ void SCR_Init( void ) {
 	cl_graphheight = Cvar_Get( "graphheight", "32", CVAR_CHEAT );
 	cl_graphscale = Cvar_Get( "graphscale", "1", CVAR_CHEAT );
 	cl_graphshift = Cvar_Get( "graphshift", "0", CVAR_CHEAT );
+	// internal: loading screen redraw rate during cgame init (0 = vanilla, only at CG_LoadingString)
+	com_loadingFps = Cvar_Get( "com_loadingFps", "0", 0 );
 
 	scr_initialized = qtrue;
 }
@@ -555,6 +568,39 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 
 /*
 ==================
+CL_LoadingBegin / CL_LoadingEnd
+
+A local map load starts (CL_MapLoading) or is over (first snapshot, disconnect, error).
+Only com_loadingFps > 0 makes anything of it.
+==================
+*/
+void CL_LoadingBegin( void ) {
+	loadingActive = qtrue;
+	loadingLastPresent = Sys_Milliseconds();
+}
+
+void CL_LoadingEnd( void ) {
+	loadingActive = qfalse;
+}
+
+/*
+==================
+CL_LoadingStateOk
+
+A load is in progress and the client is in the connect..primed window, where a
+loading frame is what the player should be seeing.
+==================
+*/
+static qboolean CL_LoadingStateOk( void ) {
+	return loadingActive && clc.state >= CA_CONNECTING && clc.state <= CA_PRIMED;
+}
+
+qboolean CL_LoadingFrameWanted( void ) {
+	return com_loadingFps != NULL && com_loadingFps->integer > 0 && CL_LoadingStateOk();
+}
+
+/*
+==================
 SCR_UpdateScreen
 
 This is called every frame, and can also be called explicitly to flush
@@ -562,16 +608,15 @@ text to the screen.
 ==================
 */
 void SCR_UpdateScreen( void ) {
-	static int recursive;
 
 	if ( !scr_initialized ) {
 		return;             // not initialized yet
 	}
 
-	if ( ++recursive > 2 ) {
+	if ( ++scr_recursive > 2 ) {
 		Com_Error( ERR_FATAL, "SCR_UpdateScreen: recursively called" );
 	}
-	recursive = 1;
+	scr_recursive = 1;
 
 	// If there is no VM, there are also no rendering commands issued. Stop the renderer in
 	// that case.
@@ -587,6 +632,11 @@ void SCR_UpdateScreen( void ) {
 			SCR_DrawScreenField( STEREO_CENTER );
 		}
 
+		// loading frames are copied aside by the renderer for CL_LoadingReplayTick
+		if ( re.LoadingSnapshot ) {
+			re.LoadingSnapshot( CL_LoadingFrameWanted() );
+		}
+
 		if ( com_speeds->integer ) {
 			re.EndFrame( &time_frontend, &time_backend );
 		} else {
@@ -594,5 +644,94 @@ void SCR_UpdateScreen( void ) {
 		}
 	}
 
-	recursive = 0;
+	scr_recursive = 0;
+}
+
+/*
+==================
+CL_LoadingTickArm
+
+Called with qfalse before CG_INIT and qtrue from the cgame UPDATESCREEN syscall
+(from then on cgame has set up enough state for a full loading screen redraw).
+Any real redraw also restarts the rate limit.
+==================
+*/
+void CL_LoadingTickArm( qboolean armed ) {
+	loadingTickArmed = armed;
+	loadingLastPresent = Sys_Milliseconds();
+}
+
+/*
+==================
+CL_LoadingTick
+
+Redraws the loading screen at com_loadingFps while cgame is initialising, so long
+loads (world, models, sounds) keep presenting frames. Only call it from safe points:
+top-level registration syscalls and renderer loader loops, never inside shader
+parsing, image/file loads or sound buffer fills.
+==================
+*/
+void CL_LoadingTick( void ) {
+	int now, interval;
+
+	if ( com_loadingFps == NULL || com_loadingFps->integer <= 0 ) {
+		return;
+	}
+	if ( loadingTickBusy || scr_recursive > 0 ) {
+		return;
+	}
+
+	interval = 1000 / com_loadingFps->integer;
+	now = Sys_Milliseconds();
+	if ( now - loadingLastPresent < interval ) {
+		return;
+	}
+
+	// full redraw only in the CG_INIT window (CA_LOADING, set in CL_InitCGame; CA_PRIMED follows the init)
+	// with everything it needs alive; otherwise fall back to re-presenting the last loading frame
+	if ( !loadingTickArmed || clc.state != CA_LOADING || !cls.rendererStarted || !uivm ) {
+		CL_LoadingReplayTick();
+		return;
+	}
+
+	loadingTickBusy = qtrue;
+	SCR_UpdateScreen();
+	IN_PumpEvents();
+	loadingLastPresent = Sys_Milliseconds();
+	loadingTickBusy = qfalse;
+}
+
+/*
+==================
+CL_LoadingReplayTick
+
+Re-presents the last full loading frame with a spinner on top, at com_loadingFps. Needs
+no VM, file system, shader or renderer state (raw GL in the renderer), so it can be
+called from anywhere during a local map load: server spawn steps, renderer / UI
+restart, EndRegistration, and inside single asset loads. Shares the rate limit with
+CL_LoadingTick.
+==================
+*/
+void CL_LoadingReplayTick( void ) {
+	int now;
+
+	if ( com_loadingFps == NULL || com_loadingFps->integer <= 0 ) {
+		return;
+	}
+	if ( loadingReplayBusy || loadingTickBusy || scr_recursive > 0 || !CL_LoadingStateOk() ) {
+		return;
+	}
+	if ( !re.PresentLoadingSnapshot ) {
+		return;
+	}
+	now = Sys_Milliseconds();
+	if ( now - loadingLastPresent < 1000 / com_loadingFps->integer ) {
+		return;
+	}
+
+	loadingReplayBusy = qtrue;
+	re.PresentLoadingSnapshot();
+	IN_PumpEvents();
+	loadingLastPresent = Sys_Milliseconds();
+	loadingReplayBusy = qfalse;
 }

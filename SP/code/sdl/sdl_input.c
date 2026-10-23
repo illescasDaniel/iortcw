@@ -414,6 +414,18 @@ static keyNum_t IN_TranslateSDLToQ3Key( SDL_Keysym *keysym, qboolean down )
 
 /*
 ===============
+IN_PumpEvents
+
+Keeps the window responsive during long loads without running the engine event loop.
+===============
+*/
+void IN_PumpEvents( void )
+{
+	SDL_PumpEvents( );
+}
+
+/*
+===============
 IN_GobbleMotionEvents
 ===============
 */

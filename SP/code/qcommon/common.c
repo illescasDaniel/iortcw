@@ -117,6 +117,7 @@ static cvar_t	*com_displayRefresh;
 int com_frameFracUs;
 long long com_frameClockUs;   // smooth frame clock (paced schedule, or real time uncapped)
 long long com_lastPresentUs;
+static cvar_t	*com_loadProfile;
 #ifndef DEDICATED
 cvar_t  *con_autochat;
 #endif
@@ -1041,12 +1042,18 @@ void Com_TouchMemory( void ) {
 	j = hunk_low.permanent >> 2;
 	for ( i = 0 ; i < j ; i += 64 ) {         // only need to touch each page
 		sum += ( (int *)s_hunkData )[i];
+		if ( ( i & 0xfffff ) < 64 ) {
+			CL_LoadingReplayTick();     // no-op outside a local map load
+		}
 	}
 
 	i = ( s_hunkTotal - hunk_high.permanent ) >> 2;
 	j = hunk_high.permanent >> 2;
 	for (  ; i < j ; i += 64 ) {          // only need to touch each page
 		sum += ( (int *)s_hunkData )[i];
+		if ( ( i & 0xfffff ) < 64 ) {
+			CL_LoadingReplayTick();
+		}
 	}
 
 	end = Sys_Milliseconds();
@@ -2440,6 +2447,7 @@ void Com_Init( char *commandLine ) {
 	// init commands and vars
 	//
 	com_altivec = Cvar_Get ("com_altivec", "1", CVAR_ARCHIVE);
+	com_loadProfile = Cvar_Get( "com_loadProfile", "0", CVAR_TEMP );
 	com_maxfps = Cvar_Get( "com_maxfps", "76", CVAR_ARCHIVE );
 	com_blood = Cvar_Get( "com_blood", "1", CVAR_ARCHIVE );
 
@@ -3040,6 +3048,121 @@ void Com_PresentWait( void ( *finish )( void ) ) {
 
 /*
 =================
+Load profiler (com_loadProfile 1 = summary, 2 = also list every mark)
+
+Fixed static storage only: the hunk is cleared mid-load. A gap is the time
+between two consecutive presents, attributed to the last mark set before the
+ending present (the most recently completed stage; the stage that blocked is
+the one after it, see the mark list at level 2).
+=================
+*/
+#define LP_MAXGAPS  8192
+#define LP_MAXMARKS 128
+#define LP_NAMELEN  40
+#define LP_HINTLEN  36
+
+static struct {
+	qboolean active;
+	char why[32];
+	long long beginUs, lastUs;
+	int cur;                    // index of last mark, -1 if none
+	int numMarks, numGaps;
+	long long markUs[LP_MAXMARKS];
+	char markName[LP_MAXMARKS][LP_NAMELEN];
+	int gapUs[LP_MAXGAPS];
+	int gapMark[LP_MAXGAPS];
+	int gapAtMs[LP_MAXGAPS];
+	char gapHint[LP_MAXGAPS][LP_HINTLEN];
+	char hint[LP_HINTLEN];      // asset most recently announced by Com_LoadProfileHint
+} lp;
+
+void Com_LoadProfileBegin( const char *why ) {
+	if ( !com_loadProfile || !com_loadProfile->integer ) {
+		return;
+	}
+	Com_Memset( &lp, 0, sizeof( lp ) );
+	Q_strncpyz( lp.why, why, sizeof( lp.why ) );
+	lp.active = qtrue;
+	lp.beginUs = lp.lastUs = Sys_Microseconds();
+	lp.cur = -1;
+}
+
+void Com_LoadProfileMark( const char *stage ) {
+	if ( !com_loadProfile || !com_loadProfile->integer || !lp.active || lp.numMarks >= LP_MAXMARKS ) {
+		return;
+	}
+	lp.markUs[lp.numMarks] = Sys_Microseconds();
+	Q_strncpyz( lp.markName[lp.numMarks], stage, LP_NAMELEN );
+	lp.cur = lp.numMarks++;
+}
+
+/*
+Cheap: copies the asset name into a fixed buffer, only while profiling. Not a mark (no slot used).
+A gap line carries the latest hint set before the ending present, i.e. the asset whose load blocked.
+*/
+void Com_LoadProfileHint( const char *what ) {
+	if ( !lp.active || !what ) {
+		return;
+	}
+	Q_strncpyz( lp.hint, what, LP_HINTLEN );
+}
+
+static void Com_LoadProfilePresent( long long now ) {
+	if ( lp.numGaps < LP_MAXGAPS ) {
+		lp.gapUs[lp.numGaps] = (int)( now - lp.lastUs );
+		lp.gapMark[lp.numGaps] = lp.cur;
+		lp.gapAtMs[lp.numGaps] = (int)( ( now - lp.beginUs ) / 1000 );
+		Q_strncpyz( lp.gapHint[lp.numGaps], lp.hint, LP_HINTLEN );
+		lp.numGaps++;
+	}
+	lp.lastUs = now;
+}
+
+static int Com_LoadProfileCmp( const void *a, const void *b ) {
+	return *(const int *)a - *(const int *)b;
+}
+
+void Com_LoadProfileEnd( void ) {
+	static int sorted[LP_MAXGAPS];
+	int i, max = 0, maxI = -1, over = 0, p95 = 0;
+
+	if ( !com_loadProfile || !lp.active ) {
+		return;
+	}
+	lp.active = qfalse;
+	for ( i = 0; i < lp.numGaps; i++ ) {
+		sorted[i] = lp.gapUs[i];
+		if ( lp.gapUs[i] > max ) {
+			max = lp.gapUs[i];
+			maxI = i;
+		}
+		if ( lp.gapUs[i] > 33000 ) {
+			over++;
+		}
+	}
+	if ( lp.numGaps ) {
+		qsort( sorted, lp.numGaps, sizeof( int ), Com_LoadProfileCmp );
+		p95 = sorted[( lp.numGaps * 95 ) / 100 < lp.numGaps ? ( lp.numGaps * 95 ) / 100 : lp.numGaps - 1];
+	}
+	Com_Printf( "LOADPROFILE %s total=%dms frames=%d maxgap=%dms@%s p95=%dms over33=%d\n", lp.why,
+		(int)( ( Sys_Microseconds() - lp.beginUs ) / 1000 ), lp.numGaps, max / 1000,
+		maxI >= 0 && lp.gapMark[maxI] >= 0 ? lp.markName[lp.gapMark[maxI]] : "-", p95 / 1000, over );
+	for ( i = 0; i < lp.numGaps; i++ ) {
+		if ( lp.gapUs[i] > 33000 ) {
+			Com_Printf( "LOADPROFILE_GAP %dms @%s t=%d hint=%s\n", lp.gapUs[i] / 1000,
+				lp.gapMark[i] >= 0 ? lp.markName[lp.gapMark[i]] : "-", lp.gapAtMs[i],
+				lp.gapHint[i][0] ? lp.gapHint[i] : "-" );
+		}
+	}
+	if ( com_loadProfile->integer >= 2 ) {
+		for ( i = 0; i < lp.numMarks; i++ ) {
+			Com_Printf( "LOADPROFILE_MARK %d %s\n", (int)( ( lp.markUs[i] - lp.beginUs ) / 1000 ), lp.markName[i] );
+		}
+	}
+}
+
+/*
+=================
 Com_PresentDone
 
 Called by the renderer right after the buffer swap. With vsync lock the swap
@@ -3050,6 +3173,9 @@ void Com_PresentDone( void ( *finish )( void ) ) {
 	long long now;
 
 	com_lastPresentUs = Sys_Microseconds();
+	if ( lp.active ) {
+		Com_LoadProfilePresent( com_lastPresentUs );
+	}
 	if ( com_vsync->integer != 4 || com_displayRefresh->value <= 1 ) {
 		pacer.vblankGood = 0;
 		return;

@@ -1622,6 +1622,7 @@ static qboolean RawImage_ScaleToPower2( byte **data, int *inout_width, int *inou
 			scaled_height <<= 1;
 
 			FCBIByBlock(*resampledBuffer, scaled_width, scaled_height, clampToEdge, (type == IMGTYPE_NORMAL || type == IMGTYPE_NORMALHEIGHT));
+			R_LOADING_REPLAY();     // one upsample step (touches only this image's buffers)
 		}
 
 		if (type == IMGTYPE_COLORALPHA)
@@ -1689,6 +1690,7 @@ static qboolean RawImage_ScaleToPower2( byte **data, int *inout_width, int *inou
 
 			width  = MAX(1, width >> 1);
 			height = MAX(1, height >> 1);
+			R_LOADING_REPLAY();
 		}
 	}
 
@@ -2071,6 +2073,8 @@ static void RawImage_UploadTexture(GLuint texture, byte *data, int x, int y, int
 			}
 		}
 
+		R_LOADING_REPLAY();     // one mip level uploaded
+
 		x >>= 1;
 		y >>= 1;
 		width = MAX(1, width >> 1);
@@ -2142,6 +2146,8 @@ static void Upload32(byte *data, int x, int y, int width, int height, GLenum pic
 		if (glRefConfig.swizzleNormalmap && (type == IMGTYPE_NORMAL || type == IMGTYPE_NORMALHEIGHT))
 			RawImage_SwizzleRA(data, width, height);
 	}
+
+	R_LOADING_REPLAY();     // light scale / swizzle passes done
 
 	if (cubemap)
 	{
@@ -2253,6 +2259,7 @@ image_t *R_CreateImageExt2( const char *name, byte *pic, int width, int height, 
 		}
 	}
 
+	R_LOADING_REPLAY();     // resample done
 	image->uploadWidth = width;
 	image->uploadHeight = height;
 
@@ -2281,6 +2288,8 @@ image_t *R_CreateImageExt2( const char *name, byte *pic, int width, int height, 
 		miplevel++;
 	}
 	while (!lastMip);
+
+	R_LOADING_REPLAY();     // texture storage allocated
 
 	// Upload data.
 	if (pic)
@@ -2522,10 +2531,12 @@ image_t	*R_FindImageFileExt( const char *name, imgType_t type, imgFlags_t flags,
 	//
 	// load the pic from disk
 	//
+	R_LOADING_HINT( name );
 	R_LoadImage( name, &pic, &width, &height, &picFormat, &picNumMips );
 	if ( pic == NULL ) {
 		return NULL;
 	}
+	R_LOADING_REPLAY();     // decode done, nothing else touched yet
 
 	checkFlagsTrue = IMGFLAG_PICMIP | IMGFLAG_MIPMAP | IMGFLAG_GENNORMALMAP;
 	checkFlagsFalse = IMGFLAG_CUBEMAP;
@@ -2628,6 +2639,7 @@ image_t	*R_FindImageFileExt( const char *name, imgType_t type, imgFlags_t flags,
 			}
 #endif
 
+			R_LOADING_REPLAY();
 			R_CreateImage( normalName, normalPic, normalWidth, normalHeight, IMGTYPE_NORMAL, normalFlags, 0 );
 			ri.Free( normalPic );	
 		}
@@ -2647,6 +2659,7 @@ image_t	*R_FindImageFileExt( const char *name, imgType_t type, imgFlags_t flags,
 			flags &= ~IMGFLAG_MIPMAP;
 	}
 
+	R_LOADING_REPLAY();
 	image = R_CreateImageExt2( ( char * ) name, pic, width, height, picFormat, picNumMips, type, flags, 0, characterMIP );
 	ri.Free( pic );
 	return image;

@@ -1481,6 +1481,13 @@ void		R_Modellist_f (void);
 //====================================================
 extern refimport_t ri;
 
+// redraw the loading screen at a limited rate; safe points only (see CL_LoadingTick)
+#define R_LOADING_TICK() do { if ( ri.LoadingTick ) { ri.LoadingTick(); } } while ( 0 )
+// re-present the last loading frame (raw GL, safe anywhere, even mid-shader/image load)
+#define R_LOADING_REPLAY() do { if ( ri.LoadingReplayTick ) { ri.LoadingReplayTick(); } } while ( 0 )
+// name the asset being loaded (load profiler gap attribution)
+#define R_LOADING_HINT( what ) do { if ( ri.LoadProfileHint ) { ri.LoadProfileHint( what ); } } while ( 0 )
+
 #define	MAX_DRAWIMAGES			2048
 #define	MAX_SKINS				1024
 
@@ -2442,6 +2449,15 @@ void	GLimp_Init( qboolean fixedFunction );
 void	GLimp_Shutdown( void );
 qboolean GLimp_SetModeInPlace( void );
 void	GLimp_EndFrame( void );
+void	GLimp_SwapOnly( void );
+qboolean GLimp_GetDrawableSize( int *w, int *h );
+
+// tr_loadscreen.c: loading screen snapshot / replay (state lives outside tr)
+void	R_LoadScreenCapture( void );
+void	R_LoadScreenShutdown( void );
+void	R_LoadScreenInvalidate( void );
+void	RE_LoadingSnapshot( qboolean enable );
+void	RE_PresentLoadingSnapshot( void );
 
 void	GLimp_LogComment( char *comment );
 void	GLimp_Minimize(void);

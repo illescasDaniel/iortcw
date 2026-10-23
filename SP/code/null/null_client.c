@@ -64,6 +64,9 @@ void CL_Disconnect( qboolean showMainMenu ) {
 void CL_MapLoading( void ) {
 }
 
+void CL_LoadingReplayTick( void ) {
+}
+
 qboolean CL_GameCommand( void ) {
 	return qfalse;
 }

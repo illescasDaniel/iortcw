@@ -3896,6 +3896,7 @@ shader_t *R_FindShaderEx( const char *name, int lightmapIndex, qboolean mipRawIm
 		}
 	}
 
+	R_LOADING_HINT( strippedName );
 	InitShaderEx( strippedName, lightmapIndex, realLightmapIndex );
 
 	//
@@ -3913,7 +3914,9 @@ shader_t *R_FindShaderEx( const char *name, int lightmapIndex, qboolean mipRawIm
 			// had errors, so use default shader
 			shader.defaultShader = qtrue;
 		}
+		R_LOADING_REPLAY();     // parse done (replay touches no shader state)
 		sh = FinishShader();
+		R_LOADING_REPLAY();
 		return sh;
 	}
 
@@ -3945,6 +3948,7 @@ shader_t *R_FindShaderEx( const char *name, int lightmapIndex, qboolean mipRawIm
 			shader.defaultShader = qtrue;
 			return FinishShader();
 		}
+		R_LOADING_REPLAY();
 	}
 
 	//
@@ -4388,7 +4392,9 @@ static void ScanAndLoadShaderFiles( void )
 		}
 		
 		ri.Printf( PRINT_DEVELOPER, "...loading '%s'\n", filename );
+		R_LOADING_HINT( filename );
 		summand = ri.FS_ReadFile( filename, (void **)&buffers[i] );
+		R_LOADING_REPLAY();
 		
 		if ( !buffers[i] )
 			ri.Error( ERR_DROP, "Couldn't load %s", filename );

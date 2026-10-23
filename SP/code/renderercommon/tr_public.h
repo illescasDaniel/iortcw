@@ -118,6 +118,11 @@ typedef struct {
 	qboolean ( *GetEntityToken )( char *buffer, int size );
 
 	void (*TakeVideoFrame)( int h, int w, byte* captureBuffer, byte *encodeBuffer, qboolean motionJpeg );
+
+	// loading screen replay (raw GL only, callable while the renderer is shut down or initialising); may be NULL
+	// LoadingSnapshot: the next frame(s) are loading frames, copy the final image aside (enable) or stop (disable)
+	void (*LoadingSnapshot)( qboolean enable );
+	void (*PresentLoadingSnapshot)( void );
 } refexport_t;
 
 //
@@ -202,6 +207,14 @@ typedef struct {
 	// frame pacing around the buffer swap (finish = glFinish); may be NULL
 	void	(*PresentWait)( void ( *finish )( void ) );
 	void	(*PresentDone)( void ( *finish )( void ) );
+
+	// redraws the loading screen at a limited rate; may be NULL; call only from safe points
+	void	(*LoadingTick)( void );
+
+	// re-presents the last loading frame with a spinner; may be NULL; callable from anywhere
+	void	(*LoadingReplayTick)( void );
+	// names the asset being loaded for the load profiler (no-op unless com_loadProfile); may be NULL
+	void	(*LoadProfileHint)( const char *what );
 } refimport_t;
 
 
