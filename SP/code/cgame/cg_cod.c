@@ -1210,6 +1210,12 @@ static qboolean CG_CodJumpKeyHeld( void ) {
 	return qfalse;
 }
 
+static qboolean CG_CodBindingHeld( const char *binding ) {
+	int k = trap_Key_GetKey( binding );
+
+	return ( k >= 0 && trap_Key_IsDown( k ) ) ? qtrue : qfalse;
+}
+
 void CG_CodUpdateToggleCrouch( void ) {
 	static qboolean wasSliding;
 	qboolean sliding;
@@ -1228,6 +1234,14 @@ void CG_CodUpdateToggleCrouch( void ) {
 	}
 	// Jump (SPACE / pad A / +moveup) clears sticky crouch so the player stands (and can jump).
 	if ( CG_CodJumpKeyHeld() ) {
+		cg.codCrouchHeld = qfalse;
+		trap_SendConsoleCommand( "-movedown\n" );
+		return;
+	}
+	// Sprint key while moving forward stands up from sticky crouch so the sprint starts
+	// (PM_CodUpdateSprint refuses to sprint while ducked).
+	if ( bg_cod.enable && bg_cod.moveEnable && CG_CodBindingHeld( "+sprint" )
+		 && CG_CodBindingHeld( "+forward" ) && !( cg.predictedPlayerState.stats[STAT_COD_FLAGS] & COD_SF_PRONE ) ) {
 		cg.codCrouchHeld = qfalse;
 		trap_SendConsoleCommand( "-movedown\n" );
 	}
