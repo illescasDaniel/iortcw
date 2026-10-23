@@ -1912,6 +1912,8 @@ const void	*RB_DrawSurfs( const void *data ) {
 		if ( firstSoft > 0 )
 			RB_RenderDrawSurfList( cmd->drawSurfs, firstSoft );
 		backEnd.fogDefer = qfalse;
+		// charge the opaque pass to its own bucket, not to whatever mark follows (ssao_apply)
+		RB_GpuMark( (backEnd.refdef.rdflags & RDF_NOWORLDMODEL) ? "scene_noworld" : "scene_opaque" );
 
 		if ( aoApply )
 		{
