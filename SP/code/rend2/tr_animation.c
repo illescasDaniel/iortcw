@@ -76,6 +76,7 @@ static float lodRadius, lodScale;
 static int             *collapse_map, *pCollapseMap;
 static int collapse[ MDS_MAX_VERTS ], *pCollapse;
 static int p0, p1, p2;
+static float mdsSdir[ MDS_MAX_VERTS ][3], mdsTdir[ MDS_MAX_VERTS ][3];	// codmod: per-vertex tangent accumulators
 static qboolean isTorso, fullTorso;
 static vec4_t m1[4], m2[4];
 //static  vec4_t m3[4], m4[4], tmp1[4], tmp2[4]; // TTimo: unused
@@ -1211,6 +1212,66 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 	}
 
 	DBG_SHOWTIME
+
+	/*
+	codmod: runtime tangents for normal/parallax mapped MDS skins (MDC/MD3 get theirs at load, MDS is skinned per frame).
+	Per emitted triangle (positions p, texcoords w) the Lengyel solution gives the texture-space directions
+	  sdir = (dt2*e1 - dt1*e2) / r,  tdir = (ds1*e2 - ds2*e1) / r,  r = ds1*dt2 - ds2*dt1
+	(e1,e2 = position edges, ds/dt = texcoord edges) via R_CalcTexDirs; these are summed onto the three vertices.
+	Per vertex the tangent is sdir orthogonalised against the skinned normal (Gram-Schmidt) and w is the handedness,
+	sign(dot(cross(n, sdir), tdir)), so mirrored UVs come out as w = -1. Only the triangles actually emitted are used
+	(tess.indexes from oldIndexes, i.e. after LOD collapse); vertices with no valid triangle (unreferenced, or a
+	degenerate/zero-area UV mapping) fall back to a stable perpendicular of the normal with w = +1. One pass over the
+	triangles, static buffers, and nothing at all unless the shader wants ATTR_TANGENT and r_normalMapping is on.
+	*/
+	if ( r_normalMapping->integer && ( tess.shader->vertexAttribs & ATTR_TANGENT ) ) {
+		const glIndex_t *idx = &tess.indexes[oldIndexes];
+		const glIndex_t *idxEnd = &tess.indexes[tess.numIndexes];
+
+		memset( mdsSdir, 0, sizeof( mdsSdir[0] ) * render_count );
+		memset( mdsTdir, 0, sizeof( mdsTdir[0] ) * render_count );
+
+		for ( ; idx + 2 < idxEnd; idx += 3 ) {
+			int i0 = idx[0] - baseVertex, i1 = idx[1] - baseVertex, i2 = idx[2] - baseVertex;
+			vec3_t sd, td;
+
+			R_CalcTexDirs( sd, td, tess.xyz[baseVertex + i0], tess.xyz[baseVertex + i1], tess.xyz[baseVertex + i2],
+						   tess.texCoords[baseVertex + i0], tess.texCoords[baseVertex + i1], tess.texCoords[baseVertex + i2] );
+			VectorAdd( mdsSdir[i0], sd, mdsSdir[i0] );
+			VectorAdd( mdsSdir[i1], sd, mdsSdir[i1] );
+			VectorAdd( mdsSdir[i2], sd, mdsSdir[i2] );
+			VectorAdd( mdsTdir[i0], td, mdsTdir[i0] );
+			VectorAdd( mdsTdir[i1], td, mdsTdir[i1] );
+			VectorAdd( mdsTdir[i2], td, mdsTdir[i2] );
+		}
+
+		for ( j = 0; j < render_count; j++ ) {
+			vec3_t n, tan;
+			vec4_t out;
+			float d;
+
+			R_VaoUnpackNormal( n, tess.normal[baseVertex + j] );
+			d = DotProduct( mdsSdir[j], mdsSdir[j] );
+			if ( d > 1e-12f ) {
+				VectorNormalize( mdsTdir[j] );
+				VectorScale( mdsSdir[j], 1.0f / sqrtf( d ), mdsSdir[j] );
+				out[3] = R_CalcTangentSpace( tan, NULL, n, mdsSdir[j], mdsTdir[j] );
+			} else {
+				out[3] = 1.0f;
+				VectorSet( tan, 0, 0, 0 );
+			}
+			// sdir parallel to the normal leaves nothing after orthogonalisation: use a perpendicular axis
+			if ( DotProduct( tan, tan ) < 0.25f ) {
+				vec3_t axis = { 0, 0, 0 };
+				axis[fabsf( n[0] ) < 0.7f ? 0 : 1] = 1.0f;
+				CrossProduct( n, axis, tan );
+				VectorNormalize( tan );
+				out[3] = 1.0f;
+			}
+			VectorCopy( tan, out );
+			R_VaoPackTangent( tess.tangent[baseVertex + j], out );
+		}
+	}
 
 	// codmod: SMAA T2x, last frame's skinned positions of this surface for the velocity prepass
 	if ( backEnd.depthFill && backEnd.smaaVelocity && !tess.shader->numDeforms &&

@@ -2623,6 +2623,9 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 	// reuse diffuse, mark others inactive
 	diffuse->type = ST_GLSL;
 
+	shader.normalCoverage = NORMALCOV_OFF;
+	shader.normalDiffuseImage = diffuse->bundle[TB_DIFFUSEMAP].image[0];
+
 	if (lightmap)
 	{
 		//ri.Printf(PRINT_ALL, ", lightmap");
@@ -2650,19 +2653,23 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 	if (r_normalMapping->integer || r_parallaxMapping->integer)
 	{
 		image_t *diffuseImg;
+		shader.normalCoverage = NORMALCOV_NONE;
 		if (normal && !r_normalMapping->integer)
 		{
 			// explicit normal maps still need r_normalMapping
+			shader.normalCoverage = NORMALCOV_OFF;
 		}
 		else if (normal)
 		{
 			//ri.Printf(PRINT_ALL, ", normalmap %s", normal->bundle[0].image[0]->imgName);
 			diffuse->bundle[TB_NORMALMAP] = normal->bundle[0];
+			shader.normalCoverage = NORMALCOV_NORMAL;
 			if (parallaxOK && normal->bundle[0].image[0] && normal->bundle[0].image[0]->heightMaxDepth < r_parallaxMinDepth->value)
 				parallaxOK = qfalse;
 			if (parallaxOK)
 			{
 				defs |= LIGHTDEF_USE_PARALLAXMAP;
+				shader.normalCoverage = NORMALCOV_PARALLAX;
 				if (normal->bundle[0].image[0])
 					diffuse->parallaxMaxDepth = normal->bundle[0].image[0]->heightMaxDepth;
 			}
@@ -2708,7 +2715,15 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 
 			// without r_normalMapping the _nh image is only usable for parallax
 			if (normalImg && !r_normalMapping->integer && !parallaxOK)
+			{
+				shader.normalCoverage = NORMALCOV_OFF;
 				normalImg = NULL;
+			}
+			else if (normalImg)
+			{
+				shader.normalCoverage = parallaxOK ? NORMALCOV_PARALLAX :
+					(normalImg->type == IMGTYPE_NORMALHEIGHT ? NORMALCOV_NH_NO_PARALLAX : NORMALCOV_NORMAL);
+			}
 
 			if (normalImg)
 			{
@@ -2778,6 +2793,7 @@ static int CollapseStagesToGLSL(void)
 {
 	int i, j, numStages;
 	qboolean skip = qfalse;
+	int envUndoIdx = -1, envUndoLm = -1, envUndoBits = 0;
 
 	// skip shaders with deforms
 	if (shader.numDeforms != 0)
@@ -2807,6 +2823,48 @@ static int CollapseStagesToGLSL(void)
 				stages[0].stateBits = stateBits0;
 				stages[1].stateBits = stateBits1;
 			}
+		}
+	}
+
+	// codmod: diffuse + fake environment shine (tinfx, tcgen environment, one_minus_dst_alpha) + lightmap
+	// (dst_color one_minus_dst_alpha) is a plain lit diffuse once the shine stage is dropped; the lightall path
+	// provides the real specular. Without this the shine stage collapses as a second "diffuse" (tinfx image, no
+	// _nh) and hides the real one from normal-map lookup. Undone below if the shader still cannot collapse.
+	{
+		int envIdx = -1, lmIdx = -1;
+		qboolean envOK = qfalse;
+
+		if (!skip && r_codShaderCollapse->integer && r_normalMapping->integer && stages[0].active && stages[0].type == ST_COLORMAP
+			&& stages[0].bundle[0].tcGen == TCGEN_TEXTURE && stages[0].rgbGen == CGEN_IDENTITY)
+		{
+			int k, others = 0;
+			for (k = 1; k < MAX_SHADER_STAGES; k++)
+			{
+				const shaderStage_t *st = &stages[k];
+				int bb = st->stateBits & (GLS_DSTBLEND_BITS | GLS_SRCBLEND_BITS);
+				if (!st->active)
+					continue;
+				// r_ignoreDstAlpha (default on) turns one_minus_dst_alpha into zero, so the shine stage arrives as
+				// zero/one (draws nothing) and the lightmap stage as a plain dst_color/zero filter
+				if (st->bundle[0].tcGen == TCGEN_ENVIRONMENT_MAPPED && st->type == ST_COLORMAP && envIdx < 0
+					&& (bb == (GLS_SRCBLEND_ONE_MINUS_DST_ALPHA | GLS_DSTBLEND_ONE) || bb == (GLS_SRCBLEND_ZERO | GLS_DSTBLEND_ONE)))
+					envIdx = k;
+				else if (st->bundle[0].tcGen == TCGEN_LIGHTMAP && lmIdx < 0
+					&& (bb == (GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ONE_MINUS_DST_ALPHA) || bb == (GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO)))
+					lmIdx = k;
+				else
+					others++;
+			}
+			envOK = (envIdx > 0 && lmIdx > 0 && !others);
+		}
+		if (envOK)
+		{
+			envUndoBits = stages[lmIdx].stateBits;
+			stages[envIdx].active = qfalse;
+			stages[lmIdx].stateBits = (stages[lmIdx].stateBits & ~(GLS_DSTBLEND_BITS | GLS_SRCBLEND_BITS))
+				| GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO;
+			envUndoIdx = envIdx;
+			envUndoLm = lmIdx;
 		}
 	}
 
@@ -2861,6 +2919,12 @@ static int CollapseStagesToGLSL(void)
 					break;
 			}
 		}
+	}
+
+	if (skip && envUndoIdx >= 0)
+	{
+		stages[envUndoIdx].active = qtrue;
+		stages[envUndoLm].stateBits = envUndoBits;
 	}
 
 	if (!skip)
@@ -2967,6 +3031,17 @@ static int CollapseStagesToGLSL(void)
 			else if (r_specularMapping->integer && r_codSpecular->integer && shader.lightmapIndex == LIGHTMAP_BY_VERTEX
 				&& (diffuse->rgbGen == CGEN_VERTEX || diffuse->rgbGen == CGEN_EXACT_VERTEX)
 				&& !(diffuse->stateBits & (GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS)))
+			{
+				vertexlit = qtrue;
+			}
+			// codmod: burnt-floor style shaders: an opaque underlay (embers) with the vertex-lit diffuse alpha-blended on top.
+			// The blended diffuse takes light-grid lighting + normal map like an opaque vertex-lit surface.
+			else if (r_codShaderCollapse->integer && r_normalMapping->integer && i > 0
+				&& (diffuse->rgbGen == CGEN_VERTEX || diffuse->rgbGen == CGEN_EXACT_VERTEX)
+				&& (diffuse->stateBits & (GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS)) == (GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA)
+				&& !(diffuse->stateBits & GLS_ATEST_BITS)
+				&& stages[i - 1].active && (stages[i - 1].type == ST_COLORMAP || stages[i - 1].type == ST_GLSL) && stages[i - 1].bundle[0].tcGen == TCGEN_TEXTURE
+				&& !(stages[i - 1].stateBits & (GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS)))
 			{
 				vertexlit = qtrue;
 			}

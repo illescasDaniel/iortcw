@@ -1758,6 +1758,90 @@ void R_DecomposeSort( unsigned sort, int *entityNum, shader_t **shader,
 
 /*
 =================
+R_NormalCov_f / R_NormalCovReport
+
+codmod diagnostic: `normalcov` prints, for the next rendered main view, the visible shaders grouped by
+normal/height map coverage (see CollapseStagesToLightall). Costs nothing unless requested.
+=================
+*/
+static qboolean r_normalCovPending;
+
+void R_NormalCov_f( void ) {
+	r_normalCovPending = qtrue;
+	ri.Printf( PRINT_ALL, "normalcov: will report on the next rendered frame\n" );
+}
+
+typedef struct {
+	shader_t *shader;
+	int count;
+} normalCovEntry_t;
+
+static int R_NormalCovCmp( const void *a, const void *b ) {
+	return ( (const normalCovEntry_t *)b )->count - ( (const normalCovEntry_t *)a )->count;
+}
+
+void R_NormalCovReport( drawSurf_t *drawSurfs, int numDrawSurfs ) {
+	static const char *const names[NORMALCOV_COUNT] = {
+		"not lightall", "NO NORMAL MAP", "normal map", "_nh found, parallax off", "parallax", "normals off (cvars)"
+	};
+	normalCovEntry_t *entries;
+	int numEntries = 0, i, j, totals[NORMALCOV_COUNT], lightall, covered;
+
+	r_normalCovPending = qfalse;
+	if ( numDrawSurfs < 1 ) {
+		ri.Printf( PRINT_ALL, "normalcov: no surfaces in this view\n" );
+		return;
+	}
+
+	entries = ri.Hunk_AllocateTempMemory( sizeof( *entries ) * tr.numShaders );
+	Com_Memset( totals, 0, sizeof( totals ) );
+
+	for ( i = 0; i < numDrawSurfs; i++ ) {
+		shader_t *sh;
+		int entityNum, fogNum, dlighted, pshadowed, atiTess;
+
+		R_DecomposeSort( drawSurfs[i].sort, &entityNum, &sh, &fogNum, &dlighted, &pshadowed, &atiTess );
+		totals[sh->normalCoverage]++;
+		for ( j = 0; j < numEntries; j++ ) {
+			if ( entries[j].shader == sh ) {
+				break;
+			}
+		}
+		if ( j == numEntries && numEntries < tr.numShaders ) {
+			entries[numEntries].shader = sh;
+			entries[numEntries].count = 0;
+			numEntries++;
+		}
+		if ( j < numEntries ) {
+			entries[j].count++;
+		}
+	}
+
+	qsort( entries, numEntries, sizeof( *entries ), R_NormalCovCmp );
+
+	ri.Printf( PRINT_ALL, "normalcov: %d surfaces, %d shaders\n", numDrawSurfs, numEntries );
+	for ( i = 0; i < numEntries && i < 60; i++ ) {
+		const shader_t *sh = entries[i].shader;
+		ri.Printf( PRINT_ALL, "%5d  %-40s  %-40s  %s\n", entries[i].count, sh->name,
+			sh->normalDiffuseImage ? sh->normalDiffuseImage->imgName : "-", names[sh->normalCoverage] );
+	}
+	if ( numEntries > 60 ) {
+		ri.Printf( PRINT_ALL, "... %d more shaders\n", numEntries - 60 );
+	}
+
+	lightall = numDrawSurfs - totals[NORMALCOV_NOT_LIGHTALL];
+	covered = totals[NORMALCOV_NORMAL] + totals[NORMALCOV_NH_NO_PARALLAX] + totals[NORMALCOV_PARALLAX];
+	for ( i = 0; i < NORMALCOV_COUNT; i++ ) {
+		ri.Printf( PRINT_ALL, "  %-24s %6d surfaces\n", names[i], totals[i] );
+	}
+	ri.Printf( PRINT_ALL, "normalcov: %d/%d lightall surfaces have a normal map (%.1f%%)\n",
+		covered, lightall, lightall > 0 ? 100.0f * covered / lightall : 0.0f );
+
+	ri.Hunk_FreeTempMemory( entries );
+}
+
+/*
+=================
 R_SortDrawSurfs
 =================
 */
@@ -2067,6 +2151,10 @@ void R_RenderView( viewParms_t *parms ) {
 	}
 
 	R_SortDrawSurfs( tr.refdef.drawSurfs + firstDrawSurf, numDrawSurfs - firstDrawSurf );
+
+	if ( r_normalCovPending && !( tr.refdef.rdflags & ( RDF_NOWORLDMODEL | RDF_SKYBOXPORTAL ) ) ) {
+		R_NormalCovReport( tr.refdef.drawSurfs + firstDrawSurf, numDrawSurfs - firstDrawSurf );
+	}
 
 	// draw main system development information (surface outlines, etc)
 	R_DebugGraphics();

@@ -491,6 +491,17 @@ typedef struct {
 } fogParms_t;
 
 
+// codmod: per-shader outcome of the normal/height map discovery (see CollapseStagesToLightall, `normalcov`)
+typedef enum {
+	NORMALCOV_NOT_LIGHTALL = 0,	// not collapsed to lightall
+	NORMALCOV_NONE,				// lightall, no normal map found
+	NORMALCOV_NORMAL,			// normal map (explicit stage or _n / _nh), parallax not active
+	NORMALCOV_NH_NO_PARALLAX,	// _nh found but parallax is off (flat, alpha-test, texmod, r_parallaxMapping 0)
+	NORMALCOV_PARALLAX,			// parallax active
+	NORMALCOV_OFF,				// lightall, normals disabled by cvars (not looked up)
+	NORMALCOV_COUNT
+} normalCoverage_t;
+
 typedef struct shader_s {
 	char		name[MAX_QPATH];		// game path, including extension
 	int			lightmapIndex;			// for a shader to match, both name and lightmapIndex must match
@@ -530,6 +541,8 @@ typedef struct shader_s {
 	// codmod: cubemap eligibility, set in FinishShader (see R_AddDrawSurf)
 	qboolean	useCubemap;				// has a lit lightall stage that can sample a cubemap
 	qboolean	hasSpecMap;				// a lightall stage has an explicit or auto-found _s map
+	int			normalCoverage;			// normalCoverage_t, diagnostic only
+	struct image_s	*normalDiffuseImage;	// diffuse image of the lightall stage, diagnostic only
 
 	fogPass_t	fogPass;				// draw a blended pass, possibly with depth test equals
 
@@ -2169,6 +2182,7 @@ extern  cvar_t  *r_cubeMapping;
 extern  cvar_t  *r_cubemapSize;
 extern  cvar_t  *r_deluxeSpecular;
 extern  cvar_t  *r_codSpecular;
+extern  cvar_t  *r_codShaderCollapse;
 extern  cvar_t  *r_specularAA;
 extern  cvar_t  *r_codSpecDirectional;
 extern  cvar_t  *r_cubemapSpecOnly;
@@ -2578,6 +2592,8 @@ void RB_GpuMark( const char *name );
 void RB_GpuMark3D( void );
 void RB_GpuProfEndFrame( void );
 void R_GpuProf_f( void );
+void R_NormalCov_f( void );
+void R_NormalCovReport( drawSurf_t *drawSurfs, int numDrawSurfs );
 void R_ShutdownGpuProf( void );
 
 void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, float scale, vec3_t normal, int id, int flags ); // TTimo updated prototype

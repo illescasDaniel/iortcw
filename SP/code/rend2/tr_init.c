@@ -202,6 +202,7 @@ cvar_t  *r_cubeMapping;
 cvar_t  *r_cubemapSize;
 cvar_t  *r_deluxeSpecular;
 cvar_t  *r_codSpecular;
+cvar_t  *r_codShaderCollapse;
 cvar_t  *r_specularAA;
 cvar_t  *r_codSpecDirectional;
 cvar_t  *r_cubemapSpecOnly;
@@ -1612,6 +1613,8 @@ void R_Register( void ) {
 	r_cubemapSize = ri.Cvar_Get( "r_cubemapSize", "128", CVAR_ARCHIVE | CVAR_LATCH );
 	r_deluxeSpecular = ri.Cvar_Get( "r_deluxeSpecular", "0.1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_codSpecular = ri.Cvar_Get( "r_codSpecular", "0", CVAR_ARCHIVE | CVAR_LATCH );   // codmod: 0 = no spec maps / light-grid specular / cubemaps (cheap); the mod sets 1
+	// codmod: 1 = with normal mapping, drop the fake tinfx environment shine stage and let underlay+blended vertex-lit shaders (burnt floor) use lightall, so those textures take _nh maps; 0 = vanilla stages. The mod sets 1 (codmod.cfg)
+	r_codShaderCollapse = ri.Cvar_Get( "r_codShaderCollapse", "0", CVAR_LATCH );
 	// codmod: geometric specular AA strength (widens roughness where the normal varies fast across a pixel); 0 = vanilla, live
 	r_specularAA = ri.Cvar_Get( "r_specularAA", "0", 0 );
 	// codmod: baked/grid specular weighted by light directionality (read at map load); 0 = old behaviour
@@ -1799,6 +1802,7 @@ void R_Register( void ) {
 	ri.Cmd_AddCommand( "minimize", GLimp_Minimize );
 	ri.Cmd_AddCommand( "gfxmeminfo", GfxMemInfo_f );
 	ri.Cmd_AddCommand( "gpuprof", R_GpuProf_f );
+	ri.Cmd_AddCommand( "normalcov", R_NormalCov_f );
 	ri.Cmd_AddCommand( "exportCubemaps", R_ExportCubemaps_f );
 	ri.Cmd_AddCommand( "taginfo", R_TagInfo_f );
 
@@ -1962,6 +1966,7 @@ void RE_Shutdown( qboolean destroyWindow ) {
 	ri.Cmd_RemoveCommand( "minimize" );
 	ri.Cmd_RemoveCommand( "gfxmeminfo" );
 	ri.Cmd_RemoveCommand( "gpuprof" );
+	ri.Cmd_RemoveCommand( "normalcov" );
 	ri.Cmd_RemoveCommand( "exportCubemaps" );
 	ri.Cmd_RemoveCommand( "taginfo" );
 
