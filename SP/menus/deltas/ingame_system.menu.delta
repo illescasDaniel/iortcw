@@ -107,6 +107,14 @@
 =ui/options.menu 97 104
 =ui/credit.menu 414 417
 =ui/ingame_system.menu 53 54
++		name display
+=ui/ingame_system.menu 94 96
++		text "Frame Warp (Experimental):"
++		cvar "r_frameWarp"
++		cvarFloatList { "Off" 0 "Late latch" 1 }
+=ui/controls.menu 518 522
+=ui/ingame_system.menu 130 135
+=ui/ingame_system.menu 489 492
 +		name effects
 =ui/ingame_system.menu 94 96
 +		text "Anti-Aliasing:"

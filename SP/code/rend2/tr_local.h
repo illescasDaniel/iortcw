@@ -851,6 +851,10 @@ typedef enum
 	UNIFORM_VELPARAMS, // xy = projection jitter in NDC, z = previous vertex lerp
 	UNIFORM_VELOCITYMAP, // SMAA T2x resolve: motion vector buffer
 
+	UNIFORM_WARPMATRIX, // frame warp: new view NDC -> old view homogeneous NDC (3x3 in the upper left)
+	UNIFORM_WARPBOX, // frame warp: 3D viewport box in pixels (x, y, w, h)
+	UNIFORM_WARPPARAMS, // frame warp: capture x = gun depth, y = dilate radius; warp x = debug visualise
+
 	UNIFORM_COUNT
 } uniform_t;
 
@@ -1707,6 +1711,36 @@ typedef struct {
 	qboolean    smaaVelMask;	// codmod: colour writes are currently enabled for the velocity attachment
 } backEndState_t;
 
+// frame warp (tr_warp.c): the last captured main view plus the 2D command tail that followed it
+typedef enum {
+	WARP_REASON_NOT_MAIN,
+	WARP_REASON_NO_FBO,
+	WARP_REASON_MID_FLUSH,
+	WARP_REASON_TAIL_3D,
+	WARP_REASON_TAIL_OTHER,
+	WARP_REASON_STALE,
+	WARP_REASON_DEBUG_ON,
+	WARP_REASON_OVERFLOW,
+	WARP_REASON_NO_CAPTURE,	// RE_WarpFrame: nothing captured (or capture of another frame)
+	WARP_REASON_NO_TAIL,	// RE_WarpFrame: capture ok but the 2D tail was rejected
+	WARP_REASON_APPLY_FAIL,
+	WARP_REASON_WARP_OK,
+	WARP_REASON_COUNT
+} warpReason_t;
+
+typedef struct {
+	qboolean	valid;			// warpImage holds a capture of a main view
+	qboolean	tailValid;		// the saved 2D tail is complete and safe to replay
+	int			frameCount;		// tr.frameCount at capture
+	vec3_t		axis[3];		// view axis at capture
+	float		fovX, fovY;
+	ivec4_t		box;			// 3D viewport (x, y, w, h), GL pixel coordinates
+	vec4_t		color2D;		// backEnd.color2D at capture, 0..1
+	float		refAngles[2];	// pitch, yaw the frame was built with (RE_WarpSetRef at capture)
+	int			tailBytes;		// bytes of 2D commands saved (incl. the terminating RC_END_OF_LIST)
+	int			reasons[WARP_REASON_COUNT];		// warpReason_t counters
+} warpState_t;
+
 /*
 ** trGlobals_t 
 **
@@ -1864,6 +1898,8 @@ typedef struct {
 	shaderProgram_t flashShadowmaskShader;
 	shaderProgram_t ssaoShader[2]; // 0 = hemisphere, 1 = GTAO
 	shaderProgram_t ssaoUpShader;
+	shaderProgram_t warpCaptureShader;	// frame warp (tr_warp.c): colour + gun mask capture
+	shaderProgram_t warpShader;			// frame warp: rotation reprojection
 	shaderProgram_t bloomBrightShader;
 	shaderProgram_t bloomBlurShader;
 	shaderProgram_t gradeShader;
@@ -1942,6 +1978,11 @@ typedef struct {
 
 	// RF, temp var used while parsing shader only
 	int					allowCompress;
+
+	// frame warp (tr_warp.c), only created with r_frameWarp / r_warpDebug
+	image_t				*warpImage;
+	FBO_t				*warpFbo;
+	warpState_t			warp;
 } trGlobals_t;
 
 extern backEndState_t	backEnd;
@@ -2122,6 +2163,14 @@ extern  cvar_t  *r_smaa;
 extern  cvar_t  *r_smaaDebug;
 extern  cvar_t  *r_smaaTemporal;
 extern  cvar_t  *r_smaaJitter;
+extern  cvar_t  *r_frameWarp;
+extern  cvar_t  *r_frameWarpMaxDeg;
+extern  cvar_t  *r_frameWarpLatchSync;
+extern  cvar_t  *r_frameWarpGunDepth;
+extern  cvar_t  *r_frameWarpGunDilate;
+extern  cvar_t  *r_warpDebug;
+extern  cvar_t  *r_warpDebugPitch;
+extern  cvar_t  *r_warpDebugYaw;
 extern  cvar_t  *r_smaaTemporalWeight;
 extern  cvar_t  *r_smaaVelocity;
 extern  cvar_t  *r_smaaPredication;
@@ -2968,6 +3017,16 @@ typedef struct {
 	trRefdef_t	refdef;
 	viewParms_t	viewParms;
 } postProcessCommand_t;
+
+// tr_warp.c
+void R_WarpStats_f( void );
+void R_WarpInitTargets( void );
+void RB_WarpCapture( const postProcessCommand_t *cmd, FBO_t *srcFbo );
+qboolean RB_WarpApply( float dPitch, float dYaw );
+qboolean RE_WarpFrame( float dPitch, float dYaw );
+void RE_WarpSetRef( const vec3_t viewangles );
+void RB_WarpLatch( void );
+void RB_WarpGpuWait( void );
 
 typedef struct {
 	int commandId;

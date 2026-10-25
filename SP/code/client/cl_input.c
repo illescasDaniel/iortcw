@@ -640,6 +640,101 @@ void CL_MouseMove(usercmd_t *cmd) {
 	}
 }
 
+/*
+=================
+CL_PeekLookDelta
+
+Frame-warp: view change (degrees, game convention: +pitch = down, +yaw = left,
+i.e. the change cl.viewangles would get) since the last usercmd, without
+consuming any input. Mouse counts and queued SE_MOUSE events are scaled like
+CL_MouseMove, but with the elapsed time instead of frame_msec and no m_filter.
+Key / pad / gyro turning is extrapolated at the last cmd's rate.
+=================
+*/
+void CL_PeekLookDelta( float *dPitch, float *dYaw ) {
+	float mx, my, elapsed;
+	int qx, qy;
+
+	*dPitch = 0;
+	*dYaw = 0;
+	if ( clc.demoplaying ) {
+		return;
+	}
+
+	elapsed = (float)( Sys_Microseconds() - cl.lastCmdUs ) * 0.001f;
+	if ( elapsed < 1.0f ) {
+		elapsed = 1.0f;
+	} else if ( elapsed > 200.0f ) {
+		elapsed = 200.0f;
+	}
+
+	qx = qy = 0;
+	Com_PeekMouseEvents( &qx, &qy );
+	mx = cl.mouseDx[cl.mouseIndex] + qx;
+	my = cl.mouseDy[cl.mouseIndex] + qy;
+
+	if ( mx != 0.0f || my != 0.0f ) {
+		if ( cl_mouseAccel->value != 0.0f ) {
+			if ( cl_mouseAccelStyle->integer == 0 ) {
+				float accelSensitivity;
+				float rate;
+
+				rate = sqrt( mx * mx + my * my ) / elapsed;
+				accelSensitivity = cl_sensitivity->value + rate * cl_mouseAccel->value;
+				mx *= accelSensitivity;
+				my *= accelSensitivity;
+			} else {
+				float rate[2];
+				float power[2];
+
+				rate[0] = fabs( mx ) / elapsed;
+				rate[1] = fabs( my ) / elapsed;
+				power[0] = powf( rate[0] / cl_mouseAccelOffset->value, cl_mouseAccel->value );
+				power[1] = powf( rate[1] / cl_mouseAccelOffset->value, cl_mouseAccel->value );
+
+				mx = cl_sensitivity->value * ( mx + ( ( mx < 0 ) ? -power[0] : power[0] ) * cl_mouseAccelOffset->value );
+				my = cl_sensitivity->value * ( my + ( ( my < 0 ) ? -power[1] : power[1] ) * cl_mouseAccelOffset->value );
+			}
+		} else if ( cl.snap.ps.persistant[PERS_HWEAPON_USE] ) {
+			mx *= 2.5;
+			my *= 2;
+		} else {
+			mx *= cl_sensitivity->value;
+			my *= cl_sensitivity->value;
+		}
+
+		mx *= cl.cgameSensitivity;
+		my *= cl.cgameSensitivity;
+
+		if ( !kb[KB_STRAFE].active ) {
+			*dYaw -= m_yaw->value * mx;
+			if ( kb[KB_MLOOK].active || cl_freelook->integer ) {
+				*dPitch += m_pitch->value * my;
+			}
+		}
+	}
+
+	*dPitch += cl.warpRate[PITCH] * elapsed;
+	*dYaw += cl.warpRate[YAW] * elapsed;
+}
+
+/*
+=================
+CL_PeekViewAngles
+
+Late-latch: the absolute view angles (degrees) the next usercmd would produce right now:
+cl.viewangles + the unconsumed look input. Unlike the raw delta this stays correct after
+CL_CreateCmd consumed input (cl.viewangles and lastCmdUs move together).
+=================
+*/
+void CL_PeekViewAngles( float *pitch, float *yaw ) {
+	float dPitch, dYaw;
+
+	CL_PeekLookDelta( &dPitch, &dYaw );
+	*pitch = cl.viewangles[PITCH] + dPitch;
+	*yaw = cl.viewangles[YAW] + dYaw;
+}
+
 
 /*
 ==============
@@ -713,12 +808,20 @@ CL_CreateCmd
 usercmd_t CL_CreateCmd( void ) {
 	usercmd_t cmd;
 	vec3_t oldAngles;
+	vec3_t warpMark;
 	float recoilAdd;
+	float warpDelta[2];
 
 	VectorCopy( cl.viewangles, oldAngles );
 
+	// frame-warp bookkeeping: view change from keys / pad / gyro, per ms
+	VectorCopy( cl.viewangles, warpMark );
+
 	// keyboard angle adjustment
 	CL_AdjustAngles();
+
+	warpDelta[PITCH] = AngleSubtract( cl.viewangles[PITCH], warpMark[PITCH] );
+	warpDelta[YAW] = AngleSubtract( cl.viewangles[YAW], warpMark[YAW] );
 
 	memset( &cmd, 0, sizeof( cmd ) );
 
@@ -731,10 +834,21 @@ usercmd_t CL_CreateCmd( void ) {
 	CL_MouseMove( &cmd );
 
 	// get basic movement from joystick
+	VectorCopy( cl.viewangles, warpMark );
 	CL_JoystickMove( &cmd );
 
 	// codmod: gyro aiming
 	CL_GyroMove();
+
+	warpDelta[PITCH] += AngleSubtract( cl.viewangles[PITCH], warpMark[PITCH] );
+	warpDelta[YAW] += AngleSubtract( cl.viewangles[YAW], warpMark[YAW] );
+	if ( frame_msec > 0 ) {
+		cl.warpRate[PITCH] = warpDelta[PITCH] / (float)frame_msec;
+		cl.warpRate[YAW] = warpDelta[YAW] / (float)frame_msec;
+	} else {
+		cl.warpRate[PITCH] = cl.warpRate[YAW] = 0;
+	}
+	cl.lastCmdUs = com_frameClockUs;
 
 	// check to make sure the angles haven't wrapped
 	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {

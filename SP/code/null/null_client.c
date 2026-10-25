@@ -113,6 +113,21 @@ void CL_FlushMemory( void ) {
 void CL_StartHunkUsers( qboolean rendererOnly ) {
 }
 
+const char *CL_WarpDeny( void ) {
+	return "null client";
+}
+qboolean CL_WarpAllowed( void ) {
+	return qfalse;
+}
+
+qboolean CL_WarpFrame( void ) {
+	return qfalse;
+}
+
+qboolean CL_WarpLatchView( float *pitch, float *yaw ) {
+	return qfalse;
+}
+
 qboolean CL_InMenuOnly( void ) {
 	return qfalse;
 }

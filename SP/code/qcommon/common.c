@@ -114,6 +114,9 @@ cvar_t	*com_maxfpsMode;
 cvar_t	*com_maxfpsGpuSync;
 static cvar_t	*com_vsync;
 static cvar_t	*com_displayRefresh;
+static cvar_t	*r_frameWarp;       // owned by the renderer; registered here too so the pacer can read it
+static cvar_t	*com_latchSync;     // r_frameWarpLatchSync: late-latch wait for the present deadline (0 never, 1 when paced, 2 always)
+static cvar_t	*com_frameWarpHz;   // r_frameWarpHz: refresh rate override (0 = measured/auto)
 int com_frameFracUs;
 long long com_frameClockUs;   // smooth frame clock (paced schedule, or real time uncapped)
 long long com_lastPresentUs;
@@ -1620,6 +1623,31 @@ void Com_QueueEvent( int time, sysEventType_t type, int value, int value2, int p
 
 /*
 ================
+Com_PeekMouseEvents
+
+Sums the queued, not yet consumed mouse deltas without dequeuing them.
+================
+*/
+void Com_PeekMouseEvents( int *dx, int *dy )
+{
+	int i;
+
+	*dx = 0;
+	*dy = 0;
+	for ( i = eventTail; i < eventHead; i++ )
+	{
+		const sysEvent_t *ev = &eventQueue[ i & MASK_QUEUED_EVENTS ];
+
+		if ( ev->evType == SE_MOUSE )
+		{
+			*dx += ev->evValue;
+			*dy += ev->evValue2;
+		}
+	}
+}
+
+/*
+================
 Com_GetSystemEvent
 
 ================
@@ -2368,6 +2396,8 @@ static void Com_InitRand(void)
 Com_Init
 =================
 */
+static void Com_WarpStats_f( void );
+
 void Com_Init( char *commandLine ) {
 	char    *s;
 	int	qport;
@@ -2498,6 +2528,10 @@ void Com_Init( char *commandLine ) {
 	// owned by the renderer (sdl_glimp.c); registered here too so the pacer can read it
 	com_vsync = Cvar_Get( "r_vsync", "0", CVAR_ARCHIVE );
 	com_displayRefresh = Cvar_Get( "r_displayRefreshActual", "0", CVAR_TEMP );
+	r_frameWarp = Cvar_Get( "r_frameWarp", "0", CVAR_ARCHIVE | CVAR_LATCH );
+	com_frameWarpHz = Cvar_Get( "r_frameWarpHz", "0", 0 );
+	com_latchSync = Cvar_Get( "r_frameWarpLatchSync", "1", 0 );
+	Cmd_AddCommand( "warpstats", Com_WarpStats_f );
 	Cvar_Get("com_errorMessage", "", CVAR_ROM | CVAR_NORESTART);
 
 #ifdef CINEMATICS_INTRO
@@ -2850,9 +2884,32 @@ typedef struct {
 	int       gpuSynced;        // synced frames since the last (re)start of the GPU sync
 	int       gpuBoundFrames;   // frames spent with the sync suspended
 	int       gpuRetryFrames;   // when to try the sync again (doubles after each failed try)
+	qboolean  inWarp;           // a frame-warp frame is being drawn (see Com_WarpPresentWait)
+	long long warpDeadlineUs;   // present time of that warp frame
+	long long warpStartUs;      // when it started
+	qboolean  readyRecorded;    // late-latch already wrote this frame's ring sample at the GPU fence (see Com_WarpLatch)
+	long long readyUs;          // time of that fence
 } pacer_t;
 
 static pacer_t pacer;
+
+// late-latch (r_frameWarp 1) statistics and the wait lead
+#define LATCH_RING 128
+typedef struct {
+	int       count;                // latches that returned angles
+	int       denied;               // latches refused (client denied / re.WarpFrame missing)
+	int       waited;               // latches that waited for the present deadline (LL-1)
+	int       late;                 // LL-1 latches whose target time had already passed
+	long long sampleUs;             // time of the last sample, 0 once its swap-return was recorded
+	int       cmdLat[LATCH_RING];   // sample time - cl.lastCmdUs, us
+	int       cmdPos;
+	int       swapLat[LATCH_RING];  // sample time -> swap return, us
+	int       swapPos;
+	int       leadLat[LATCH_RING];  // sample time -> GPU finished the warp + 2D tail (Com_PresentWait), us
+	int       leadPos;
+} latch_t;
+
+static latch_t latch;
 
 static int Com_PaceCmpInt( const void *a, const void *b ) {
 	return *(const int *)a - *(const int *)b;
@@ -2902,6 +2959,401 @@ static float Com_EffectiveFps( void ) {
 	return fps;
 }
 
+/*
+=================
+Frame warp (async reprojection) pacer
+
+With r_frameWarp the engine renders a real frame every k refresh periods T and
+presents k-1 re-projected warp frames (CL_WarpFrame) in the slots between
+them, so a game that renders at about half the display rate still presents at
+the display rate. Everything runs on the main thread, in sequence: the warp
+slots are served from the top-of-frame wait of the next real frame, which
+therefore has to fit inside one T (otherwise warp suspends itself).
+
+  scheduled   slot i = previous real deadline + i*T; real deadline = + k*T
+  vsync lock  slot i = last observed vblank + (i - last presented slot)*T,
+              the swap blocks at the vblank (r_vsync 4 with a good vblank lock)
+
+Game time steps by k*T per real frame (pacer.periodUs).
+=================
+*/
+#define WARP_RING 32
+
+typedef struct {
+	qboolean  suspended;
+	int       suspFrames;       // frames spent suspended
+	int       retryFrames;      // when to try again (doubles after each early failure, 64..2048)
+	int       activeFrames;     // active frames since the last (re)start
+	int       missed;           // consecutive real frames that missed their deadline
+	int       failStreak;       // consecutive failed warp slots
+	qboolean  wasActive;        // previous frame was a warp frame
+	int       k;
+	double    periodUs;         // T
+	int       cost[WARP_RING];  // warp frame start -> ready to present, us
+	int       costPos;
+	int       costN;
+	int       presents, skips, fails, suspensions;
+	int       skipEarly, skipLate;  // skipped slots: next real frame too close at entry / slot time already past
+	int       realFrames;        // real frames run while warp was active
+	int       denied;            // CL_WarpFrame refused (CL_WarpDeny)
+	int       rejected;          // re.WarpFrame returned qfalse
+	const char *lastDeny;
+	int       suspByReason[3];   // fit / missed deadlines / failing
+	int       suspFrame[4], suspPos;  // com_frameNumber of the last suspensions
+	int       waitTopCalls, nearT, lastLeadUs;  // diagnostics: active top-of-frame calls, last Com_PaceLead() + 500
+	long long lastPresentUs;    // com_lastPresentUs at the previous interval sample
+	int       ivN;
+	double    ivMean, ivM2;     // present-to-present interval (Welford), us
+	const char *lastSuspend;
+} warp_t;
+
+static warp_t warp;
+
+// refresh period T in us (0 = unknown)
+static double Com_WarpPeriodUs( void ) {
+	double nominal = com_displayRefresh->value > 1 ? 1000000.0 / com_displayRefresh->value : 0;
+
+	if ( com_frameWarpHz->value > 1 ) {
+		return 1000000.0 / com_frameWarpHz->value;
+	}
+	if ( pacer.vblankGood >= 4 && pacer.vblankPeriodUs > 0 ) {
+		return pacer.vblankPeriodUs < nominal ? nominal : pacer.vblankPeriodUs;
+	}
+	return nominal;
+}
+
+// lead of a warp frame: P98 of its recent cost + 500 us, clamped to [500, T/2]
+static int Com_WarpLeadUs( double T ) {
+	int tmp[WARP_RING];
+	int n = warp.costN < WARP_RING ? warp.costN : WARP_RING;
+	int lead;
+
+	if ( n < 8 ) {
+		return (int)( T / 3 );
+	}
+	Com_Memcpy( tmp, warp.cost, sizeof( tmp ) );
+	qsort( tmp, n, sizeof( int ), Com_PaceCmpInt );
+	lead = tmp[(int)( ( n - 1 ) * 0.98 + 0.5 )] + 500;
+	if ( lead > T / 2 ) {
+		lead = (int)( T / 2 );
+	}
+	if ( lead < 500 ) {
+		lead = 500;
+	}
+	return lead;
+}
+
+static void Com_WarpSuspend( const char *why ) {
+	if ( warp.activeFrames < 64 && warp.retryFrames ) {
+		warp.retryFrames = warp.retryFrames * 2 < 2048 ? warp.retryFrames * 2 : 2048;
+	} else {
+		warp.retryFrames = 64;
+	}
+	warp.suspended = qtrue;
+	warp.suspFrames = 0;
+	warp.activeFrames = 0;
+	warp.missed = 0;
+	warp.failStreak = 0;
+	warp.suspensions++;
+	warp.suspFrame[warp.suspPos++ & 3] = com_frameNumber;
+	warp.lastSuspend = why;
+}
+
+// NULL when warp can run this frame, else why not; fills warp.k / warp.periodUs
+static const char *Com_WarpWhyNot( void ) {
+	double T, eff;
+	int k;
+
+	if ( r_frameWarp->integer != 3 ) {
+		return "r_frameWarp is not 3 (fixed-k pacer)";
+	}
+	if ( !com_maxfpsPrecise->integer ) {
+		return "com_maxfpsPrecise 0";
+	}
+	if ( !com_maxfpsGpuSync->integer ) {
+		return "com_maxfpsGpuSync 0";
+	}
+	if ( com_minimized->integer || com_unfocused->integer ) {
+		return "window unfocused/minimized";
+	}
+	if ( com_dedicated->integer || com_timedemo->integer ) {
+		return "dedicated/timedemo";
+	}
+	if ( !CL_WarpAllowed() ) {
+		return "not allowed by client (menu/loading/demo)";
+	}
+	if ( warp.suspended ) {
+		return warp.lastSuspend ? warp.lastSuspend : "suspended";
+	}
+	T = Com_WarpPeriodUs();
+	if ( T <= 0 ) {
+		return "refresh rate unknown (set r_frameWarpHz)";
+	}
+	eff = Com_EffectiveFps();
+	k = eff > 0 ? (int)ceil( 1000000.0 / T / eff - 0.05 ) : 2;
+	if ( k < 2 ) {
+		k = 2;
+	}
+	if ( k > 16 ) {
+		k = 16;
+	}
+	warp.k = k;
+	warp.periodUs = T;
+	return NULL;
+}
+
+static qboolean Com_WarpActive( void ) {
+	if ( r_frameWarp->integer != 3 ) {
+		return qfalse;
+	}
+	if ( warp.wasActive ) {
+		warp.missed = pacer.late ? warp.missed + 1 : 0;
+		warp.wasActive = qfalse;
+	}
+	if ( warp.suspended && ++warp.suspFrames >= warp.retryFrames ) {
+		warp.suspended = qfalse;
+		warp.activeFrames = 0;
+	}
+	if ( Com_WarpWhyNot() ) {
+		return qfalse;
+	}
+	if ( warp.activeFrames == 0 ) {
+		// (re)start: the ring is only fed by paced frames, so when uncapped it still holds the values that
+		// caused the last suspension (or the loading hitches), which would re-suspend at once. Start over;
+		// two slow frames suspend again.
+		Com_Memset( pacer.ring, 0, sizeof( pacer.ring ) );
+	}
+	if ( warp.missed >= 4 ) {
+		warp.suspByReason[1]++;
+		Com_WarpSuspend( "suspended: real frames miss their deadline" );
+		return qfalse;
+	}
+	if ( warp.failStreak >= 8 ) {
+		warp.suspByReason[2]++;
+		Com_WarpSuspend( "suspended: warp frames keep failing" );
+		return qfalse;
+	}
+	// the warp slot (work in [D0 + T - warpLead, D0 + T]) and the next real frame (work in [D1 - lead, D1],
+	// D1 = D0 + 2T) only have to be disjoint, which is lead < T; the warp lead itself is not part of it
+	if ( pacer.presentedFrame && Com_PaceLead() + 500 > warp.periodUs ) {
+		warp.lastLeadUs = Com_PaceLead() + 500;
+		warp.suspByReason[0]++;
+		Com_WarpSuspend( "suspended: real frame does not fit in one refresh period" );
+		return qfalse;
+	}
+	return qtrue;
+}
+
+// present-to-present interval statistics, sampled once per distinct present
+static void Com_WarpNotePresent( void ) {
+	double d;
+
+	if ( com_lastPresentUs == warp.lastPresentUs ) {
+		return;
+	}
+	if ( warp.lastPresentUs && com_lastPresentUs - warp.lastPresentUs < 4 * warp.periodUs ) {
+		double delta;
+
+		d = (double)( com_lastPresentUs - warp.lastPresentUs );
+		warp.ivN++;
+		delta = d - warp.ivMean;
+		warp.ivMean += delta / warp.ivN;
+		warp.ivM2 += delta * ( d - warp.ivMean );
+	}
+	warp.lastPresentUs = com_lastPresentUs;
+}
+
+// one warp slot: 1 presented, 0 skipped (too late), -1 failed
+static int Com_WarpSlot( long long slotUs ) {
+	long long now = Sys_Microseconds();
+	int lead = Com_WarpLeadUs( warp.periodUs );
+	const char *deny;
+	qboolean ok;
+
+	if ( now > slotUs - lead ) {
+		warp.skips++;
+		warp.skipLate++;
+		return 0;
+	}
+	Sys_WaitUntil( slotUs - lead, com_maxfpsSpinUs->integer );
+	pacer.warpDeadlineUs = slotUs;
+	pacer.warpStartUs = Sys_Microseconds();
+	deny = CL_WarpDeny();
+	pacer.inWarp = qtrue;
+	ok = deny ? qfalse : CL_WarpFrame();
+	pacer.inWarp = qfalse;
+	if ( !ok ) {
+		if ( deny ) {
+			warp.denied++;
+			warp.lastDeny = deny;
+		} else {
+			warp.rejected++;
+		}
+		warp.fails++;
+		warp.failStreak++;
+		return -1;
+	}
+	warp.presents++;
+	warp.failStreak = 0;
+	Com_WarpNotePresent();
+	return 1;
+}
+
+static void Com_WarpFrameWaitTop( void ) {
+	double T = warp.periodUs;
+	int k = warp.k;
+	long long now = Sys_Microseconds();
+	qboolean lock;
+	double prevD = 0, D;
+	int i, lastIdx = 0;
+	int lead;
+
+	pacer.active = qtrue;
+	pacer.mode = 2;                 // real frames always gpu-sync and present on a deadline
+	pacer.gpuBound = qfalse;
+	pacer.gpuBoundFrames = 0;
+	pacer.gpuMissed = 0;
+	pacer.late = qfalse;
+	warp.wasActive = qtrue;
+	warp.activeFrames++;
+	warp.realFrames++;
+	Com_WarpNotePresent();
+
+	lock = com_vsync->integer == 4 && com_frameWarpHz->value <= 1 && pacer.vblankGood >= 4 &&
+		   pacer.lastVblankUs && now - pacer.lastVblankUs < ( k + 2 ) * T;
+	pacer.vblankLock = lock;
+	pacer.periodUs = k * T;
+
+	if ( lock ) {
+		for ( i = 1; i < k; i++ ) {
+			if ( Com_WarpSlot( pacer.lastVblankUs + (long long)( ( i - lastIdx ) * T ) ) > 0 ) {
+				lastIdx = i;
+			}
+		}
+		D = (double)pacer.lastVblankUs + ( k - lastIdx ) * T;
+		lead = pacer.presentedFrame ? Com_PaceLead() : (int)( T * 0.5 );
+		if ( lead > T * 0.85 ) {
+			lead = (int)( T * 0.85 );
+		}
+		pacer.deadlineUs = D;
+		now = Sys_Microseconds();
+		if ( now < D - lead - 300 ) {
+			Sys_WaitUntil( (long long)( D - lead - 300 ), com_maxfpsSpinUs->integer );
+		} else {
+			pacer.late = qtrue;
+		}
+	} else {
+		prevD = pacer.deadlineUs;
+		D = prevD + k * T;
+		if ( prevD > 0 && (double)com_lastPresentUs > prevD + T * 0.5 ) {
+			// the previous real frame presented late: schedule from when it really did
+			prevD = (double)com_lastPresentUs;
+			D = prevD + k * T;
+			pacer.late = qtrue;
+		}
+		if ( prevD <= 0 || D < now - k * T * 0.5 || D > now + 2 * k * T ) {
+			D = (double)now;            // first frame, hitch, or cap changed: no slots
+			pacer.late = qtrue;
+		} else {
+			for ( i = 1; i < k; i++ ) {
+				Com_WarpSlot( (long long)( prevD + i * T ) );
+			}
+		}
+		pacer.deadlineUs = D;
+		lead = Com_PaceLead() + 500;
+		if ( pacer.presentedFrame == 0 ) {
+			lead = (int)( pacer.periodUs * 0.5 );
+		}
+		if ( lead > pacer.periodUs * 0.9 ) {
+			lead = (int)( pacer.periodUs * 0.9 );
+		}
+		Sys_WaitUntil( (long long)D - lead, com_maxfpsSpinUs->integer );
+	}
+	pacer.frameStartUs = Sys_Microseconds();
+	pacer.lastTopUs = pacer.frameStartUs;
+}
+
+// the renderer's present wait while a warp frame is drawn (never touches presentedFrame or the main ring)
+static void Com_WarpPresentWait( void ( *finish )( void ) ) {
+	long long ready;
+
+	if ( finish ) {
+		finish();
+	}
+	ready = Sys_Microseconds();
+	warp.cost[warp.costPos++ % WARP_RING] = (int)( ready - pacer.warpStartUs );
+	warp.costN++;
+	if ( !pacer.vblankLock ) {
+		Sys_WaitUntil( pacer.warpDeadlineUs, com_maxfpsSpinUs->integer );
+	}
+}
+
+// P50 / P98 (ms) of the filled part of a latch sample ring
+static void Com_LatchPct( const int *ring, int pos, float *p50, float *p98, int *n ) {
+	int tmp[LATCH_RING];
+	int cnt = pos < LATCH_RING ? pos : LATCH_RING;
+
+	*n = cnt;
+	*p50 = *p98 = 0;
+	if ( !cnt ) {
+		return;
+	}
+	Com_Memcpy( tmp, ring, sizeof( tmp ) );
+	qsort( tmp, cnt, sizeof( int ), Com_PaceCmpInt );
+	*p50 = tmp[cnt / 2] * 0.001f;
+	*p98 = tmp[(int)( ( cnt - 1 ) * 0.98 + 0.5 )] * 0.001f;
+}
+
+static void Com_WarpLatchStats( void ) {
+	float a50, a98, b50, b98, c50, c98;
+	int na, nb, nc;
+
+	Com_LatchPct( latch.cmdLat, latch.cmdPos, &a50, &a98, &na );
+	Com_LatchPct( latch.swapLat, latch.swapPos, &b50, &b98, &nb );
+	Com_LatchPct( latch.leadLat, latch.leadPos, &c50, &c98, &nc );
+	Com_Printf( "latch: mode %d sync %d, latches %d, denied %d, waited %d (target already past %d)\n",
+				r_frameWarp->integer, com_latchSync->integer, latch.count, latch.denied, latch.waited, latch.late );
+	Com_Printf( "latch: cmd->sample P50 %.2f P98 %.2f ms (%d); sample->swap-return P50 %.2f P98 %.2f ms (%d); sample->warp+2D done P50 %.2f P98 %.2f ms (%d)\n",
+				a50, a98, na, b50, b98, nb, c50, c98, nc );
+}
+
+static void Com_WarpStats_f( void ) {
+	int tmp[WARP_RING];
+	int n = warp.costN < WARP_RING ? warp.costN : WARP_RING;
+	const char *why = Com_WarpWhyNot();
+	int p50 = 0, p98 = 0;
+
+	if ( n ) {
+		Com_Memcpy( tmp, warp.cost, sizeof( tmp ) );
+		qsort( tmp, n, sizeof( int ), Com_PaceCmpInt );
+		p50 = tmp[n / 2];
+		p98 = tmp[(int)( ( n - 1 ) * 0.98 + 0.5 )];
+	}
+	Com_Printf( "warp: %s%s%s\n", why ? "inactive: " : "active", why ? why : "",
+				warp.suspended && !why ? " (suspended)" : "" );
+	Com_Printf( "warp: k %d, T %.1f us (%.1f Hz), real frames %d, presents %d, skips %d, failures %d, suspensions %d\n",
+				warp.k, warp.periodUs, warp.periodUs > 0 ? 1000000.0 / warp.periodUs : 0.0,
+				warp.realFrames, warp.presents, warp.skips, warp.fails, warp.suspensions );
+	Com_Printf( "warp: slots skipped (slot time already past) %d, client denied %d (last: %s), renderer rejected %d; last real-frame lead %d us\n",
+				warp.skipLate, warp.denied, warp.lastDeny ? warp.lastDeny : "-", warp.rejected, warp.lastLeadUs );
+	Com_Printf( "warp: suspensions: lead>T %d, missed deadlines %d, failing %d; at frames %d %d %d %d (now %d)\n",
+				warp.suspByReason[0], warp.suspByReason[1], warp.suspByReason[2],
+				warp.suspFrame[0], warp.suspFrame[1], warp.suspFrame[2], warp.suspFrame[3], com_frameNumber );
+	{
+		int rt[PACE_RING];
+
+		Com_Memcpy( rt, pacer.ring, sizeof( rt ) );
+		qsort( rt, PACE_RING, sizeof( int ), Com_PaceCmpInt );
+		Com_Printf( "warp: real frame top->ready: min %d, P50 %d, max %d us (last %d); gpuBound %d\n",
+					rt[0], rt[PACE_RING / 2], rt[PACE_RING - 1], PACE_RING, pacer.gpuBound );
+	}
+	Cmd_ExecuteString( "warprstats" );
+	Com_WarpLatchStats();
+	Com_Printf( "warp: cost P50 %d us, P98 %d us (last %d), lead %d us; present interval mean %.1f us, sd %.1f us (%d samples)\n",
+				p50, p98, n, Com_WarpLeadUs( warp.periodUs > 0 ? warp.periodUs : 4000.0 ), warp.ivMean,
+				warp.ivN > 1 ? sqrt( warp.ivM2 / ( warp.ivN - 1 ) ) : 0.0, warp.ivN );
+}
+
 static void Com_FrameWaitTop( void ) {
 	float fps;
 	long long now;
@@ -2912,6 +3364,7 @@ static void Com_FrameWaitTop( void ) {
 
 	pacer.active = qfalse;
 	pacer.vblankLock = qfalse;
+	pacer.readyRecorded = qfalse;
 
 	if ( com_minimized->integer && com_maxfpsMinimized->value > 0 ) {
 		fps = com_maxfpsMinimized->value;
@@ -2926,6 +3379,8 @@ static void Com_FrameWaitTop( void ) {
 	if ( pacer.mode < 0 || pacer.mode > 2 ) {
 		pacer.mode = 2;
 	}
+
+	if ( Com_WarpActive() ) { Com_WarpFrameWaitTop(); return; }
 
 	// low latency vsync: lock to the display unless the user capped below it
 	llEligible = vsync == 4 && com_displayRefresh->value > 1 &&
@@ -3002,6 +3457,8 @@ void Com_PresentWait( void ( *finish )( void ) ) {
 	long long ready;
 	qboolean sync;
 
+	if ( pacer.inWarp ) { Com_WarpPresentWait( finish ); return; }
+
 	if ( !pacer.active || pacer.presentedFrame == com_frameNumber + 1 ) {
 		return;     // uncapped, or an extra EndFrame within the same Com_Frame (loading screens)
 	}
@@ -3022,12 +3479,26 @@ void Com_PresentWait( void ( *finish )( void ) ) {
 			pacer.gpuSynced = 0;
 		}
 	}
-	if ( sync ) {
-		finish();
-	}
-	ready = Sys_Microseconds();
-	if ( sync || !pacer.gpuBound ) {
-		pacer.ring[pacer.ringPos++ % PACE_RING] = (int)( ready - pacer.frameStartUs );
+	if ( pacer.readyRecorded ) {
+		// late-latch: the ring sample and the fence time were taken when the post-process fence signalled.
+		// The finish below only measures how long the warp + 2D tail need after the sample (the latch lead).
+		pacer.readyRecorded = qfalse;
+		if ( finish ) {
+			finish();
+		}
+		if ( latch.sampleUs ) {
+			latch.leadLat[latch.leadPos++ % LATCH_RING] = (int)( Sys_Microseconds() - latch.sampleUs );
+		}
+		ready = pacer.readyUs;
+		sync = qtrue;
+	} else {
+		if ( sync ) {
+			finish();
+		}
+		ready = Sys_Microseconds();
+		if ( sync || !pacer.gpuBound ) {
+			pacer.ring[pacer.ringPos++ % PACE_RING] = (int)( ready - pacer.frameStartUs );
+		}
 	}
 
 	if ( sync && !pacer.vblankLock ) {
@@ -3209,6 +3680,10 @@ void Com_PresentDone( void ( *finish )( void ) ) {
 	long long now;
 
 	com_lastPresentUs = Sys_Microseconds();
+	if ( latch.sampleUs ) {
+		latch.swapLat[latch.swapPos++ % LATCH_RING] = (int)( com_lastPresentUs - latch.sampleUs );
+		latch.sampleUs = 0;
+	}
 	if ( lp.active ) {
 		Com_LoadProfilePresent( com_lastPresentUs );
 	}
@@ -3866,3 +4341,69 @@ qboolean Com_IsVoipTarget(uint8_t *voipTargets, int voipTargetsSize, int clientN
 	return qfalse;
 }
 
+
+/*
+=================
+Com_WarpLatch
+
+Late-latch (r_frameWarp 1), called by the renderer right after post-process of a real frame:
+returns the freshest absolute view angles (degrees) to warp the finished frame to.
+LL-0 (uncapped, or r_frameWarpLatchSync 0): sample at once. LL-1 (paced): wait for the GPU fence
+of the post-process (gpuWait), record the pacer ring sample there (not after the deliberate wait,
+or Com_PaceLead would grow every frame), then wait until presentDeadline - latchLead and sample.
+=================
+*/
+qboolean Com_WarpLatch( void ( *gpuWait )( void ), float *pitch, float *yaw ) {
+	long long now, target;
+	qboolean paced;
+	int sync = com_latchSync ? com_latchSync->integer : 0;
+
+	if ( r_frameWarp->integer != 1 ) {
+		return qfalse;
+	}
+	if ( CL_WarpDeny() ) {
+		latch.denied++;
+		return qfalse;
+	}
+
+	paced = pacer.active && ( pacer.mode > 0 || pacer.vblankLock ) && pacer.deadlineUs > 0 &&
+			pacer.presentedFrame != com_frameNumber + 1 && !pacer.gpuBound && gpuWait;
+	if ( sync != 0 && paced ) {     // LL-1; an unpaced frame has no deadline to wait for, even with sync 2
+		int n = latch.leadPos < LATCH_RING ? latch.leadPos : LATCH_RING;
+		int lead = 1500;
+
+		gpuWait();
+		now = Sys_Microseconds();
+		pacer.ring[pacer.ringPos++ % PACE_RING] = (int)( now - pacer.frameStartUs );
+		pacer.readyUs = now;
+		pacer.readyRecorded = qtrue;
+
+		if ( n >= 16 ) {
+			int tmp[LATCH_RING];
+
+			Com_Memcpy( tmp, latch.leadLat, sizeof( tmp ) );
+			qsort( tmp, n, sizeof( int ), Com_PaceCmpInt );
+			lead = tmp[(int)( ( n - 1 ) * 0.98 + 0.5 )] + 300;
+		}
+		if ( lead > pacer.periodUs * 0.9 ) {
+			lead = (int)( pacer.periodUs * 0.9 );
+		}
+		target = (long long)pacer.deadlineUs - lead;
+		latch.waited++;
+		if ( now >= target ) {
+			latch.late++;
+		} else {
+			Sys_WaitUntil( target, com_maxfpsSpinUs->integer );
+		}
+	}
+
+	latch.sampleUs = Sys_Microseconds();
+	if ( !CL_WarpLatchView( pitch, yaw ) ) {
+		latch.denied++;
+		latch.sampleUs = 0;
+		return qfalse;
+	}
+	latch.count++;
+	latch.cmdLat[latch.cmdPos++ % LATCH_RING] = (int)( latch.sampleUs - CL_WarpLastCmdUs() );
+	return qtrue;
+}

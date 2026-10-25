@@ -167,6 +167,10 @@ typedef struct {
 
 	qboolean cameraMode;    //----(SA)	added for control of input while watching cinematics
 
+	// frame-warp (async reprojection): see CL_PeekLookDelta
+	long long lastCmdUs;                // com_frameClockUs when the last usercmd was built
+	float warpRate[2];                  // key/pad/gyro view turn of the last cmd, deg per ms (PITCH, YAW)
+
 } clientActive_t;
 
 extern clientActive_t cl;
@@ -593,6 +597,9 @@ void CL_ReadPackets( void );
 
 void CL_WritePacket( void );
 void IN_CenterView( void );
+void CL_PeekLookDelta( float *dPitch, float *dYaw );
+void CL_PeekViewAngles( float *pitch, float *yaw );
+qboolean CL_WarpLatchView( float *pitch, float *yaw );   // late-latch: freshest view angles
 qboolean IN_GetGyroRates( float *yawRate, float *pitchRate );	// codmod: sdl_input.c
 void IN_Notebook( void );
 void IN_Help( void );

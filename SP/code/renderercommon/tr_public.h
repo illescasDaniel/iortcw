@@ -123,6 +123,9 @@ typedef struct {
 	// LoadingSnapshot: the next frame(s) are loading frames, copy the final image aside (enable) or stop (disable)
 	void (*LoadingSnapshot)( qboolean enable );
 	void (*PresentLoadingSnapshot)( void );
+	qboolean (*WarpFrame)( float dPitch, float dYaw );
+	// late-latch: tells the renderer the view angles the frame was built with (r_frameWarp 1)
+	void (*WarpSetRef)( const vec3_t viewangles );
 } refexport_t;
 
 //
@@ -217,6 +220,8 @@ typedef struct {
 	void	(*LoadProfileHint)( const char *what );
 	// runs fn(arg) on the loading worker thread while the loading screen keeps presenting; CPU-only fn; may be NULL
 	void	(*RunOffloaded)( void ( *fn )( void * ), void *arg );
+	// late-latch: waits via gpuWait, then returns the freshest view angles; qfalse = not available; may be NULL
+	qboolean (*WarpLatch)( void ( *gpuWait )( void ), float *pitch, float *yaw );
 } refimport_t;
 
 

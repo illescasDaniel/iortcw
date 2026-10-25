@@ -2585,6 +2585,11 @@ const void *RB_PostProcess(const void *data)
 	}
 #endif
 
+	if ( tr.warpFbo ) {
+		RB_WarpCapture( cmd, srcFbo );
+		RB_WarpLatch();
+	}
+
 	return (const void *)(cmd + 1);
 }
 

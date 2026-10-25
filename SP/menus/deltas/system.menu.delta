@@ -108,6 +108,14 @@
 =ui/options.menu 97 104
 =ui/credit.menu 414 417
 =ui/system.menu 93 94
++		name display
+=ui/system.menu 283 285
++		text "Frame Warp (Experimental):"
++		cvar "r_frameWarp"
++		cvarFloatList { "Off" 0 "Late latch" 1 }
+=ui/controls.menu 518 522
+=ui/system.menu 156 161
+=ui/system.menu 204 207
 +		name effects
 =ui/system.menu 283 285
 +		text "Anti-Aliasing:"

@@ -49,6 +49,8 @@ extern const char *fallbackShader_shadowmask_fp;
 extern const char *fallbackShader_ssao_vp;
 extern const char *fallbackShader_ssao_fp;
 extern const char *fallbackShader_ssaoup_fp;
+extern const char *fallbackShader_warpcap_fp;
+extern const char *fallbackShader_warp_fp;
 extern const char *fallbackShader_bloombright_fp;
 extern const char *fallbackShader_grade_fp;
 extern const char *fallbackShader_texturecolor_vp;
@@ -191,6 +193,10 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_VelPrevMatrix", GLSL_MAT16 },
 	{ "u_VelParams", GLSL_VEC4 },
 	{ "u_VelocityMap", GLSL_INT },
+
+	{ "u_WarpMatrix", GLSL_MAT16 },
+	{ "u_WarpBox", GLSL_VEC4 },
+	{ "u_WarpParams", GLSL_VEC4 },
 };
 
 typedef enum
@@ -1682,6 +1688,37 @@ void GLSL_InitGPUShaders(void)
 	numEtcShaders++;
 
 
+	// frame warp (tr_warp.c): only compiled when the warp targets were created
+	if (tr.warpFbo)
+	{
+		attribs = ATTR_POSITION | ATTR_TEXCOORD;
+		extradefines[0] = '\0';
+
+		if (!GLSL_InitGPUShader(&tr.warpCaptureShader, "warpcap", attribs, qtrue, extradefines, qtrue, fallbackShader_texturecolor_vp, fallbackShader_warpcap_fp))
+		{
+			ri.Error(ERR_FATAL, "Could not load warpcap shader!");
+		}
+
+		GLSL_InitUniforms(&tr.warpCaptureShader);
+		GLSL_SetUniformInt(&tr.warpCaptureShader, UNIFORM_SCREENIMAGEMAP, TB_COLORMAP);
+		GLSL_SetUniformInt(&tr.warpCaptureShader, UNIFORM_SCREENDEPTHMAP, TB_LIGHTMAP);
+		GLSL_FinishGPUShader(&tr.warpCaptureShader);
+
+		numEtcShaders++;
+
+		if (!GLSL_InitGPUShader(&tr.warpShader, "warp", attribs, qtrue, extradefines, qtrue, fallbackShader_texturecolor_vp, fallbackShader_warp_fp))
+		{
+			ri.Error(ERR_FATAL, "Could not load warp shader!");
+		}
+
+		GLSL_InitUniforms(&tr.warpShader);
+		GLSL_SetUniformInt(&tr.warpShader, UNIFORM_SCREENIMAGEMAP, TB_COLORMAP);
+		GLSL_FinishGPUShader(&tr.warpShader);
+
+		numEtcShaders++;
+	}
+
+
 	// codmod bloom bright pass and grade/bloom composite (drawn like texturecolor blits)
 	attribs = ATTR_POSITION | ATTR_TEXCOORD;
 	extradefines[0] = '\0';
@@ -1830,6 +1867,8 @@ void GLSL_ShutdownGPUShaders(void)
 	for ( i = 0; i < 2; i++)
 		GLSL_DeleteGPUShader(&tr.ssaoShader[i]);
 	GLSL_DeleteGPUShader(&tr.ssaoUpShader);
+	GLSL_DeleteGPUShader(&tr.warpCaptureShader);
+	GLSL_DeleteGPUShader(&tr.warpShader);
 
 	for ( i = 0; i < 4; i++)
 		GLSL_DeleteGPUShader(&tr.depthBlurShader[i]);

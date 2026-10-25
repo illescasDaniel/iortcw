@@ -3124,6 +3124,103 @@ qboolean CL_CheckPaused(void)
 	return qfalse;
 }
 
+/*
+==================
+CL_WarpAllowed
+
+Frame-warp (re-projecting the last frame to the newest mouse input) is only
+valid during plain first-person play with live input.
+==================
+*/
+const char *CL_WarpDeny( void ) {
+	const playerState_t *ps;
+
+	if ( !re.WarpFrame ) {
+		return "renderer has no WarpFrame";
+	}
+	if ( clc.state != CA_ACTIVE ) {
+		return "client not CA_ACTIVE";
+	}
+	if ( !cl.snap.valid ) {
+		return "no valid snapshot";
+	}
+	if ( clc.demoplaying && !( cl_benchDemo && cl_benchDemo->integer ) ) {
+		return "demo playing";
+	}
+	if ( Key_GetCatcher() != 0 ) {
+		return "key catcher (menu/console/message)";
+	}
+	if ( cl.cameraMode ) {
+		return "camera mode";
+	}
+	if ( CL_CheckPaused() || ( cl_timedemo && cl_timedemo->integer ) ) {
+		return "paused/timedemo";
+	}
+	if ( CL_VideoRecording() || ( cl_avidemo && cl_avidemo->integer ) ) {
+		return "video recording";
+	}
+	if ( Cvar_VariableIntegerValue( "cg_thirdPerson" ) ) {
+		return "third person";
+	}
+
+	ps = &cl.snap.ps;
+	if ( ps->pm_type != PM_NORMAL ) {
+		return "pm_type not PM_NORMAL";
+	}
+	if ( ps->stats[STAT_HEALTH] <= 0 ) {
+		return "dead";
+	}
+	if ( ps->viewlocked ) {
+		return "view locked";
+	}
+	if ( ps->persistant[PERS_HWEAPON_USE] ) {
+		return "mounted weapon";
+	}
+	return NULL;
+}
+
+qboolean CL_WarpAllowed( void ) {
+	return CL_WarpDeny() == NULL;
+}
+
+/*
+==================
+CL_WarpFrame
+
+Presents an extra frame re-projected by the input turned since the last
+usercmd. Returns qtrue if a frame was presented.
+==================
+*/
+qboolean CL_WarpFrame( void ) {
+	float dPitch, dYaw;
+
+	if ( !CL_WarpAllowed() ) {
+		return qfalse;
+	}
+	IN_QueueEvents();
+	CL_PeekLookDelta( &dPitch, &dYaw );
+	return re.WarpFrame( dPitch, dYaw );
+}
+
+/*
+==================
+CL_WarpLatchView
+
+Late-latch: the freshest absolute view angles (called by the renderer through Com_WarpLatch).
+==================
+*/
+qboolean CL_WarpLatchView( float *pitch, float *yaw ) {
+	if ( CL_WarpDeny() ) {
+		return qfalse;
+	}
+	IN_QueueEvents();
+	CL_PeekViewAngles( pitch, yaw );
+	return qtrue;
+}
+
+long long CL_WarpLastCmdUs( void ) {
+	return cl.lastCmdUs;
+}
 
 //============================================================================
 
@@ -3285,6 +3382,9 @@ void CL_Frame( int msec ) {
 	CL_SetCGameTime();
 
 	// update the screen
+	if ( re.WarpSetRef && Cvar_VariableIntegerValue( "r_frameWarp" ) && CL_WarpAllowed() ) {
+		re.WarpSetRef( cl.viewangles );     // reference of the angles the frame is rendered with
+	}
 	if ( clc.state == CA_ACTIVE ) { Com_LoadProfileMark( "cl:first_frame_begin" ); }    // no-op once the profile ended
 	SCR_UpdateScreen();
 	if ( clc.state == CA_ACTIVE ) { Com_LoadProfileEnd(); }
@@ -3642,6 +3742,7 @@ void CL_InitRef( void ) {
 	ri.LoadingReplayTick = CL_LoadingReplayTick;
 	ri.LoadProfileHint = Com_LoadProfileHint;
 	ri.RunOffloaded = Com_RunOffloaded;
+	ri.WarpLatch = Com_WarpLatch;
 
 	ri.Z_Malloc = Z_Malloc;
 	ri.Free = Z_Free;

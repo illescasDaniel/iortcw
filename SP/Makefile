@@ -1879,6 +1879,7 @@ Q3R2OBJ = \
   $(B)/rend2/tr_sky.o \
   $(B)/rend2/tr_surface.o \
   $(B)/rend2/tr_vbo.o \
+  $(B)/rend2/tr_warp.o \
   $(B)/rend2/tr_world.o \
   \
   $(B)/rend2/sdl_gamma.o \
@@ -1924,7 +1925,9 @@ Q3R2STRINGOBJ = \
   $(B)/rend2/glsl/texturecolor_fp.o \
   $(B)/rend2/glsl/texturecolor_vp.o \
   $(B)/rend2/glsl/tonemap_fp.o \
-  $(B)/rend2/glsl/tonemap_vp.o
+  $(B)/rend2/glsl/tonemap_vp.o \
+  $(B)/rend2/glsl/warp_fp.o \
+  $(B)/rend2/glsl/warpcap_fp.o
 
 ifneq ($(USE_RENDERER_DLOPEN), 0)
   Q3R2OBJ += \

@@ -1120,6 +1120,7 @@ qboolean UI_usesUniqueCDKey( void );
 //
 void IN_Init( void *windowData );
 void IN_Frame( void );
+void IN_QueueEvents( void );     // IN_ProcessEvents only (no joystick); frame-warp
 void IN_Shutdown( void );
 void IN_Restart( void );
 qboolean IN_ToggleFullscreenInPlace( void );
@@ -1174,6 +1175,14 @@ void Com_PresentDone( void ( *finish )( void ) );
 // Sub-millisecond remainder (0..999 us) of the paced game clock, for cgame interpolation
 extern int com_frameFracUs;
 extern long long com_frameClockUs;
+// Frame-warp (async reprojection): client side in cl_main.c, queue peek in common.c
+qboolean CL_WarpAllowed( void );
+const char *CL_WarpDeny( void );
+qboolean CL_WarpFrame( void );
+long long CL_WarpLastCmdUs( void );   // clock of the last usercmd (late-latch stats)
+qboolean CL_WarpLatchView( float *pitch, float *yaw );
+qboolean Com_WarpLatch( void ( *gpuWait )( void ), float *pitch, float *yaw );   // late-latch (client import)
+void Com_PeekMouseEvents( int *dx, int *dy );   // sums queued SE_MOUSE events without dequeuing
 // Sys_Microseconds time right after the last buffer swap (bench: present cadence)
 extern long long com_lastPresentUs;
 // Opt-in load-time profiler (cvar com_loadProfile); all no-ops when 0

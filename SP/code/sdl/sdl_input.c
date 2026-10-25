@@ -1553,6 +1553,19 @@ static void IN_ProcessEvents( void )
 
 /*
 ===============
+IN_QueueEvents
+
+Moves pending SDL events into the common event queue (no joystick poll),
+for frame-warp between full frames. Com_EventLoop dispatches them later.
+===============
+*/
+void IN_QueueEvents( void )
+{
+	IN_ProcessEvents( );
+}
+
+/*
+===============
 IN_Frame
 ===============
 */

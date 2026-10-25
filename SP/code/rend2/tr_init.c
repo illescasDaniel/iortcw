@@ -146,6 +146,14 @@ cvar_t  *r_smaa;
 cvar_t  *r_smaaDebug;
 cvar_t  *r_smaaTemporal;
 cvar_t  *r_smaaJitter;
+cvar_t  *r_frameWarp;
+cvar_t  *r_frameWarpMaxDeg;
+cvar_t  *r_frameWarpLatchSync;
+cvar_t  *r_frameWarpGunDepth;
+cvar_t  *r_frameWarpGunDilate;
+cvar_t  *r_warpDebug;
+cvar_t  *r_warpDebugPitch;
+cvar_t  *r_warpDebugYaw;
 cvar_t  *r_smaaTemporalWeight;
 cvar_t  *r_smaaVelocity;
 cvar_t  *r_smaaPredication;
@@ -1536,6 +1544,17 @@ void R_Register( void ) {
 	ri.Cvar_CheckRange( r_smaaTemporal, 0, 1, qtrue );
 	r_smaaJitter = ri.Cvar_Get( "r_smaaJitter", "0.25", 0 );	// jitter amplitude in pixels (0 = jitter off, debug)
 	ri.Cvar_CheckRange( r_smaaJitter, 0, 1, qfalse );
+
+	// frame warp (tr_warp.c): re-project a real frame to a slightly different view direction
+	r_frameWarp = ri.Cvar_Get( "r_frameWarp", "0", CVAR_ARCHIVE | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_frameWarp, 0, 3, qtrue );
+	r_frameWarpLatchSync = ri.Cvar_Get( "r_frameWarpLatchSync", "1", 0 );	// 0 never, 1 when paced, 2 always (read by the common side)
+	r_frameWarpMaxDeg = ri.Cvar_Get( "r_frameWarpMaxDeg", "20", 0 );
+	r_frameWarpGunDepth = ri.Cvar_Get( "r_frameWarpGunDepth", "0.3", CVAR_CHEAT );
+	r_frameWarpGunDilate = ri.Cvar_Get( "r_frameWarpGunDilate", "1", 0 );
+	r_warpDebug = ri.Cvar_Get( "r_warpDebug", "0", CVAR_TEMP );	// 1 fixed delta, 2 oscillating at 1 Hz, 3 visualise
+	r_warpDebugPitch = ri.Cvar_Get( "r_warpDebugPitch", "0", 0 );
+	r_warpDebugYaw = ri.Cvar_Get( "r_warpDebugYaw", "2", 0 );
 	r_smaaTemporalWeight = ri.Cvar_Get( "r_smaaTemporalWeight", "0.5", 0 );	// weight of the history sample
 	ri.Cvar_CheckRange( r_smaaTemporalWeight, 0, 0.95f, qfalse );
 	r_smaaVelocity = ri.Cvar_Get( "r_smaaVelocity", "1", 0 );	// T2x per-object velocity buffer (0 = camera motion only)
@@ -1791,6 +1810,7 @@ void R_Register( void ) {
 	r_highQualityVideo = ri.Cvar_Get( "r_highQualityVideo", "1", CVAR_ARCHIVE );
 	// make sure all the commands added here are also
 	// removed in R_Shutdown
+	ri.Cmd_AddCommand( "warprstats", R_WarpStats_f );
 	ri.Cmd_AddCommand( "imagelist", R_ImageList_f );
 	ri.Cmd_AddCommand( "shaderlist", R_ShaderList_f );
 	ri.Cmd_AddCommand( "skinlist", R_SkinList_f );
@@ -1912,7 +1932,10 @@ void R_Init( void ) {
 	R_LOADING_REPLAY();
 
 	if (glRefConfig.framebufferObject)
+	{
 		FBO_Init();
+		R_WarpInitTargets();
+	}
 	R_LOADING_REPLAY();
 
 	GLSL_InitGPUShaders();
@@ -1955,6 +1978,7 @@ void RE_Shutdown( qboolean destroyWindow ) {
 
 	ri.Printf( PRINT_ALL, "RE_Shutdown( %i )\n", destroyWindow );
 
+	ri.Cmd_RemoveCommand( "warprstats" );
 	ri.Cmd_RemoveCommand( "imagelist" );
 	ri.Cmd_RemoveCommand( "shaderlist" );
 	ri.Cmd_RemoveCommand( "skinlist" );
@@ -2099,6 +2123,8 @@ refexport_t *GetRefAPI( int apiVersion, refimport_t *rimp ) {
 	re.TakeVideoFrame = RE_TakeVideoFrame;
 	re.LoadingSnapshot = RE_LoadingSnapshot;
 	re.PresentLoadingSnapshot = RE_PresentLoadingSnapshot;
+	re.WarpFrame = RE_WarpFrame;
+	re.WarpSetRef = RE_WarpSetRef;
 
 	// RF
 	re.ZombieFXAddNewHit = RB_ZombieFXAddNewHit;
