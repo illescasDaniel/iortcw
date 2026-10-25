@@ -152,7 +152,7 @@ qboolean RB_WarpApply( float dPitch, float dYaw ) {
 	R_WarpMatrix( (const vec3_t *)tr.warp.axis, (const vec3_t *)newAxis, tr.warp.fovX, tr.warp.fovY, m );
 
 	VectorSet4( box, tr.warp.box[0], tr.warp.box[1], tr.warp.box[2], tr.warp.box[3] );
-	VectorSet4( params, r_warpDebug->integer == 3 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f );
+	VectorSet4( params, r_warpDebug->integer == 3 ? 1.0f : 0.0f, r_frameWarpEdgeBlur->value, 0.0f, 0.0f );
 
 	GLSL_BindProgram( &tr.warpShader );
 	GLSL_SetUniformMat4( &tr.warpShader, UNIFORM_WARPMATRIX, m );

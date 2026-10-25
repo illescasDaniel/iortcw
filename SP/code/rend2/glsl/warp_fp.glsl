@@ -2,12 +2,37 @@ uniform sampler2D u_ScreenImageMap; // captured scene: rgb colour, a = view mode
 
 uniform mat4   u_WarpMatrix;  // upper left 3x3: new view NDC (x, y, 1) -> old view homogeneous NDC
 uniform vec4   u_WarpBox;     // 3D viewport in pixels: x, y, w, h
-uniform vec4   u_WarpParams;  // x = 1: visualise (mask red, edge clamp blue, hole fill green)
+uniform vec4   u_WarpParams;  // x = 1: visualise (mask red, edge clamp blue, hole fill green), y = edge blur strength (0 = plain clamp)
 uniform vec2   u_InvTexRes;   // 1 / size of the captured image
 
 varying vec2   var_Tex1;
 
 #define HOLE_STEPS 16
+#define EDGE_TAPS 8
+
+float edgeNoise(const vec2 fc)
+{
+	return fract(52.9829189 * fract(dot(fc, vec2(0.06711056, 0.00583715))));
+}
+
+// Where the warp reveals pixels outside the captured frame, the clamp stretches the border row into
+// streaks. Blur across the streaks (perpendicular to the overshoot), wider the further outside.
+vec3 edgeBlur(const vec2 p, const vec2 pc, const vec2 lo, const vec2 hi, const vec3 base, const float strength)
+{
+	vec2 over = abs(p - pc);
+	vec2 w = min(over * 0.5 * strength, vec2(96.0));
+	vec3 sum = base;
+	float n = edgeNoise(gl_FragCoord.xy);
+	for (int i = 0; i < EDGE_TAPS; i++)
+	{
+		float t = fract(n + float(i) / float(EDGE_TAPS)) * 2.0 - 1.0;
+		vec2 q = pc + vec2(t * w.y, t * w.x);
+		q = clamp(q, lo, hi);
+		vec4 c = texture2D(u_ScreenImageMap, q * u_InvTexRes);
+		sum += c.a > 0.5 ? base : c.rgb;
+	}
+	return sum / float(EDGE_TAPS + 1);
+}
 
 float gunMask(const vec2 uv)
 {
@@ -50,6 +75,8 @@ void main()
 			{
 				tint = vec3(0.0, 0.0, 1.0);
 				tintAmount = 0.5;
+				if (u_WarpParams.y > 0.0 && cOld.a < 0.5)
+					cOld.rgb = edgeBlur(p, pc, lo, hi, cOld.rgb, u_WarpParams.y);
 			}
 
 			if (cOld.a > 0.5)

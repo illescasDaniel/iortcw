@@ -148,6 +148,7 @@ cvar_t  *r_smaaTemporal;
 cvar_t  *r_smaaJitter;
 cvar_t  *r_frameWarp;
 cvar_t  *r_frameWarpMaxDeg;
+cvar_t  *r_frameWarpEdgeBlur;
 cvar_t  *r_frameWarpLatchSync;
 cvar_t  *r_frameWarpGunDepth;
 cvar_t  *r_frameWarpGunDilate;
@@ -1550,6 +1551,7 @@ void R_Register( void ) {
 	ri.Cvar_CheckRange( r_frameWarp, 0, 3, qtrue );
 	r_frameWarpLatchSync = ri.Cvar_Get( "r_frameWarpLatchSync", "1", 0 );	// 0 never, 1 when paced, 2 always (read by the common side)
 	r_frameWarpMaxDeg = ri.Cvar_Get( "r_frameWarpMaxDeg", "20", 0 );
+	r_frameWarpEdgeBlur = ri.Cvar_Get( "r_frameWarpEdgeBlur", "1", 0 );	// blur strength where the warp reveals the screen edge; 0 = plain stretch
 	r_frameWarpGunDepth = ri.Cvar_Get( "r_frameWarpGunDepth", "0.3", CVAR_CHEAT );
 	r_frameWarpGunDilate = ri.Cvar_Get( "r_frameWarpGunDilate", "1", 0 );
 	r_warpDebug = ri.Cvar_Get( "r_warpDebug", "0", CVAR_TEMP );	// 1 fixed delta, 2 oscillating at 1 Hz, 3 visualise

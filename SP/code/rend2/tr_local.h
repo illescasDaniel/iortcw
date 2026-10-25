@@ -2165,6 +2165,7 @@ extern  cvar_t  *r_smaaTemporal;
 extern  cvar_t  *r_smaaJitter;
 extern  cvar_t  *r_frameWarp;
 extern  cvar_t  *r_frameWarpMaxDeg;
+extern  cvar_t  *r_frameWarpEdgeBlur;
 extern  cvar_t  *r_frameWarpLatchSync;
 extern  cvar_t  *r_frameWarpGunDepth;
 extern  cvar_t  *r_frameWarpGunDilate;
