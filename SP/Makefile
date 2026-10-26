@@ -1852,6 +1852,7 @@ Q3R2OBJ = \
   $(B)/rend2/tr_fbo.o \
   $(B)/rend2/tr_flares.o \
   $(B)/rend2/tr_gpuprof.o \
+  $(B)/rend2/tr_pacegpu.o \
   $(B)/rend2/tr_font.o \
   $(B)/rend2/tr_glsl.o \
   $(B)/rend2/tr_image.o \

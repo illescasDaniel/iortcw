@@ -210,6 +210,7 @@ typedef struct {
 	// frame pacing around the buffer swap (finish = glFinish); may be NULL
 	void	(*PresentWait)( void ( *finish )( void ) );
 	void	(*PresentDone)( void ( *finish )( void ) );
+	void	(*PaceGpuRegister)( const paceGpu_t *ops );	/* may be NULL */
 
 	// redraws the loading screen at a limited rate; may be NULL; call only from safe points
 	void	(*LoadingTick)( void );

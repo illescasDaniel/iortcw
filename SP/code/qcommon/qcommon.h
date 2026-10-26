@@ -1172,6 +1172,17 @@ long long Sys_WaitUntil( long long deadlineUs, int spinUs );
 // Frame pacer hooks called by the renderer around the buffer swap (finish = glFinish)
 void Com_PresentWait( void ( *finish )( void ) );
 void Com_PresentDone( void ( *finish )( void ) );
+
+/* GPU pacing ops registered by the renderer (com_maxfpsGpuSync 2) */
+typedef struct paceGpu_s {
+	int       (*mark)( void );                        /* timestamp + fence + glFlush after the frame's last command; seq > 0, 0 = unsupported */
+	int       (*poll)( int seq );                     /* non-blocking: 1 signalled (or evicted), 0 pending */
+	qboolean  (*doneNs)( int seq, long long *gpuNs ); /* non-blocking: GPU time the frame finished */
+	long long (*nowNs)( void );                       /* glGetInteger64v(GL_TIMESTAMP) */
+} paceGpu_t;
+void Com_PaceGpuRegister( const paceGpu_t *ops );     /* NULL = unregister (renderer shutdown) */
+void Com_PaceStatsReset( void );
+void Com_PaceStatsPrint( void );                      /* one "codmod pace: k=v ..." line */
 // Sub-millisecond remainder (0..999 us) of the paced game clock, for cgame interpolation
 extern int com_frameFracUs;
 extern long long com_frameClockUs;

@@ -1381,6 +1381,7 @@ void CL_SetCGameTime( void ) {
 		} else if ( now - clc.benchStartUs >= BENCH_WARMUP_US ) {
 			if ( !clc.benchMeasureUs ) {
 				clc.benchMeasureUs = now;
+				Com_PaceStatsReset();
 			} else if ( clc.benchFrames < MAX_BENCH_FRAMES ) {
 				clc.benchDurations[ clc.benchFrames++ ] = (int)( now - clc.benchLastUs );
 			}

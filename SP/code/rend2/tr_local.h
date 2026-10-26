@@ -2646,6 +2646,10 @@ void R_NormalCov_f( void );
 void R_NormalCovReport( drawSurf_t *drawSurfs, int numDrawSurfs );
 void R_ShutdownGpuProf( void );
 
+// tr_pacegpu.c
+void R_PaceGpuInit( void );
+void R_PaceGpuShutdown( void );
+
 void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, float scale, vec3_t normal, int id, int flags ); // TTimo updated prototype
 void RB_AddDlightFlares( void );
 void RB_RenderFlares (void);

@@ -1551,7 +1551,7 @@ void R_Register( void ) {
 	ri.Cvar_CheckRange( r_frameWarp, 0, 3, qtrue );
 	r_frameWarpLatchSync = ri.Cvar_Get( "r_frameWarpLatchSync", "1", 0 );	// 0 never, 1 when paced, 2 always (read by the common side)
 	r_frameWarpMaxDeg = ri.Cvar_Get( "r_frameWarpMaxDeg", "20", 0 );
-	r_frameWarpEdgeBlur = ri.Cvar_Get( "r_frameWarpEdgeBlur", "1", 0 );	// blur strength where the warp reveals the screen edge; 0 = plain stretch
+	r_frameWarpEdgeBlur = ri.Cvar_Get( "r_frameWarpEdgeBlur", "2", 0 );	// blur strength where the warp reveals the screen edge; 0 = plain stretch
 	r_frameWarpGunDepth = ri.Cvar_Get( "r_frameWarpGunDepth", "0.3", CVAR_CHEAT );
 	r_frameWarpGunDilate = ri.Cvar_Get( "r_frameWarpGunDilate", "1", 0 );
 	r_warpDebug = ri.Cvar_Get( "r_warpDebug", "0", CVAR_TEMP );	// 1 fixed delta, 2 oscillating at 1 Hz, 3 visualise
@@ -1928,6 +1928,7 @@ void R_Init( void ) {
 	R_InitNextFrame();
 
 	InitOpenGL();
+	R_PaceGpuInit();
 	R_LOADING_REPLAY();
 
 	R_InitImages();
@@ -1979,6 +1980,8 @@ RE_Shutdown
 void RE_Shutdown( qboolean destroyWindow ) {
 
 	ri.Printf( PRINT_ALL, "RE_Shutdown( %i )\n", destroyWindow );
+
+	R_PaceGpuShutdown();
 
 	ri.Cmd_RemoveCommand( "warprstats" );
 	ri.Cmd_RemoveCommand( "imagelist" );

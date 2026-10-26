@@ -112,6 +112,7 @@ cvar_t	*com_maxfpsPrecise;
 cvar_t	*com_maxfpsSpinUs;
 cvar_t	*com_maxfpsMode;
 cvar_t	*com_maxfpsGpuSync;
+static cvar_t	*com_maxfpsGpuQueue;   // com_maxfpsGpuSync 2: frames the GPU may be behind (0..3)
 static cvar_t	*com_vsync;
 static cvar_t	*com_displayRefresh;
 static cvar_t	*r_frameWarp;       // owned by the renderer; registered here too so the pacer can read it
@@ -2397,6 +2398,7 @@ Com_Init
 =================
 */
 static void Com_WarpStats_f( void );
+static void Com_PaceStats_f( void );
 
 void Com_Init( char *commandLine ) {
 	char    *s;
@@ -2523,8 +2525,10 @@ void Com_Init( char *commandLine ) {
 	com_maxfpsSpinUs = Cvar_Get( "com_maxfpsSpinUs", "-1", CVAR_ARCHIVE );
 	// where the cap waits: 0 start of frame, 1 right before present, 2 predictive (start late, present on time)
 	com_maxfpsMode = Cvar_Get( "com_maxfpsMode", "2", CVAR_ARCHIVE );
-	// glFinish before the present wait / after the swap so frame timing sees the GPU, not just the CPU
+	// GPU pacing: 0 none (CPU timing only), 1 glFinish before the present wait / after the swap so frame timing sees
+	// the GPU, 2 fence pipeline (never blocks the GPU: timestamps + fences, com_maxfpsGpuQueue frames in flight)
 	com_maxfpsGpuSync = Cvar_Get( "com_maxfpsGpuSync", "1", CVAR_ARCHIVE );
+	com_maxfpsGpuQueue = Cvar_Get( "com_maxfpsGpuQueue", "1", 0 );
 	// owned by the renderer (sdl_glimp.c); registered here too so the pacer can read it
 	com_vsync = Cvar_Get( "r_vsync", "0", CVAR_ARCHIVE );
 	com_displayRefresh = Cvar_Get( "r_displayRefreshActual", "0", CVAR_TEMP );
@@ -2532,6 +2536,7 @@ void Com_Init( char *commandLine ) {
 	com_frameWarpHz = Cvar_Get( "r_frameWarpHz", "0", 0 );
 	com_latchSync = Cvar_Get( "r_frameWarpLatchSync", "1", 0 );
 	Cmd_AddCommand( "warpstats", Com_WarpStats_f );
+	Cmd_AddCommand( "pacestats", Com_PaceStats_f );
 	Cvar_Get("com_errorMessage", "", CVAR_ROM | CVAR_NORESTART);
 
 #ifdef CINEMATICS_INTRO
@@ -2889,6 +2894,10 @@ typedef struct {
 	long long warpStartUs;      // when it started
 	qboolean  readyRecorded;    // late-latch already wrote this frame's ring sample at the GPU fence (see Com_WarpLatch)
 	long long readyUs;          // time of that fence
+	qboolean  fence;            // this frame is paced by the fence pipeline (com_maxfpsGpuSync 2), see Com_PaceFenceOk
+	int       recIdx;           // index of this frame's record in paceRecs (-1 none)
+	int       leadUs;           // lead used by the top-of-frame wait (fence mode)
+	int       markedFrame;      // com_frameNumber + 1 the GPU mark was taken for
 } pacer_t;
 
 static pacer_t pacer;
@@ -2922,6 +2931,253 @@ static int Com_PaceLead( void ) {
 	Com_Memcpy( tmp, pacer.ring, sizeof( tmp ) );
 	qsort( tmp, PACE_RING, sizeof( int ), Com_PaceCmpInt );
 	return tmp[PACE_RING - 2];
+}
+
+
+/*
+=================
+GPU fence pipeline (com_maxfpsGpuSync 2)
+
+The renderer registers timestamp/fence ops (Com_PaceGpuRegister). Every paced frame gets a record
+(start time on the CPU clock and the GPU clock, deadline); the renderer marks it after the frame's last
+command (fence + timestamp). Completed records are harvested without blocking: the GPU completion time
+(mapped to the CPU clock) feeds the lead ring and the statistics. The next frame only waits (sleep-poll,
+100 ms timeout) while more than com_maxfpsGpuQueue earlier frames are still unfinished.
+=================
+*/
+#define PACE_RECS 16
+
+typedef struct {
+	int       seq;              // renderer fence/timestamp id, 0 = not marked
+	int       frameTag;         // com_frameNumber + 1 the record belongs to
+	long long startUs;
+	long long startGpuNs;
+	double    deadlineUs;       // 0 = uncapped frame
+	double    periodUs;
+	qboolean  latched;          // late-latch wrote the ring sample (LL-1)
+	qboolean  active;           // pacer controlled this frame (feeds the ring)
+} paceRec_t;
+
+static const paceGpu_t *paceOps;
+static paceRec_t paceRecs[PACE_RECS];
+static int paceRecCount, paceRecDone;   // records created / harvested (monotonic)
+
+#define PSTAT_N 16384
+static struct {
+	int       s2g[PSTAT_N], s2gN;       // input -> GPU done, non-latched frames, us
+	int       giv[PSTAT_N], givN;       // GPU completion intervals, us
+	int       siv[PSTAT_N], sivN;       // swap-return intervals, us
+	int       bl[PSTAT_N], blN;         // backlog wait, us
+	double    capSum, holdSum;
+	int       capN, holdN;
+	int       frames, framesD, miss, latched, timeouts, nowMax;
+	long long lastG, lastSwapUs;
+} ps;
+
+void Com_PaceStatsReset( void ) {
+	Com_Memset( &ps, 0, sizeof( ps ) );
+}
+
+static void Com_PaceStatPush( int *arr, int *n, int v ) {
+	arr[(*n)++ % PSTAT_N] = v;
+}
+
+void Com_PaceGpuRegister( const paceGpu_t *ops ) {
+	paceOps = ops;
+	Com_Memset( paceRecs, 0, sizeof( paceRecs ) );
+	paceRecCount = paceRecDone = 0;
+	pacer.recIdx = -1;
+	ps.lastG = 0;
+}
+
+static qboolean Com_PaceFenceOk( void ) {
+	return com_maxfpsGpuSync->integer == 2 && paceOps && paceOps->mark && paceOps->poll &&
+		   paceOps->doneNs && paceOps->nowNs;
+}
+
+static int Com_PaceQueue( void ) {
+	int q = com_maxfpsGpuQueue ? com_maxfpsGpuQueue->integer : 1;
+
+	return q < 0 ? 0 : q > 3 ? 3 : q;
+}
+
+// records that were marked and are not harvested yet
+static int Com_PacePending( void ) {
+	int i, n = 0;
+
+	for ( i = paceRecDone; i < paceRecCount; i++ ) {
+		if ( paceRecs[i % PACE_RECS].seq ) {
+			n++;
+		}
+	}
+	return n;
+}
+
+// resolve finished records in order, without blocking
+static void Com_PaceHarvest( void ) {
+	while ( paceRecDone < paceRecCount ) {
+		paceRec_t *r = &paceRecs[paceRecDone % PACE_RECS];
+		long long gpuNs;
+
+		if ( r->seq == 0 ) {
+			paceRecDone++;      // never marked (frame without a present)
+			continue;
+		}
+		if ( paceOps->doneNs( r->seq, &gpuNs ) ) {
+			double g = (double)r->startUs + (double)( gpuNs - r->startGpuNs ) / 1000.0;
+			long long gUs = (long long)g;
+
+			ps.frames++;
+			if ( r->latched ) {
+				ps.latched++;
+			} else {
+				int cost = (int)( gUs - r->startUs );
+
+				Com_PaceStatPush( ps.s2g, &ps.s2gN, cost );
+				if ( r->active ) {
+					pacer.ring[pacer.ringPos++ % PACE_RING] = cost;
+				}
+			}
+			if ( ps.lastG && gUs > ps.lastG ) {
+				Com_PaceStatPush( ps.giv, &ps.givN, (int)( gUs - ps.lastG ) );
+			}
+			ps.lastG = gUs;
+			if ( r->deadlineUs > 0 ) {
+				ps.framesD++;
+				if ( g > r->deadlineUs + 0.25 * r->periodUs ) {
+					ps.miss++;
+				}
+			}
+		} else if ( !paceOps->poll( r->seq ) ) {
+			break;
+		}
+		r->seq = 0;
+		paceRecDone++;
+	}
+}
+
+// create this frame's record (fence mode only)
+static void Com_PaceRecBegin( long long startUs, long long startGpuNs, qboolean active ) {
+	paceRec_t *r;
+
+	if ( paceRecCount - paceRecDone >= PACE_RECS ) {
+		paceRecDone++;
+	}
+	pacer.recIdx = paceRecCount++;
+	r = &paceRecs[pacer.recIdx % PACE_RECS];
+	Com_Memset( r, 0, sizeof( *r ) );
+	r->frameTag = com_frameNumber + 1;
+	r->startUs = startUs;
+	r->startGpuNs = startGpuNs;
+	r->deadlineUs = active ? pacer.deadlineUs : 0;
+	r->periodUs = pacer.periodUs;
+	r->active = active;
+}
+
+static paceRec_t *Com_PaceRecCur( void ) {
+	paceRec_t *r;
+
+	if ( pacer.recIdx < 0 || pacer.recIdx < paceRecDone ) {
+		return NULL;
+	}
+	r = &paceRecs[pacer.recIdx % PACE_RECS];
+	return r->frameTag == com_frameNumber + 1 ? r : NULL;
+}
+
+static long long Com_PaceNowNs( void ) {
+	long long t0 = Sys_Microseconds(), ns = paceOps->nowNs();
+	int us = (int)( Sys_Microseconds() - t0 );
+
+	if ( us > ps.nowMax ) {
+		ps.nowMax = us;
+	}
+	return ns;
+}
+
+// once per Com_Frame: fence + timestamp after the frame's last command
+static void Com_PaceMark( void ) {
+	paceRec_t *r = Com_PaceRecCur();
+
+	if ( !r || r->seq || pacer.markedFrame == com_frameNumber + 1 ) {
+		return;
+	}
+	pacer.markedFrame = com_frameNumber + 1;
+	r->seq = paceOps->mark();
+}
+
+// P98 of "late-latch sample -> GPU finished the warp + 2D tail", us (1500 until enough samples)
+static int Com_LatchLeadP98( void ) {
+	int n = latch.leadPos < LATCH_RING ? latch.leadPos : LATCH_RING;
+	int tmp[LATCH_RING];
+
+	if ( n < 16 ) {
+		return 1500;
+	}
+	Com_Memcpy( tmp, latch.leadLat, sizeof( tmp ) );
+	qsort( tmp, n, sizeof( int ), Com_PaceCmpInt );
+	return tmp[(int)( ( n - 1 ) * 0.98 + 0.5 )];
+}
+
+// copy the last samples of a stats ring into a sorted scratch array; returns the count
+static int Com_PaceSorted( const int *arr, int total, int *out ) {
+	int n = total < PSTAT_N ? total : PSTAT_N;
+
+	if ( n ) {
+		Com_Memcpy( out, arr, n * sizeof( int ) );     // wrapped order does not matter for percentiles
+		qsort( out, n, sizeof( int ), Com_PaceCmpInt );
+	}
+	return n;
+}
+
+static void Com_PaceMeanSd( const int *arr, int total, double *mean, double *sd ) {
+	int i, n = total < PSTAT_N ? total : PSTAT_N;
+	double sum = 0, var = 0;
+
+	*mean = *sd = 0;
+	if ( !n ) {
+		return;
+	}
+	for ( i = 0; i < n; i++ ) {
+		sum += arr[i];
+	}
+	*mean = sum / n;
+	for ( i = 0; i < n; i++ ) {
+		var += ( arr[i] - *mean ) * ( arr[i] - *mean );
+	}
+	*sd = sqrt( var / n );
+}
+
+static int Com_PacePct( const int *arr, int total, double p ) {
+	static int tmp[PSTAT_N];
+	int n = Com_PaceSorted( arr, total, tmp );
+
+	return n ? tmp[(int)( ( n - 1 ) * p + 0.5 )] : 0;
+}
+
+void Com_PaceStatsPrint( void ) {
+	double gm, gs, sm, ss;
+	double T = pacer.periodUs;
+
+	Com_PaceMeanSd( ps.giv, ps.givN, &gm, &gs );
+	Com_PaceMeanSd( ps.siv, ps.sivN, &sm, &ss );
+	Com_Printf( "codmod pace: mode=%d gsync=%d q=%d T=%.0f frames=%d s2g_p50=%d s2g_p98=%d latched=%d "
+				"giv_mean=%.0f giv_sd=%.0f giv_p99=%d siv_sd=%.0f miss%%=%.2f wait_cap=%.0f "
+				"wait_backlog_p98=%d hold=%.0f fence_timeouts=%d nowns_max_us=%d\n",
+				com_maxfpsMode->integer, com_maxfpsGpuSync->integer, Com_PaceQueue(), T, ps.frames,
+				Com_PacePct( ps.s2g, ps.s2gN, 0.5 ), Com_PacePct( ps.s2g, ps.s2gN, 0.98 ), ps.latched,
+				gm, gs, Com_PacePct( ps.giv, ps.givN, 0.99 ), ss,
+				ps.framesD ? 100.0 * ps.miss / ps.framesD : 0.0,
+				ps.capN ? ps.capSum / ps.capN : 0.0, Com_PacePct( ps.bl, ps.blN, 0.98 ),
+				ps.holdN ? ps.holdSum / ps.holdN : 0.0, ps.timeouts, ps.nowMax );
+}
+
+static void Com_PaceStats_f( void ) {
+	if ( Cmd_Argc() > 1 && !Q_stricmp( Cmd_Argv( 1 ), "reset" ) ) {
+		Com_PaceStatsReset();
+		Com_Printf( "pacestats reset\n" );
+		return;
+	}
+	Com_PaceStatsPrint();
 }
 
 /*
@@ -3354,17 +3610,88 @@ static void Com_WarpStats_f( void ) {
 				warp.ivN > 1 ? sqrt( warp.ivM2 / ( warp.ivN - 1 ) ) : 0.0, warp.ivN );
 }
 
+/*
+=================
+Com_FrameWaitTopFence
+
+Capped frame in fence mode (com_maxfpsGpuSync 2); the deadline is already advanced. The cap wait is as in
+the other modes, then the frame waits (sleep-poll, never a blocking GPU call) until at most
+com_maxfpsGpuQueue earlier frames are unfinished on the GPU.
+=================
+*/
+static void Com_FrameWaitTopFence( long long arrivedUs ) {
+	double T = pacer.periodUs, planned;
+	int lead = 0, q = Com_PaceQueue();
+	long long t0, now;
+	qboolean ll1;
+
+	pacer.fence = qtrue;
+	Com_PaceHarvest();
+
+	ll1 = r_frameWarp->integer == 1 && com_latchSync && com_latchSync->integer != 0 && !pacer.gpuBound;
+	if ( pacer.mode == 2 ) {
+		lead = Com_PaceLead() + 500;
+		if ( pacer.presentedFrame == 0 ) {
+			lead = (int)( T * 0.5 );
+		}
+		if ( ll1 ) {
+			if ( lead > T * 0.9 ) {
+				lead = (int)( T * 0.9 );
+			}
+		} else if ( lead > ( q + 1 ) * T ) {
+			lead = (int)( ( q + 1 ) * T );
+		}
+	}
+	pacer.leadUs = lead;
+
+	planned = pacer.mode == 0 ? pacer.deadlineUs : pacer.mode == 2 ? pacer.deadlineUs - lead : (double)arrivedUs;
+	t0 = Sys_Microseconds();
+	if ( pacer.mode == 0 ) {
+		Sys_WaitUntil( (long long)pacer.deadlineUs, com_maxfpsSpinUs->integer );
+	} else if ( pacer.mode == 2 ) {
+		Sys_WaitUntil( (long long)pacer.deadlineUs - lead, com_maxfpsSpinUs->integer );
+	}
+	now = Sys_Microseconds();
+	ps.capSum += (double)( now - t0 );
+	ps.capN++;
+
+	// backlog wait
+	t0 = now;
+	Com_PaceHarvest();
+	while ( Com_PacePending() > q ) {
+		if ( now - t0 > 100000 ) {
+			ps.timeouts++;
+			paceRecDone = paceRecCount;
+			break;
+		}
+		Sys_WaitUntil( now + 100, 0 );
+		now = Sys_Microseconds();
+		Com_PaceHarvest();
+	}
+	now = Sys_Microseconds();
+	Com_PaceStatPush( ps.bl, &ps.blN, (int)( now - t0 ) );
+
+	if ( now > planned + 0.25 * T ) {
+		pacer.deadlineUs = pacer.mode == 2 ? (double)now + lead : (double)now;
+		pacer.late = qtrue;
+	}
+	pacer.frameStartUs = now;
+	Com_PaceRecBegin( now, Com_PaceNowNs(), qtrue );
+}
+
 static void Com_FrameWaitTop( void ) {
 	float fps;
 	long long now;
 	int vsync = com_vsync->integer;
-	qboolean llEligible;
+	qboolean llEligible, fence;
 	int lead;
 	double target;
 
 	pacer.active = qfalse;
 	pacer.vblankLock = qfalse;
 	pacer.readyRecorded = qfalse;
+	pacer.fence = qfalse;
+	pacer.recIdx = -1;
 
 	if ( com_minimized->integer && com_maxfpsMinimized->value > 0 ) {
 		fps = com_maxfpsMinimized->value;
@@ -3416,9 +3743,21 @@ static void Com_FrameWaitTop( void ) {
 		return;
 	}
 
+	fence = Com_PaceFenceOk();
+	if ( !fence ) {
+		paceRecDone = paceRecCount;     // mode switched away: drop what is in flight
+	}
+
 	if ( fps <= 0 ) {
 		pacer.deadlineUs = 0;       // uncapped; re-anchor when a cap comes back
 		pacer.lastTopUs = now;
+		if ( fence ) {
+			// stats only: no waits
+			pacer.fence = qtrue;
+			Com_PaceHarvest();
+			pacer.frameStartUs = Sys_Microseconds();
+			Com_PaceRecBegin( pacer.frameStartUs, Com_PaceNowNs(), qfalse );
+		}
 		return;
 	}
 
@@ -3429,6 +3768,11 @@ static void Com_FrameWaitTop( void ) {
 	if ( pacer.deadlineUs < now - pacer.periodUs * 0.5 || pacer.deadlineUs > now + 2 * pacer.periodUs ) {
 		pacer.deadlineUs = (double)now;     // first frame, hitch, or cap changed
 		pacer.late = qtrue;
+	}
+
+	if ( fence ) {
+		Com_FrameWaitTopFence( now );
+		return;
 	}
 
 	if ( pacer.mode == 0 ) {
@@ -3454,10 +3798,16 @@ Called by the renderer right before it swaps buffers (finish = glFinish).
 =================
 */
 void Com_PresentWait( void ( *finish )( void ) ) {
-	long long ready;
-	qboolean sync;
+	long long ready, t0;
+	qboolean sync, fenceMode;
+	double holdTo;
 
 	if ( pacer.inWarp ) { Com_WarpPresentWait( finish ); return; }
+
+	if ( pacer.fence ) {
+		Com_PaceMark();     // before the early returns: also uncapped frames get a GPU timestamp
+	}
+	fenceMode = pacer.fence && pacer.active && !pacer.vblankLock;
 
 	if ( !pacer.active || pacer.presentedFrame == com_frameNumber + 1 ) {
 		return;     // uncapped, or an extra EndFrame within the same Com_Frame (loading screens)
@@ -3465,6 +3815,18 @@ void Com_PresentWait( void ( *finish )( void ) ) {
 	pacer.presentedFrame = com_frameNumber + 1;
 
 	sync = finish && com_maxfpsGpuSync->integer && ( pacer.mode > 0 || pacer.vblankLock );
+	if ( fenceMode && !pacer.readyRecorded ) {
+		sync = qfalse;      // no glFinish: the GPU is observed through fences (Com_PaceHarvest)
+	}
+	if ( fenceMode && pacer.gpuBound ) {
+		// LL-1 gave up (the GPU cannot hold the cap); retry only when it would fit
+		if ( ++pacer.gpuBoundFrames >= pacer.gpuRetryFrames &&
+			 Com_PaceLead() + Com_LatchLeadP98() + 500 < pacer.periodUs * 0.9 ) {
+			pacer.gpuBound = qfalse;
+			pacer.gpuMissed = 0;
+			pacer.gpuSynced = 0;
+		}
+	}
 
 	// glFinish here serializes the CPU and the GPU: fine while the frame fits the cap (it
 	// lowers latency), but when the GPU alone cannot hold the cap it idles the GPU during the
@@ -3483,6 +3845,9 @@ void Com_PresentWait( void ( *finish )( void ) ) {
 		// late-latch: the ring sample and the fence time were taken when the post-process fence signalled.
 		// The finish below only measures how long the warp + 2D tail need after the sample (the latch lead).
 		pacer.readyRecorded = qfalse;
+		if ( Com_PaceRecCur() ) {
+			Com_PaceRecCur()->latched = qtrue;
+		}
 		if ( finish ) {
 			finish();
 		}
@@ -3496,7 +3861,7 @@ void Com_PresentWait( void ( *finish )( void ) ) {
 			finish();
 		}
 		ready = Sys_Microseconds();
-		if ( sync || !pacer.gpuBound ) {
+		if ( !fenceMode && ( sync || !pacer.gpuBound ) ) {
 			pacer.ring[pacer.ringPos++ % PACE_RING] = (int)( ready - pacer.frameStartUs );
 		}
 	}
@@ -3522,9 +3887,19 @@ void Com_PresentWait( void ( *finish )( void ) ) {
 	if ( ready > pacer.deadlineUs + pacer.periodUs * 0.5 ) {
 		pacer.deadlineUs = (double)ready;       // missed: re-anchor, game time follows the real clock
 		pacer.late = qtrue;
+		if ( Com_PaceRecCur() ) {
+			Com_PaceRecCur()->deadlineUs = pacer.deadlineUs;
+		}
 		return;
 	}
-	Sys_WaitUntil( (long long)pacer.deadlineUs, com_maxfpsSpinUs->integer );
+	holdTo = pacer.deadlineUs;
+	if ( fenceMode && pacer.mode == 2 && pacer.deadlineUs + pacer.periodUs - pacer.leadUs < holdTo ) {
+		holdTo = pacer.deadlineUs + pacer.periodUs - pacer.leadUs;
+	}
+	t0 = Sys_Microseconds();
+	Sys_WaitUntil( (long long)holdTo, com_maxfpsSpinUs->integer );
+	ps.holdSum += (double)( Sys_Microseconds() - t0 );
+	ps.holdN++;
 }
 
 /*
@@ -3680,6 +4055,10 @@ void Com_PresentDone( void ( *finish )( void ) ) {
 	long long now;
 
 	com_lastPresentUs = Sys_Microseconds();
+	if ( ps.lastSwapUs && com_lastPresentUs - ps.lastSwapUs < 500000 ) {
+		Com_PaceStatPush( ps.siv, &ps.sivN, (int)( com_lastPresentUs - ps.lastSwapUs ) );
+	}
+	ps.lastSwapUs = com_lastPresentUs;
 	if ( latch.sampleUs ) {
 		latch.swapLat[latch.swapPos++ % LATCH_RING] = (int)( com_lastPresentUs - latch.sampleUs );
 		latch.sampleUs = 0;
@@ -3840,6 +4219,7 @@ void Com_Frame( void ) {
 				minMsec = 0;    // legacy loop below runs once (network poll only)
 			} else {
 				pacer.active = qfalse;
+				pacer.fence = qfalse;
 			}
 		}
 	}

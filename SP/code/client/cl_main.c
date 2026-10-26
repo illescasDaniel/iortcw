@@ -946,6 +946,7 @@ static void CL_ReportBenchDemo( void ) {
 				 Cvar_VariableString( "r_vsync" ),
 				 Cvar_VariableString( "com_maxfps" ) );
 	Com_Printf( "codmod bench cfg: %s\n", head );
+	Com_PaceStatsPrint();
 	// r_vsync 3 (triple buffer) never blocks the swap, so it does not cap the FPS
 	vsync = Cvar_VariableIntegerValue( "r_vsync" );
 	if ( ( vsync != 0 && vsync != 3 ) || Cvar_VariableIntegerValue( "com_maxfps" ) != 0 ) {
@@ -1243,6 +1244,7 @@ void CL_PlayDemo_f( void ) {
 
 	clc.state = CA_CONNECTED;
 	clc.demoplaying = qtrue;
+	Com_PaceStatsReset();
 	Q_strncpyz( clc.servername, arg, sizeof( clc.servername ) );
 
 #ifdef LEGACY_PROTOCOL
@@ -3743,6 +3745,7 @@ void CL_InitRef( void ) {
 	ri.LoadProfileHint = Com_LoadProfileHint;
 	ri.RunOffloaded = Com_RunOffloaded;
 	ri.WarpLatch = Com_WarpLatch;
+	ri.PaceGpuRegister = Com_PaceGpuRegister;
 
 	ri.Z_Malloc = Z_Malloc;
 	ri.Free = Z_Free;
