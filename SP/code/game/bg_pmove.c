@@ -2270,6 +2270,13 @@ static void PM_BeginWeaponChange( int oldweapon, int newweapon, qboolean reload 
 	}
 
 
+	// codmod: a switch that really starts ends the attack-anim lock, or a switch begun within
+	// the lock (quick-knife return, swing then pick up a gun) loses DROP/RAISE/IDLE and strands
+	// the viewmodel on a stale pose
+	if ( !pm->ps->aiChar && bg_cod.enable && bg_cod.weaponEnable ) {
+		pm->ps->weapAnimTimer = 0;
+	}
+
 	switch ( newweapon ) {
 
 	case WP_GAUNTLET:

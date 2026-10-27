@@ -756,6 +756,30 @@ void CG_PredictPlayerState( void ) {
 		}
 	}
 
+	// codmod: same class of bug for weapon switches: a missed RAISING->READY transition leaves
+	// the carried anim on DROP/RAISE (gun held below the screen; in ADS the sight alignment drags
+	// it into view as a huge chunk). READY/FIRING always means idle or an attack; RAISING must
+	// not still show DROP.
+	if ( bg_cod.enable ) {
+		int anim = cg.predictedPlayerState.weapAnim & ~ANIM_TOGGLEBIT;
+		int fix = -1;
+
+		if ( cg.predictedPlayerState.weaponstate == WEAPON_READY
+			 || cg.predictedPlayerState.weaponstate == WEAPON_FIRING ) {
+			if ( anim == WEAP_DROP || anim == WEAP_RAISE
+				 || anim == WEAP_ALTSWITCHFROM || anim == WEAP_ALTSWITCHTO ) {
+				fix = WEAP_IDLE1;
+			}
+		} else if ( cg.predictedPlayerState.weaponstate == WEAPON_RAISING && anim == WEAP_DROP ) {
+			fix = WEAP_RAISE;
+		}
+		if ( fix >= 0 ) {
+			cg.predictedPlayerState.weapAnim =
+				( ( cg.predictedPlayerState.weapAnim & ANIM_TOGGLEBIT ) ^ ANIM_TOGGLEBIT ) | fix;
+			cg.predictedPlayerState.weapAnimTimer = 0;
+		}
+	}
+
 	if ( cg_showmiss.integer > 1 ) {
 		CG_Printf( "[%i : %i] ", cg_pmove.cmd.serverTime, cg.time );
 	}
