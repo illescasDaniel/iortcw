@@ -116,6 +116,17 @@
 =ui/controls.menu 518 522
 =ui/system.menu 156 161
 =ui/system.menu 204 207
++		name display
+=ui/system.menu 283 285
++		text "Warp Parallax:"
++		cvar "r_frameWarpMesh"
++		cvarTest "r_frameWarp"
++		disableCvar { "0" "1" }
++		cvarFloatList { "Off" 0 "Low" 1 "Medium" 2 "High" 3 }
++		rect 82 200 290 12
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/system.menu 93 94
 +		name effects
 =ui/system.menu 283 285
 +		text "Anti-Aliasing:"

@@ -115,6 +115,17 @@
 =ui/controls.menu 518 522
 =ui/ingame_system.menu 130 135
 =ui/ingame_system.menu 489 492
++		name display
+=ui/ingame_system.menu 94 96
++		text "Warp Parallax:"
++		cvar "r_frameWarpMesh"
++		cvarTest "r_frameWarp"
++		disableCvar { "0" "1" }
++		cvarFloatList { "Off" 0 "Low" 1 "Medium" 2 "High" 3 }
++		rect 82 200 290 12
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
 +		name effects
 =ui/ingame_system.menu 94 96
 +		text "Anti-Aliasing:"

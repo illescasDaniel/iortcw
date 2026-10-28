@@ -43,6 +43,7 @@ typedef void ( APIENTRY *getQueryObjectui64vProc_t )( GLuint id, GLenum pname, G
 #define GPUPROF_FRAMES  8
 #define GPUPROF_MARKS   128
 #define GPUPROF_NAMES   48
+#define GPUPROF_PRESENTS 16384
 
 typedef struct {
 	GLuint		queries[GPUPROF_MARKS];
@@ -72,6 +73,8 @@ static struct {
 	int							numFrames;
 	double						totalMs;
 	double						maxFrameMs;
+	float						presentMs[GPUPROF_PRESENTS];	// one sample per compositor warp present (mesh warp + 2D tail replay)
+	int							numPresents;		// total ever seen; the last GPUPROF_PRESENTS are kept
 } gp;
 
 static void R_GpuProfInit( void ) {
@@ -97,6 +100,7 @@ void R_GpuProfReset( void ) {
 	gp.numFrames = 0;
 	gp.totalMs = 0;
 	gp.maxFrameMs = 0;
+	gp.numPresents = 0;
 }
 
 static gpuProfStat_t *R_GpuProfStat( const char *name ) {
@@ -117,6 +121,14 @@ static gpuProfStat_t *R_GpuProfStat( const char *name ) {
 	gp.stats[gp.numStats].seen = qfalse;
 	gp.stats[gp.numStats].frames = 0;
 	return &gp.stats[gp.numStats++];
+}
+
+static const char *const warpPresentName = "warp_present";
+
+static int R_GpuProfCmpFloat( const void *a, const void *b ) {
+	float x = *(const float *)a, y = *(const float *)b;
+
+	return x < y ? -1 : ( x > y ? 1 : 0 );
 }
 
 // read a finished frame; returns qfalse if its results are not ready yet
@@ -149,6 +161,9 @@ static qboolean R_GpuProfHarvest( gpuProfFrame_t *f ) {
 			gpuProfStat_t *s = R_GpuProfStat( f->names[i] );
 			double ms = ( t[i] - t[i - 1] ) / 1000000.0;
 
+			if ( f->names[i] == warpPresentName ) {
+				gp.presentMs[gp.numPresents++ % GPUPROF_PRESENTS] = (float)ms;
+			}
 			if ( s ) {
 				s->frameMs += ms;
 				s->totalMs += ms;
@@ -201,7 +216,7 @@ void RB_GpuMark( const char *name ) {
 	// everything drawn by a compositor warp present goes to one bucket; consecutive marks of it
 	// collapse into one (the later timestamp replaces the earlier), so a present costs few slots
 	if ( tr.warp.presenting ) {
-		name = "warp_present";
+		name = warpPresentName;
 		if ( f->numMarks > 0 && f->names[f->numMarks - 1] == name ) {
 			f->numMarks--;
 		}
@@ -271,6 +286,14 @@ void R_GpuProfPrint( void ) {
 		ri.Printf( PRINT_ALL, "codmod gpuprof: %-16s avg_ms=%6.3f  pct=%5.1f  max_ms=%6.3f  hit=%5.1f%%\n",
 			s->name, s->totalMs / gp.numFrames, 100.0 * s->totalMs / gp.totalMs, s->maxMs,
 			100.0 * s->frames / gp.numFrames );
+	}
+	if ( gp.numPresents ) {
+		// per present (one warp + 2D tail replay each): the distribution the per-frame sum above hides
+		int n = gp.numPresents < GPUPROF_PRESENTS ? gp.numPresents : GPUPROF_PRESENTS;
+
+		qsort( gp.presentMs, n, sizeof( float ), R_GpuProfCmpFloat );
+		ri.Printf( PRINT_ALL, "codmod gpuprof: warp_present per present: n=%d p50_ms=%.3f p98_ms=%.3f max_ms=%.3f\n",
+			gp.numPresents, gp.presentMs[( n - 1 ) / 2], gp.presentMs[(int)( ( n - 1 ) * 0.98 + 0.5 )], gp.presentMs[n - 1] );
 	}
 }
 
