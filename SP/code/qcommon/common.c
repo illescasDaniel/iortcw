@@ -5281,6 +5281,35 @@ static int Com_PacedMsec( int eventMsec ) {
 Com_Frame
 =================
 */
+/*
+================
+Com_FrameWarpConflicts
+
+r_frameWarp 2 (compositor) needs r_vsync 0-3; r_vsync 4 (low latency) is its own pacer. Last change wins, with a
+console line: r_frameWarp -> 2 while r_vsync is 4 sets r_vsync 3; r_vsync -> 4 while r_frameWarp is 2 sets
+r_frameWarp 1. r_frameWarp is latched, so its pending value counts (the menu applies it with a vid_restart).
+At startup a saved 2 + 4 combination keeps the compositor.
+================
+*/
+static void Com_FrameWarpConflicts( void ) {
+	static int lastWarp = -1;
+	int warp = Cvar_VariableLatchedInteger( "r_frameWarp" );
+	int vsync = com_vsync->integer;
+
+	if ( warp == 2 && vsync == 4 ) {
+		if ( warp != lastWarp ) {
+			Com_Printf( "r_frameWarp 2 does not work with r_vsync 4: r_vsync set to 3\n" );
+			Cvar_Set( "r_vsync", "3" );
+			vsync = 3;
+		} else {
+			Com_Printf( "r_vsync 4 does not work with r_frameWarp 2: r_frameWarp set to 1 (late latch)\n" );
+			Cvar_Set( "r_frameWarp", "1" );
+			warp = 1;
+		}
+	}
+	lastWarp = warp;
+}
+
 void Com_Frame( void ) {
 
 	int msec, minMsec;
@@ -5311,6 +5340,7 @@ void Com_Frame( void ) {
 	// write config file if anything changed
 	Com_WriteConfiguration();
 	Com_LoadProfileFrameMark( "f:writecfg" );
+	Com_FrameWarpConflicts();
 
 	//
 	// main event loop
