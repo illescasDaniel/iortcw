@@ -1179,8 +1179,21 @@ typedef struct paceGpu_s {
 	int       (*poll)( int seq );                     /* non-blocking: 1 signalled (or evicted), 0 pending */
 	qboolean  (*doneNs)( int seq, long long *gpuNs ); /* non-blocking: GPU time the frame finished */
 	long long (*nowNs)( void );                       /* glGetInteger64v(GL_TIMESTAMP) */
+	int       (*markTag)( int tag );                  /* AP: GPU timestamp (no fence, no flush) under a caller tag > 0, 64-entry ring; returns tag, 0 = unsupported */
+	qboolean  (*tagDone)( int tag, long long *gpuNs );/* AP: non-blocking: GPU time of a tagged mark; qfalse = pending or evicted */
+	void      (*flush)( void );                       /* AP: glFlush, asked for only right before a warp present */
 } paceGpu_t;
 void Com_PaceGpuRegister( const paceGpu_t *ops );     /* NULL = unregister (renderer shutdown) */
+qboolean Com_WarpCheckpoint( int where, float *pitch, float *yaw );  /* qtrue = a warp present is due at view angles (pitch, yaw) */
+/* `where` values of Com_WarpCheckpoint beyond the renderer's first four (warpCheckpoint_t, tr_local.h): keep in sync */
+#define WARP_CPX_END          4   /* right before the frame's RC_SWAP_BUFFERS (end of the backend) */
+#define WARP_CPX_PRESENT_END  5   /* notification, not a question: the present started by the last qtrue return is over (ok or not) */
+void Com_ApCpuCheckpoint( int where );                /* CPU-side compositor slot (top-of-frame wait, after SV_Frame, before SCR_UpdateScreen) */
+#define AP_CP_AFTER_SV   10
+#define AP_CP_BEFORE_SCR 11
+qboolean CL_WarpReady( void );                      /* the renderer holds a capture it can present a warp of */
+qboolean CL_WarpPresentNow( void );                   /* sample the input and have the renderer present a warp (compositor) */
+void Com_ApStatsPrint( void );                        /* one "codmod ap: k=v ..." line */
 void Com_PaceStatsReset( void );
 void Com_PaceStatsPrint( void );                      /* one "codmod pace: k=v ..." line */
 // Sub-millisecond remainder (0..999 us) of the paced game clock, for cgame interpolation

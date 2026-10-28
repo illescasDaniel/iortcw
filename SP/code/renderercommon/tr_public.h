@@ -126,6 +126,10 @@ typedef struct {
 	qboolean (*WarpFrame)( float dPitch, float dYaw );
 	// late-latch: tells the renderer the view angles the frame was built with (r_frameWarp 1)
 	void (*WarpSetRef)( const vec3_t viewangles );
+	// compositor warp: re-projects the last capture to the absolute view angles and presents it (callable from checkpoints); qfalse = nothing presented
+	qboolean (*WarpPresent)( float pitch, float yaw );
+	// compositor warp: a capture and a replayable 2D tail exist, so WarpPresent can succeed (qfalse = not ready, not an error)
+	qboolean (*WarpReady)( void );
 } refexport_t;
 
 //
@@ -211,6 +215,8 @@ typedef struct {
 	void	(*PresentWait)( void ( *finish )( void ) );
 	void	(*PresentDone)( void ( *finish )( void ) );
 	void	(*PaceGpuRegister)( const paceGpu_t *ops );	/* may be NULL */
+	// compositor warp: the renderer asks at a checkpoint whether a warp present is due; qtrue = present at (pitch, yaw); may be NULL
+	qboolean (*WarpCheckpoint)( int where, float *pitch, float *yaw );
 
 	// redraws the loading screen at a limited rate; may be NULL; call only from safe points
 	void	(*LoadingTick)( void );

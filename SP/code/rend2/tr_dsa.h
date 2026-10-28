@@ -26,6 +26,19 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 void GL_BindNullTextures(void);
 int GL_BindMultiTexture(GLenum texunit, GLenum target, GLuint texture);
 
+typedef struct
+{
+	GLuint textures[NUM_TEXTURE_UNITS];
+	GLenum targets[NUM_TEXTURE_UNITS];
+	GLenum texunit;
+	GLuint program;
+	GLuint drawFramebuffer;
+	GLuint readFramebuffer;
+} glBindings_t;
+
+void GL_SaveBindings(glBindings_t *b);
+void GL_RestoreBindings(const glBindings_t *b);
+
 GLvoid APIENTRY GLDSA_BindMultiTextureEXT(GLenum texunit, GLenum target, GLuint texture);
 GLvoid APIENTRY GLDSA_TextureParameterfEXT(GLuint texture, GLenum target, GLenum pname, GLfloat param);
 GLvoid APIENTRY GLDSA_TextureParameteriEXT(GLuint texture, GLenum target, GLenum pname, GLint param);

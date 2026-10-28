@@ -2969,6 +2969,7 @@ void RE_LoadWorldMap( const char *name ) {
 
 	skyboxportal = 0;
 	RB_SMAAResetMotion();
+	Com_Memset( tr.sunCascade, 0, sizeof( tr.sunCascade ) );	// codmod: cached far cascades are the previous map's
 	tr.smaaHistoryValid = qfalse;	// codmod: SMAA T2x history belongs to the previous map
 
 	if ( tr.worldMapLoaded ) {

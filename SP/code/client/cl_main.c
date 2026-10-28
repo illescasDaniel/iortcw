@@ -947,6 +947,7 @@ static void CL_ReportBenchDemo( void ) {
 				 Cvar_VariableString( "com_maxfps" ) );
 	Com_Printf( "codmod bench cfg: %s\n", head );
 	Com_PaceStatsPrint();
+	Com_ApStatsPrint();
 	// r_vsync 3 (triple buffer) never blocks the swap, so it does not cap the FPS
 	vsync = Cvar_VariableIntegerValue( "r_vsync" );
 	if ( ( vsync != 0 && vsync != 3 ) || Cvar_VariableIntegerValue( "com_maxfps" ) != 0 ) {
@@ -3220,6 +3221,27 @@ qboolean CL_WarpLatchView( float *pitch, float *yaw ) {
 	return qtrue;
 }
 
+/*
+==================
+CL_WarpPresentNow
+
+Compositor (r_frameWarp 2) CPU-side slot: samples the input and has the renderer present a warp of the last
+captured frame. Returns qtrue if the renderer swapped.
+==================
+*/
+qboolean CL_WarpPresentNow( void ) {
+	float pitch, yaw;
+
+	if ( !re.WarpPresent || !CL_WarpLatchView( &pitch, &yaw ) ) {
+		return qfalse;
+	}
+	return re.WarpPresent( pitch, yaw );
+}
+
+qboolean CL_WarpReady( void ) {
+	return re.WarpReady && re.WarpReady();
+}
+
 long long CL_WarpLastCmdUs( void ) {
 	return cl.lastCmdUs;
 }
@@ -3388,6 +3410,7 @@ void CL_Frame( int msec ) {
 		re.WarpSetRef( cl.viewangles );     // reference of the angles the frame is rendered with
 	}
 	if ( clc.state == CA_ACTIVE ) { Com_LoadProfileMark( "cl:first_frame_begin" ); }    // no-op once the profile ended
+	Com_ApCpuCheckpoint( AP_CP_BEFORE_SCR );
 	SCR_UpdateScreen();
 	if ( clc.state == CA_ACTIVE ) { Com_LoadProfileEnd(); }
 
@@ -3746,6 +3769,7 @@ void CL_InitRef( void ) {
 	ri.RunOffloaded = Com_RunOffloaded;
 	ri.WarpLatch = Com_WarpLatch;
 	ri.PaceGpuRegister = Com_PaceGpuRegister;
+	ri.WarpCheckpoint = Com_WarpCheckpoint;
 
 	ri.Z_Malloc = Z_Malloc;
 	ri.Free = Z_Free;

@@ -152,6 +152,8 @@ cvar_t  *r_frameWarpEdgeBlur;
 cvar_t  *r_frameWarpLatchSync;
 cvar_t  *r_frameWarpGunDepth;
 cvar_t  *r_frameWarpGunDilate;
+cvar_t  *r_frameWarpCheckpoints;
+cvar_t  *r_frameWarpApTest;
 cvar_t  *r_warpDebug;
 cvar_t  *r_warpDebugPitch;
 cvar_t  *r_warpDebugYaw;
@@ -247,6 +249,7 @@ cvar_t  *r_shadowCascadeZNear;
 cvar_t  *r_shadowCascadeZFar;
 cvar_t  *r_shadowCascadeZBias;
 cvar_t  *r_sunShadowStable;
+cvar_t  *r_sunShadowCascadeUpdate;
 cvar_t  *r_ignoreDstAlpha;
 
 cvar_t  *r_ignoreGLErrors;
@@ -741,6 +744,8 @@ RB_TakeScreenshotCmd
 */
 const void *RB_TakeScreenshotCmd( const void *data ) {
 	const screenshotCommand_t	*cmd;
+	GLint warpSavedRead = 0;
+	qboolean warpBound = qfalse;
 	
 	cmd = (const screenshotCommand_t *)data;
 
@@ -748,10 +753,25 @@ const void *RB_TakeScreenshotCmd( const void *data ) {
 	if(tess.numIndexes)
 		RB_EndSurface();
 	
+	// Compositor (r_frameWarp 2 / r_frameWarpApTest): warp presents swap the window several times per real frame,
+	// so the window's back buffer at the head of the list (where a console screenshot lands) holds whichever swap
+	// came last or before. Read the real frame instead: the render target still holds the last finished frame
+	// (2D included) until this frame draws, and warp presents never touch it.
+	if ( ( r_frameWarp->integer == 2 || r_frameWarpApTest->integer ) && glRefConfig.framebufferObject && tr.renderFbo &&
+		 !tr.warp.presenting && ( !tr.msaaResolveFbo || r_hdr->integer ) ) {
+		qglGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &warpSavedRead );
+		GL_BindFramebuffer( GL_READ_FRAMEBUFFER, ( tr.msaaResolveFbo ? tr.msaaResolveFbo : tr.renderFbo )->frameBuffer );
+		warpBound = qtrue;
+	}
+
 	if (cmd->jpeg)
 		RB_TakeScreenshotJPEG( cmd->x, cmd->y, cmd->width, cmd->height, cmd->fileName);
 	else
 		RB_TakeScreenshot( cmd->x, cmd->y, cmd->width, cmd->height, cmd->fileName);
+
+	if ( warpBound ) {
+		GL_BindFramebuffer( GL_READ_FRAMEBUFFER, warpSavedRead );
+	}
 	
 	return (const void *)(cmd + 1);
 }
@@ -1554,6 +1574,8 @@ void R_Register( void ) {
 	r_frameWarpEdgeBlur = ri.Cvar_Get( "r_frameWarpEdgeBlur", "2", 0 );	// blur strength where the warp reveals the screen edge; 0 = plain stretch
 	r_frameWarpGunDepth = ri.Cvar_Get( "r_frameWarpGunDepth", "0.3", CVAR_CHEAT );
 	r_frameWarpGunDilate = ri.Cvar_Get( "r_frameWarpGunDilate", "1", 0 );
+	r_frameWarpCheckpoints = ri.Cvar_Get( "r_frameWarpCheckpoints", "3", 0 );	// compositor: 1 between commands, 2 inside RB_DrawSurfs, 4/8/16 only after depth/ssao/opaque
+	r_frameWarpApTest = ri.Cvar_Get( "r_frameWarpApTest", "0", CVAR_TEMP );	// 1: zero-delta warp present at every enabled checkpoint (correctness test)
 	r_warpDebug = ri.Cvar_Get( "r_warpDebug", "0", CVAR_TEMP );	// 1 fixed delta, 2 oscillating at 1 Hz, 3 visualise
 	r_warpDebugPitch = ri.Cvar_Get( "r_warpDebugPitch", "0", 0 );
 	r_warpDebugYaw = ri.Cvar_Get( "r_warpDebugYaw", "2", 0 );
@@ -1682,6 +1704,11 @@ void R_Register( void ) {
 	// codmod: stable sun shadows, bitmask. 1 = rotation-invariant texel-snapped cascades,
 	// 2 = bilinear-PCF filter without screen noise, 4 = blend across cascade edges. 0 = vanilla rend2.
 	r_sunShadowStable = ri.Cvar_Get( "r_sunShadowStable", "0", CVAR_LATCH );
+	// codmod: far sun-shadow cascades (levels 1 and 2) re-render only every Nth frame, staggered; 0 or 1 = every
+	// frame (vanilla). Needs r_sunShadowStable bit 1. A skipped frame reuses the old map and its matrix, and
+	// only while the camera has moved at most a few texels (the map is rendered with that much margin);
+	// otherwise the cascade re-renders at once. Moving casters in the far cascades lag by up to N-1 frames.
+	r_sunShadowCascadeUpdate = ri.Cvar_Get( "r_sunShadowCascadeUpdate", "0", 0 );
 	r_ignoreDstAlpha = ri.Cvar_Get( "r_ignoreDstAlpha", "1", CVAR_ARCHIVE | CVAR_LATCH );
 
 	//
@@ -1813,6 +1840,7 @@ void R_Register( void ) {
 	// make sure all the commands added here are also
 	// removed in R_Shutdown
 	ri.Cmd_AddCommand( "warprstats", R_WarpStats_f );
+	ri.Cmd_AddCommand( "warppresent", R_WarpPresent_f );
 	ri.Cmd_AddCommand( "imagelist", R_ImageList_f );
 	ri.Cmd_AddCommand( "shaderlist", R_ShaderList_f );
 	ri.Cmd_AddCommand( "skinlist", R_SkinList_f );
@@ -1984,6 +2012,7 @@ void RE_Shutdown( qboolean destroyWindow ) {
 	R_PaceGpuShutdown();
 
 	ri.Cmd_RemoveCommand( "warprstats" );
+	ri.Cmd_RemoveCommand( "warppresent" );
 	ri.Cmd_RemoveCommand( "imagelist" );
 	ri.Cmd_RemoveCommand( "shaderlist" );
 	ri.Cmd_RemoveCommand( "skinlist" );
@@ -2130,6 +2159,8 @@ refexport_t *GetRefAPI( int apiVersion, refimport_t *rimp ) {
 	re.PresentLoadingSnapshot = RE_PresentLoadingSnapshot;
 	re.WarpFrame = RE_WarpFrame;
 	re.WarpSetRef = RE_WarpSetRef;
+	re.WarpPresent = RE_WarpPresent;
+	re.WarpReady = RE_WarpReady;
 
 	// RF
 	re.ZombieFXAddNewHit = RB_ZombieFXAddNewHit;

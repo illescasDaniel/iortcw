@@ -48,6 +48,12 @@ typedef void ( APIENTRY *paceGetQueryui64vProc_t )( GLuint id, GLenum pname, GLu
 typedef void ( APIENTRY *paceGetInteger64vProc_t )( GLenum pname, GLint64 *data );
 
 #define PACE_SLOTS 8
+#define PACE_TAGS  64
+
+typedef struct {
+	GLuint	query;
+	int		tag;	// 0 = never issued
+} paceTag_t;
 
 typedef struct {
 	void	*sync;
@@ -64,6 +70,7 @@ static struct {
 	paceGetQueryui64vProc_t		getQueryui64v;
 	paceGetInteger64vProc_t		getInteger64v;
 	paceSlot_t					slots[PACE_SLOTS];
+	paceTag_t					tags[PACE_TAGS];
 	int							seq;
 } pg;
 
@@ -126,11 +133,52 @@ static long long R_PaceGpuNowNs( void ) {
 	return (long long)t;
 }
 
+// timestamp under a caller tag (no fence, no flush: marks are cheap; R_PaceGpuFlush is asked for only before a warp). The 64-entry ring overwrites the oldest tag
+static int R_PaceGpuMarkTag( int tag ) {
+	paceTag_t *t;
+
+	if ( tag <= 0 ) {
+		return 0;
+	}
+	t = &pg.tags[tag % PACE_TAGS];
+	pg.queryCounter( t->query, GL_TIMESTAMP );
+	t->tag = tag;
+	return tag;
+}
+
+static void R_PaceGpuFlush( void ) {
+	qglFlush();
+}
+
+static qboolean R_PaceGpuTagDone( int tag, long long *gpuNs ) {
+	paceTag_t *t;
+	GLint available = 0;
+	GLuint64 ns = 0;
+
+	if ( tag <= 0 ) {
+		return qfalse;
+	}
+	t = &pg.tags[tag % PACE_TAGS];
+	if ( t->tag != tag ) {
+		return qfalse;
+	}
+	qglGetQueryObjectiv( t->query, GL_QUERY_RESULT_AVAILABLE, &available );
+	if ( !available ) {
+		return qfalse;
+	}
+	pg.getQueryui64v( t->query, GL_QUERY_RESULT, &ns );
+	*gpuNs = (long long)ns;
+	return qtrue;
+}
+
 static const paceGpu_t paceOps = {
 	R_PaceGpuMark,
 	R_PaceGpuPoll,
 	R_PaceGpuDoneNs,
-	R_PaceGpuNowNs
+	R_PaceGpuNowNs,
+	R_PaceGpuMarkTag,
+	R_PaceGpuTagDone,
+	R_PaceGpuFlush
 };
 
 void R_PaceGpuInit( void ) {
@@ -154,6 +202,9 @@ void R_PaceGpuInit( void ) {
 	for ( i = 0; i < PACE_SLOTS; i++ ) {
 		qglGenQueries( 1, &pg.slots[i].query );
 	}
+	for ( i = 0; i < PACE_TAGS; i++ ) {
+		qglGenQueries( 1, &pg.tags[i].query );
+	}
 	pg.loaded = qtrue;
 	ri.PaceGpuRegister( &paceOps );
 }
@@ -170,6 +221,9 @@ void R_PaceGpuShutdown( void ) {
 			pg.deleteSync( pg.slots[i].sync );
 		}
 		qglDeleteQueries( 1, &pg.slots[i].query );
+	}
+	for ( i = 0; i < PACE_TAGS; i++ ) {
+		qglDeleteQueries( 1, &pg.tags[i].query );
 	}
 	Com_Memset( &pg, 0, sizeof( pg ) );
 }

@@ -25,6 +25,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 static struct
 {
 	GLuint textures[NUM_TEXTURE_UNITS];
+	GLenum targets[NUM_TEXTURE_UNITS];	// target of the texture bound on each unit (0 = GL_TEXTURE_2D)
 	GLenum texunit;
 
 	GLuint program;
@@ -45,6 +46,7 @@ void GL_BindNullTextures(void)
 		{
 			qglBindMultiTextureEXT(GL_TEXTURE0 + i, GL_TEXTURE_2D, 0);
 			glDsaState.textures[i] = 0;
+			glDsaState.targets[i] = GL_TEXTURE_2D;
 		}
 	}
 	else
@@ -54,6 +56,7 @@ void GL_BindNullTextures(void)
 			qglActiveTexture(GL_TEXTURE0 + i);
 			qglBindTexture(GL_TEXTURE_2D, 0);
 			glDsaState.textures[i] = 0;
+			glDsaState.targets[i] = GL_TEXTURE_2D;
 		}
 
 		qglActiveTexture(GL_TEXTURE0);
@@ -73,7 +76,45 @@ int GL_BindMultiTexture(GLenum texunit, GLenum target, GLuint texture)
 
 	qglBindMultiTextureEXT(texunit, target, texture);
 	glDsaState.textures[tmu] = texture;
+	glDsaState.targets[tmu] = target;
 	return 1;
+}
+
+/*
+** GL_SaveBindings / GL_RestoreBindings
+**
+** Snapshot and restore the tracked texture, program and framebuffer bindings (frame warp present from
+** the middle of a frame).
+*/
+void GL_SaveBindings(glBindings_t *b)
+{
+	Com_Memcpy(b->textures, glDsaState.textures, sizeof(b->textures));
+	Com_Memcpy(b->targets, glDsaState.targets, sizeof(b->targets));
+	b->texunit = glDsaState.texunit;
+	b->program = glDsaState.program;
+	b->drawFramebuffer = glDsaState.drawFramebuffer;
+	b->readFramebuffer = glDsaState.readFramebuffer;
+}
+
+void GL_RestoreBindings(const glBindings_t *b)
+{
+	int i;
+
+	for (i = 0; i < NUM_TEXTURE_UNITS; i++)
+	{
+		if (glDsaState.textures[i] != b->textures[i])
+			GL_BindMultiTexture(GL_TEXTURE0 + i, b->targets[i] ? b->targets[i] : GL_TEXTURE_2D, b->textures[i]);
+	}
+
+	if (!glRefConfig.directStateAccess && glDsaState.texunit != b->texunit)
+	{
+		qglActiveTexture(b->texunit);
+		glDsaState.texunit = b->texunit;
+	}
+
+	GL_UseProgram(b->program);
+	GL_BindFramebuffer(GL_DRAW_FRAMEBUFFER, b->drawFramebuffer);
+	GL_BindFramebuffer(GL_READ_FRAMEBUFFER, b->readFramebuffer);
 }
 
 GLvoid APIENTRY GLDSA_BindMultiTextureEXT(GLenum texunit, GLenum target, GLuint texture)

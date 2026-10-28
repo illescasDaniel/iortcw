@@ -41,7 +41,7 @@ typedef void ( APIENTRY *queryCounterProc_t )( GLuint id, GLenum target );
 typedef void ( APIENTRY *getQueryObjectui64vProc_t )( GLuint id, GLenum pname, GLuint64 *params );
 
 #define GPUPROF_FRAMES  8
-#define GPUPROF_MARKS   64
+#define GPUPROF_MARKS   128
 #define GPUPROF_NAMES   48
 
 typedef struct {
@@ -197,6 +197,16 @@ void RB_GpuMark( const char *name ) {
 	}
 
 	f = &gp.frames[gp.frameIndex];
+
+	// everything drawn by a compositor warp present goes to one bucket; consecutive marks of it
+	// collapse into one (the later timestamp replaces the earlier), so a present costs few slots
+	if ( tr.warp.presenting ) {
+		name = "warp_present";
+		if ( f->numMarks > 0 && f->names[f->numMarks - 1] == name ) {
+			f->numMarks--;
+		}
+	}
+
 	if ( f->numMarks == GPUPROF_MARKS ) {
 		return;
 	}

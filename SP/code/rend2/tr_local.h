@@ -1728,6 +1728,16 @@ typedef enum {
 	WARP_REASON_COUNT
 } warpReason_t;
 
+// compositor checkpoints (RB_WarpCheckpoint, tr_backend.c); the id is passed to ri.WarpCheckpoint
+typedef enum {
+	WARP_CP_COMMAND,		// between two render commands of the real frame
+	WARP_CP_AFTER_DEPTH,	// RB_DrawSurfs: after the prepass depth resolve/copy
+	WARP_CP_AFTER_SSAO,		// RB_DrawSurfs: after the SSAO block, framebuffer and viewport restored
+	WARP_CP_AFTER_OPAQUE,	// RB_DrawSurfs: after the opaque pass (scene_opaque)
+	WARP_CP_END,			// right before the frame's RC_SWAP_BUFFERS (value is WARP_CPX_END in qcommon.h)
+	WARP_CP_COUNT
+} warpCheckpoint_t;
+
 typedef struct {
 	qboolean	valid;			// warpImage holds a capture of a main view
 	qboolean	tailValid;		// the saved 2D tail is complete and safe to replay
@@ -1739,6 +1749,10 @@ typedef struct {
 	float		refAngles[2];	// pitch, yaw the frame was built with (RE_WarpSetRef at capture)
 	int			tailBytes;		// bytes of 2D commands saved (incl. the terminating RC_END_OF_LIST)
 	int			reasons[WARP_REASON_COUNT];		// warpReason_t counters
+	qboolean	inTail;			// the real list's 2D tail has begun (after RC_POSTPROCESS, until the swap): no checkpoints
+	qboolean	presenting;		// inside RE_WarpPresent (recursion guard; gpuprof and the swap check it)
+	int			cpCalls[WARP_CP_COUNT];		// checkpoints that were enabled and had a usable capture
+	int			cpPresented[WARP_CP_COUNT];	// ... of which a warp present was drawn
 } warpState_t;
 
 /*
@@ -1929,6 +1943,18 @@ typedef struct {
 	vec3_t                  lastCascadeSunDirection;
 	float                   lastCascadeSunMvp[16];
 
+	// codmod: r_sunShadowCascadeUpdate. What each far cascade's shadow map (levels 1, 2) holds, so a frame
+	// can skip re-rendering it. valid is cleared on map load; the rest describes the last render.
+	struct {
+		qboolean	valid;
+		int			frame;			// tr.frameCount of the last render
+		int			size;			// shadow map width
+		float		half;			// half extent of the light-space box
+		vec3_t		axis[3];		// light view axes
+		vec3_t		center;			// light-space box centre (snapped in y and z)
+		float		mvp[16];		// matrix the map was rendered with; sampling must use this one
+	}						sunCascade[3];
+
 //----(SA)	added
 	float lightGridMulAmbient;          // lightgrid multipliers specified in sky shader
 	float lightGridMulDirected;         //
@@ -1982,6 +2008,8 @@ typedef struct {
 	// frame warp (tr_warp.c), only created with r_frameWarp / r_warpDebug
 	image_t				*warpImage;
 	FBO_t				*warpFbo;
+	image_t				*warpOutImage;	// compositor warp (RE_WarpPresent): warped frame plus replayed 2D, renderFbo colour format, no MSAA
+	FBO_t				*warpOutFbo;
 	warpState_t			warp;
 } trGlobals_t;
 
@@ -2169,6 +2197,8 @@ extern  cvar_t  *r_frameWarpEdgeBlur;
 extern  cvar_t  *r_frameWarpLatchSync;
 extern  cvar_t  *r_frameWarpGunDepth;
 extern  cvar_t  *r_frameWarpGunDilate;
+extern  cvar_t  *r_frameWarpCheckpoints;
+extern  cvar_t  *r_frameWarpApTest;
 extern  cvar_t  *r_warpDebug;
 extern  cvar_t  *r_warpDebugPitch;
 extern  cvar_t  *r_warpDebugYaw;
@@ -2275,6 +2305,7 @@ extern  cvar_t  *r_shadowCascadeZNear;
 extern  cvar_t  *r_shadowCascadeZFar;
 extern  cvar_t  *r_shadowCascadeZBias;
 extern  cvar_t  *r_sunShadowStable;
+extern  cvar_t  *r_sunShadowCascadeUpdate;
 extern  cvar_t  *r_ignoreDstAlpha;
 
 extern	cvar_t	*r_greyscale;
@@ -3029,6 +3060,9 @@ void R_WarpInitTargets( void );
 void RB_WarpCapture( const postProcessCommand_t *cmd, FBO_t *srcFbo );
 qboolean RB_WarpApply( float dPitch, float dYaw );
 qboolean RE_WarpFrame( float dPitch, float dYaw );
+qboolean RE_WarpPresent( float pitch, float yaw );
+qboolean RE_WarpReady( void );
+void R_WarpPresent_f( void );
 void RE_WarpSetRef( const vec3_t viewangles );
 void RB_WarpLatch( void );
 void RB_WarpGpuWait( void );

@@ -2624,6 +2624,19 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 	// codmod: stable cascades. Fixed world-up light axes, a world-anchored light view,
 	// a cascade size that does not change when the camera turns, and texel snapping.
 	qboolean stableCascade = (level != 3 && (r_sunShadowStable->integer & 1));
+	// codmod: far cascades may skip frames (see r_sunShadowCascadeUpdate)
+	int cascadeEvery = (stableCascade && level >= 1 && level <= 2) ? r_sunShadowCascadeUpdate->integer : 0;
+	float cascadeMargin = cascadeEvery > 1 ? 8.0f : 0.0f;	// texels of slack on each side
+	float stableHalf = 0.0f;
+	vec3_t stableCenter = { 0, 0, 0 };
+
+	// A sky portal scene (another camera) would overwrite the maps the main scene wants to reuse, and its
+	// distant shadows are not worth a render: with frame skipping on, it gets no far-cascade shadows.
+	if (cascadeEvery > 1 && (fd->rdflags & RDF_SKYBOXPORTAL))
+	{
+		Mat4Zero(tr.refdef.sunShadowMvp[level]);
+		return;
+	}
 
 	if (stableCascade)
 		lightViewIndependentOfCameraView = qtrue;
@@ -2885,7 +2898,7 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 				radius = sqrt((zc - splitZNear) * (zc - splitZNear) + splitZNear * splitZNear * k2);
 
 			// one spare texel on each side covers the snap offset
-			half = radius * size / (size - 2.0f);
+			half = radius * size / (size - 2.0f - 2.0f * cascadeMargin);
 			texel = 2.0f * half / size;
 
 			center[0] = (lightviewBounds[0][0] + lightviewBounds[1][0]) * 0.5f;
@@ -2898,6 +2911,9 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 			lightviewBounds[1][1] = center[1] + half;
 			lightviewBounds[0][2] = center[2] - half;
 			lightviewBounds[1][2] = center[2] + half;
+
+			stableHalf = half;
+			VectorCopy(center, stableCenter);
 		}
 
 		if (!glRefConfig.depthClamp)
@@ -2932,6 +2948,44 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 		//ri.Printf(PRINT_ALL, "xmin %f xmax %f ymin %f ymax %f\n", lightviewBounds[0][1], lightviewBounds[1][1], -lightviewBounds[1][2], -lightviewBounds[0][2]);
 	}
 
+
+	if (cascadeEvery > 1)
+	{
+		// Reuse last render of this cascade? Only when the light view is identical and the box has moved
+		// at most the margin (so everything the current slice needs is still inside the old map), and
+		// only on frames this cascade is not scheduled (staggered by level).
+		typeof(tr.sunCascade[0]) *c = &tr.sunCascade[level];
+		float texel = 2.0f * stableHalf / c->size;
+		qboolean reuse = c->valid && c->size == tr.sunShadowFbo[level]->width
+			&& (tr.frameCount + level) % cascadeEvery != 0
+			&& tr.frameCount - c->frame < cascadeEvery * 2
+			&& fabs(c->half - stableHalf) < 0.01f
+			&& VectorCompare(c->axis[0], lightViewAxis[0]) && VectorCompare(c->axis[1], lightViewAxis[1])
+			&& VectorCompare(c->axis[2], lightViewAxis[2]);
+
+		if (reuse)
+		{
+			int k;
+			for (k = 0; k < 3; k++)
+				if (fabs(c->center[k] - stableCenter[k]) > texel * (cascadeMargin - 1.0f))
+					reuse = qfalse;
+		}
+
+		if (reuse)
+		{
+			Mat4Copy(c->mvp, tr.refdef.sunShadowMvp[level]);
+			return;
+		}
+
+		c->valid = qtrue;
+		c->frame = tr.frameCount;
+		c->size = tr.sunShadowFbo[level]->width;
+		c->half = stableHalf;
+		VectorCopy(lightViewAxis[0], c->axis[0]);
+		VectorCopy(lightViewAxis[1], c->axis[1]);
+		VectorCopy(lightViewAxis[2], c->axis[2]);
+		VectorCopy(stableCenter, c->center);
+	}
 
 	{
 		int firstDrawSurf;
@@ -2997,6 +3051,9 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 		}
 
 		Mat4Multiply(tr.viewParms.projectionMatrix, tr.viewParms.world.modelMatrix, tr.refdef.sunShadowMvp[level]);
+
+		if (cascadeEvery > 1)
+			Mat4Copy(tr.refdef.sunShadowMvp[level], tr.sunCascade[level].mvp);
 	}
 }
 

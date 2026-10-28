@@ -13,6 +13,7 @@ r_frameWarp or r_warpDebug is set at renderer init (no textures, no shaders, onl
 #endif
 
 #include "tr_local.h"
+#include "tr_dsa.h"
 
 // defined in tr_fbo.c, not in a header
 FBO_t *FBO_Create( const char *name, int width, int height );
@@ -40,6 +41,8 @@ Called after FBO_Init: creates the capture target when the feature (or its debug
 void R_WarpInitTargets( void ) {
 	tr.warpImage = NULL;
 	tr.warpFbo = NULL;
+	tr.warpOutImage = NULL;
+	tr.warpOutFbo = NULL;
 
 	if ( r_frameWarp->integer <= 0 && !r_warpDebug->integer ) {
 		return;
@@ -56,6 +59,15 @@ void R_WarpInitTargets( void ) {
 	tr.warpFbo = FBO_Create( "_warp", tr.renderFbo->width, tr.renderFbo->height );
 	FBO_AttachImage( tr.warpFbo, tr.warpImage, GL_COLOR_ATTACHMENT0, 0 );
 	R_CheckFBO( tr.warpFbo );
+
+	// compositor target: the colour format of the render FBO (the MSAA resolve image has it), never multisampled
+	tr.warpOutImage = R_CreateImage( "*warpOut", NULL, tr.renderFbo->width, tr.renderFbo->height, IMGTYPE_COLORALPHA,
+									 IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, tr.renderImage->internalFormat );
+	tr.warpOutFbo = FBO_Create( "_warpOut", tr.renderFbo->width, tr.renderFbo->height );
+	FBO_AttachImage( tr.warpOutFbo, tr.warpOutImage, GL_COLOR_ATTACHMENT0, 0 );
+	if ( !R_CheckFBO( tr.warpOutFbo ) ) {
+		tr.warpOutFbo = NULL;
+	}
 }
 
 /*
@@ -129,13 +141,13 @@ Draws the captured main view into tr.renderFbo as seen from the captured directi
 degrees. Returns qfalse when there is nothing valid to warp. Not exported yet; chunk 2 uses it for presents.
 =============
 */
-qboolean RB_WarpApply( float dPitch, float dYaw ) {
+static qboolean RB_WarpApplyTo( FBO_t *dst, float dPitch, float dYaw ) {
 	vec3_t angles, newAxis[3];
 	vec4_t box, params;
 	mat4_t m;
 	float maxDeg = r_frameWarpMaxDeg->value;
 
-	if ( !tr.warpFbo || !tr.warp.valid || !tr.renderFbo ) {
+	if ( !tr.warpFbo || !tr.warp.valid || !dst ) {
 		tr.warp.reasons[WARP_REASON_STALE]++;
 		return qfalse;
 	}
@@ -160,8 +172,26 @@ qboolean RB_WarpApply( float dPitch, float dYaw ) {
 	GLSL_SetUniformVec4( &tr.warpShader, UNIFORM_WARPPARAMS, params );
 
 	// the pass covers the whole render target; HUD and gun mask handling happen in the shader
-	FBO_BlitFromTexture( tr.warpImage, NULL, NULL, tr.renderFbo, NULL, &tr.warpShader, NULL, GLS_DEPTHTEST_DISABLE );
+	FBO_BlitFromTexture( tr.warpImage, NULL, NULL, dst, NULL, &tr.warpShader, NULL, GLS_DEPTHTEST_DISABLE );
 	return qtrue;
+}
+
+qboolean RB_WarpApply( float dPitch, float dYaw ) {
+	return RB_WarpApplyTo( tr.renderFbo, dPitch, dYaw );
+}
+
+/*
+=============
+R_WarpCaptureFresh
+
+The capture is usable if it was taken in this frame or at most maxAge frames ago (RE_BeginFrame bumps
+tr.frameCount, so a warp issued during the next frame's frontend sees age 1).
+=============
+*/
+static qboolean R_WarpCaptureFresh( int maxAge ) {
+	int age = tr.frameCount - tr.warp.frameCount;
+
+	return tr.warp.valid && age >= 0 && age <= maxAge;
 }
 
 /*
@@ -348,7 +378,7 @@ qboolean RE_WarpFrame( float dPitch, float dYaw ) {
 		return qfalse;
 	}
 
-	if ( !tr.warp.valid || tr.warp.frameCount != tr.frameCount ) {
+	if ( !R_WarpCaptureFresh( 0 ) ) {
 		tr.warp.reasons[WARP_REASON_NO_CAPTURE]++;
 		return qfalse;
 	}
@@ -377,6 +407,153 @@ qboolean RE_WarpFrame( float dPitch, float dYaw ) {
 	return qtrue;
 }
 
+/*
+=============
+RE_WarpPresent
+
+Compositor warp (r_frameWarp 2): re-projects the last capture to the absolute view angles (pitch, yaw) into
+tr.warpOutFbo, then replays the saved 2D tail over it. The replay runs through the unchanged
+RB_ExecuteRenderCommands / RB_SwapBuffers with tr.renderFbo / tr.msaaResolveFbo temporarily pointing at the
+warp target, so the 2D and present code stay as they are. May be called from the middle of a real frame
+(at a render command boundary with nothing pending in tess): all state it changes is put back.
+Returns qfalse when nothing was presented. Always draws the warp, however small the correction.
+=============
+*/
+static int apCalls, apPresented, apDenied;
+
+qboolean RE_WarpReady( void ) {
+	return !tr.warp.presenting && tr.warpFbo && tr.warpOutFbo && tr.renderFbo && !r_warpDebug->integer &&
+		   R_WarpCaptureFresh( 1 ) && tr.warp.tailValid;
+}
+
+qboolean RE_WarpPresent( float pitch, float yaw ) {
+	static backEndState_t savedBackEnd;
+	glBindings_t bindings;
+	FBO_t *savedRenderFbo, *savedResolveFbo, *savedCurrentFbo;
+	vao_t *savedVao;
+	mat4_t savedModelview, savedProjection;
+	uint32_t savedStateBits;
+	int savedCulling, savedCullFront;
+	qboolean savedFinishCalled, ok;
+	GLint viewport[4], scissor[4];
+	GLboolean colorMask[4];
+
+	if ( tr.warp.presenting ) {
+		return qfalse;
+	}
+
+	apCalls++;
+
+	if ( !tr.warpFbo || !tr.warpOutFbo || !tr.renderFbo || r_warpDebug->integer ) {
+		tr.warp.reasons[WARP_REASON_NO_FBO]++;
+		apDenied++;
+		return qfalse;
+	}
+
+	if ( !R_WarpCaptureFresh( 1 ) ) {
+		tr.warp.reasons[WARP_REASON_NO_CAPTURE]++;
+		apDenied++;
+		return qfalse;
+	}
+
+	if ( !tr.warp.tailValid ) {
+		tr.warp.reasons[WARP_REASON_NO_TAIL]++;
+		apDenied++;
+		return qfalse;
+	}
+
+	// batched surfaces belong to the real frame and must not be drawn into the warp target
+	if ( tess.numIndexes ) {
+		RB_EndSurface();
+	}
+
+	// the first warp mark also carries the real GPU work since the previous mark
+	RB_GpuMark( "pre_warp" );
+
+	// save everything the warp and the 2D replay touch
+	Com_Memcpy( &savedBackEnd, &backEnd, sizeof( backEnd ) );
+	savedFinishCalled = glState.finishCalled;
+	savedStateBits = glState.glStateBits;
+	savedCulling = glState.faceCulling;
+	savedCullFront = glState.faceCullFront;
+	savedCurrentFbo = glState.currentFBO;
+	savedVao = glState.currentVao;
+	Mat4Copy( glState.modelview, savedModelview );
+	Mat4Copy( glState.projection, savedProjection );
+	GL_SaveBindings( &bindings );
+	qglGetIntegerv( GL_VIEWPORT, viewport );
+	qglGetIntegerv( GL_SCISSOR_BOX, scissor );
+	qglGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
+	savedRenderFbo = tr.renderFbo;
+	savedResolveFbo = tr.msaaResolveFbo;
+
+	tr.warp.presenting = qtrue;
+	qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+
+	ok = RB_WarpApplyTo( tr.warpOutFbo, pitch - tr.warp.refAngles[0], AngleNormalize180( yaw - tr.warp.refAngles[1] ) );
+
+	if ( ok ) {
+		tr.renderFbo = tr.warpOutFbo;
+		tr.msaaResolveFbo = NULL;
+
+		backEnd.projection2D = qfalse;
+		backEnd.color2D[0] = tr.warp.color2D[0] * 255.0f + 0.5f;
+		backEnd.color2D[1] = tr.warp.color2D[1] * 255.0f + 0.5f;
+		backEnd.color2D[2] = tr.warp.color2D[2] * 255.0f + 0.5f;
+		backEnd.color2D[3] = tr.warp.color2D[3] * 255.0f + 0.5f;
+		glState.finishCalled = qfalse;
+
+		RB_ExecuteRenderCommands( warpTailBuf );
+
+		tr.renderFbo = savedRenderFbo;
+		tr.msaaResolveFbo = savedResolveFbo;
+		tr.warp.reasons[WARP_REASON_WARP_OK]++;
+		apPresented++;
+	} else {
+		tr.warp.reasons[WARP_REASON_APPLY_FAIL]++;
+		apDenied++;
+	}
+
+	// restore: tracked caches first (they now describe the real GL state), then step each back to what was found
+	Com_Memcpy( &backEnd, &savedBackEnd, sizeof( backEnd ) );
+	glState.finishCalled = savedFinishCalled;
+	GL_State( savedStateBits );
+	GL_Cull( savedCulling );
+	glState.faceCullFront = savedCullFront;
+	GL_RestoreBindings( &bindings );
+	glState.currentFBO = savedCurrentFbo;
+	if ( savedVao && glState.currentVao != savedVao ) {
+		R_BindVao( savedVao );
+	}
+	GL_SetProjectionMatrix( savedProjection );
+	GL_SetModelviewMatrix( savedModelview );
+	qglViewport( viewport[0], viewport[1], viewport[2], viewport[3] );
+	qglScissor( scissor[0], scissor[1], scissor[2], scissor[3] );
+	qglColorMask( colorMask[0], colorMask[1], colorMask[2], colorMask[3] );
+	tr.warp.presenting = qfalse;
+
+	return ok;
+}
+
+/*
+=============
+R_WarpPresent_f
+
+warppresent <pitch> <yaw>: dev command, one compositor present at absolute view angles.
+=============
+*/
+void R_WarpPresent_f( void ) {
+	if ( ri.Cmd_Argc() != 3 ) {
+		ri.Printf( PRINT_ALL, "usage: warppresent <pitch> <yaw>  (absolute angles; capture was built with %.2f %.2f)\n",
+				   tr.warp.refAngles[0], tr.warp.refAngles[1] );
+		return;
+	}
+
+	if ( !RE_WarpPresent( atof( ri.Cmd_Argv( 1 ) ), atof( ri.Cmd_Argv( 2 ) ) ) ) {
+		ri.Printf( PRINT_ALL, "warppresent: nothing presented (see warprstats)\n" );
+	}
+}
+
 static int WarpCmpFloat( const void *a, const void *b ) {
 	float x = *(const float *)a, y = *(const float *)b;
 
@@ -401,6 +578,12 @@ void R_WarpStats_f( void ) {
 	ri.Printf( PRINT_ALL, "warp renderer: warp frames: ok %d, failed: noCapture %d noTail %d applyFail %d stale %d\n",
 			   r[WARP_REASON_WARP_OK], r[WARP_REASON_NO_CAPTURE], r[WARP_REASON_NO_TAIL], r[WARP_REASON_APPLY_FAIL],
 			   r[WARP_REASON_STALE] );
+	ri.Printf( PRINT_ALL, "warp present: calls %d, presented %d, denied %d\n", apCalls, apPresented, apDenied );
+	ri.Printf( PRINT_ALL, "warp checkpoints: command %d/%d, afterDepth %d/%d, afterSsao %d/%d, afterOpaque %d/%d (presented/calls)\n",
+			   tr.warp.cpPresented[WARP_CP_COMMAND], tr.warp.cpCalls[WARP_CP_COMMAND],
+			   tr.warp.cpPresented[WARP_CP_AFTER_DEPTH], tr.warp.cpCalls[WARP_CP_AFTER_DEPTH],
+			   tr.warp.cpPresented[WARP_CP_AFTER_SSAO], tr.warp.cpCalls[WARP_CP_AFTER_SSAO],
+			   tr.warp.cpPresented[WARP_CP_AFTER_OPAQUE], tr.warp.cpCalls[WARP_CP_AFTER_OPAQUE] );
 	ri.Printf( PRINT_ALL, "warp latch: mode %d, calls %d, applied %d, skipped(small) %d, denied %d, noCapture %d\n",
 			   r_frameWarp->integer, latchCalls, latchApplied, latchSkipped, latchDenied, latchNoCapture );
 
@@ -482,7 +665,7 @@ angles and re-projects the captured view by the difference to the angles the fra
 void RB_WarpLatch( void ) {
 	float pitch, yaw, dPitch, dYaw, mag;
 
-	if ( r_frameWarp->integer != 1 || r_warpDebug->integer || !tr.warpFbo ) {
+	if ( ( r_frameWarp->integer != 1 && r_frameWarp->integer != 2 ) || r_warpDebug->integer || !tr.warpFbo ) {
 		return;
 	}
 

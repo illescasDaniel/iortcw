@@ -1439,6 +1439,61 @@ const void *RB_StretchPicGradient( const void *data ) {
 
 /*
 =============
+RB_WarpCheckpoint
+
+Compositor (r_frameWarp 2): a point where the real frame may be interrupted by a warp present. The common side
+decides (ri.WarpCheckpoint); r_frameWarpApTest forces a zero-delta present instead, to prove the real frame is
+unaffected. RE_WarpPresent puts all GL and backend state back. Never reached from the replayed 2D tail
+(presenting). Callers guarantee a half-done framebuffer/MSAA resolve is not pending and the SMAA velocity
+draw-buffer state is not active.
+=============
+*/
+static void RB_WarpCheckpoint( int where ) {
+	int mask, age;
+	float pitch, yaw;
+	qboolean test = r_frameWarpApTest->integer != 0;
+
+	if ( ( r_frameWarp->integer != 2 && !test ) || tr.warp.presenting || !tr.warp.valid ) {
+		return;
+	}
+
+	if ( test && where == WARP_CP_END ) {
+		return;     // the test presents a warp of the frame being finished right before the real swap: not a valid state
+	}
+	mask = r_frameWarpCheckpoints->integer;
+	if ( where == WARP_CP_COMMAND || where == WARP_CP_END ) {
+		if ( !( mask & 1 ) ) {
+			return;
+		}
+	} else if ( !( mask & 2 ) && !( mask & ( 2 << where ) ) ) {
+		return;
+	}
+
+	age = tr.frameCount - tr.warp.frameCount;
+	if ( age < 0 || age > 1 ) {
+		return;
+	}
+
+	tr.warp.cpCalls[where]++;
+
+	if ( test ) {
+		pitch = tr.warp.refAngles[0];
+		yaw = tr.warp.refAngles[1];
+	} else if ( !ri.WarpCheckpoint( where, &pitch, &yaw ) ) {
+		return;
+	}
+
+	if ( RE_WarpPresent( pitch, yaw ) ) {
+		tr.warp.cpPresented[where]++;
+	}
+	if ( !test ) {
+		// the common side ends its bookkeeping of the present it asked for (the swap goes through its pacer hooks)
+		ri.WarpCheckpoint( WARP_CPX_PRESENT_END, &pitch, &yaw );
+	}
+}
+
+/*
+=============
 RB_DrawSurfs
 
 =============
@@ -1550,6 +1605,11 @@ const void	*RB_DrawSurfs( const void *data ) {
 				FBO_BlitFromTexture(tr.renderDepthImage, srcTexCoords, NULL, tr.hdrDepthFbo, NULL, NULL, NULL, 0);
 			}
 			RB_GpuMark( "depthcopy" );
+
+			// checkpoint: main view only. Velocity draw buffers are already reset, the depth is resolved/copied,
+			// renderFbo (oldFbo) is bound with the view's viewport
+			if ( !( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) )
+				RB_WarpCheckpoint( WARP_CP_AFTER_DEPTH );
 
 			if (r_sunlightMode->integer && backEnd.viewParms.flags & VPF_USESUNLIGHT)
 			{
@@ -1871,6 +1931,10 @@ const void	*RB_DrawSurfs( const void *data ) {
 		// reset viewport and scissor
 		FBO_Bind(oldFbo);
 		SetViewportAndScissor();
+
+		// checkpoint: AO textures are done, oldFbo and the view's viewport are current again
+		if ( !isShadowView && !( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) )
+			RB_WarpCheckpoint( WARP_CP_AFTER_SSAO );
 	}
 
 	if (glRefConfig.framebufferObject && (backEnd.viewParms.flags & VPF_DEPTHCLAMP) && glRefConfig.depthClamp)
@@ -1914,6 +1978,11 @@ const void	*RB_DrawSurfs( const void *data ) {
 		backEnd.fogDefer = qfalse;
 		// charge the opaque pass to its own bucket, not to whatever mark follows (ssao_apply)
 		RB_GpuMark( (backEnd.refdef.rdflags & RDF_NOWORLDMODEL) ? "scene_noworld" : "scene_opaque" );
+
+		// checkpoint: opaques are in the render target, fogDefer is cleared, the multiply-AO apply and the
+		// translucents are still to come (render target and viewport unchanged since the opaque pass)
+		if ( !( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) )
+			RB_WarpCheckpoint( WARP_CP_AFTER_OPAQUE );
 
 		if ( aoApply )
 		{
@@ -2268,7 +2337,10 @@ const void	*RB_SwapBuffers( const void *data ) {
 	// ran while the GPU sat idle (~24% idle at 2560x1600). The driver's own frame queue
 	// bounds how far ahead the CPU gets; the frame pacer syncs when a cap is active.
 	RB_GpuMark( "present_blit" );
-	RB_GpuProfEndFrame();
+	// a compositor warp present (RE_WarpPresent) replays this swap in the middle of a real frame
+	if ( !tr.warp.presenting ) {
+		RB_GpuProfEndFrame();
+	}
 
 	if ( !glState.finishCalled && r_swapFinish->integer ) {
 		qglFinish();
@@ -2677,6 +2749,13 @@ void RB_ExecuteRenderCommands( const void *data ) {
 	while ( 1 ) {
 		data = PADP(data, sizeof(void *));
 
+		// compositor checkpoint between commands (real list only; the replayed tail runs with presenting set)
+		if ( *(const int *)data == RC_SWAP_BUFFERS ) {
+			RB_WarpCheckpoint( WARP_CP_END );
+		} else if ( *(const int *)data != RC_END_OF_LIST && !tr.warp.inTail ) {
+			RB_WarpCheckpoint( WARP_CP_COMMAND );
+		}
+
 		switch ( *(const int *)data ) {
 		case RC_SET_COLOR:
 			data = RB_SetColor( data );
@@ -2692,9 +2771,13 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			break;
 		case RC_DRAW_BUFFER:
 			data = RB_DrawBuffer( data );
+			tr.warp.inTail = qfalse;
 			break;
 		case RC_SWAP_BUFFERS:
 			data = RB_SwapBuffers( data );
+			if ( !tr.warp.presenting ) {
+				tr.warp.inTail = qfalse;
+			}
 			break;
 		case RC_SCREENSHOT:
 			data = RB_TakeScreenshotCmd( data );
@@ -2713,6 +2796,9 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			break;
 		case RC_POSTPROCESS:
 			data = RB_PostProcess(data);
+			if ( !tr.warp.presenting ) {
+				tr.warp.inTail = qtrue;
+			}
 			break;
 		case RC_EXPORT_CUBEMAPS:
 			data = RB_ExportCubemaps(data);
