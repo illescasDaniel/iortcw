@@ -853,7 +853,9 @@ typedef enum
 
 	UNIFORM_WARPMATRIX, // frame warp: new view NDC -> old view homogeneous NDC (3x3 in the upper left)
 	UNIFORM_WARPBOX, // frame warp: 3D viewport box in pixels (x, y, w, h)
-	UNIFORM_WARPPARAMS, // frame warp: capture x = gun depth, y = dilate radius; warp x = debug visualise
+	UNIFORM_WARPPARAMS, // frame warp: capture x = gun depth, y = dilate radius; warp x = debug visualise; warpdepth (gunDepth, zNear, zFar, step)
+	UNIFORM_WARPMOVE, // mesh warp: xyz = camera translation in the capture's view space, w = fill / stretch flags
+	UNIFORM_WARPPROJ, // mesh warp: x = tanX, y = tanY, z = zNear, w = zFar
 
 	UNIFORM_COUNT
 } uniform_t;
@@ -1738,6 +1740,8 @@ typedef enum {
 	WARP_CP_COUNT
 } warpCheckpoint_t;
 
+#define WARP_MESH_RING 16
+
 typedef struct {
 	qboolean	valid;			// warpImage holds a capture of a main view
 	qboolean	tailValid;		// the saved 2D tail is complete and safe to replay
@@ -1753,6 +1757,21 @@ typedef struct {
 	qboolean	presenting;		// inside RE_WarpPresent (recursion guard; gpuprof and the swap check it)
 	int			cpCalls[WARP_CP_COUNT];		// checkpoints that were enabled and had a usable capture
 	int			cpPresented[WARP_CP_COUNT];	// ... of which a warp present was drawn
+
+	// 6-DoF mesh warp (r_frameWarpMesh): camera origin / velocity tracking and the capture's projection
+	vec3_t		origin;			// camera origin of the captured frame
+	vec3_t		prevOrigin;		// origin of the previous captured frame
+	vec3_t		velocity;		// estimated camera velocity, units per second
+	int			time;			// ri.Milliseconds at capture
+	int			prevTime;
+	int			prevFrameCount;
+	float		zNear, zFar;	// capture projection depth range
+	float		tanX, tanY;		// tan(fov/2) of the capture
+	int			velResets;		// velocity estimates dropped as teleports / too fast
+	float		speedRing[WARP_MESH_RING];	// recent speeds (units/s)
+	float		dtRing[WARP_MESH_RING];		// recent predicted warp dt (s)
+	float		moveRing[WARP_MESH_RING];	// recent applied move lengths (units)
+	int			ringPos;
 } warpState_t;
 
 /*
@@ -1914,6 +1933,8 @@ typedef struct {
 	shaderProgram_t ssaoUpShader;
 	shaderProgram_t warpCaptureShader;	// frame warp (tr_warp.c): colour + gun mask capture
 	shaderProgram_t warpShader;			// frame warp: rotation reprojection
+	shaderProgram_t warpDepthShader;	// 6-DoF mesh warp: depth grid capture
+	shaderProgram_t warpMeshShader;		// 6-DoF mesh warp: forward-reprojected depth grid
 	shaderProgram_t bloomBrightShader;
 	shaderProgram_t bloomBlurShader;
 	shaderProgram_t gradeShader;
@@ -2010,6 +2031,11 @@ typedef struct {
 	FBO_t				*warpFbo;
 	image_t				*warpOutImage;	// compositor warp (RE_WarpPresent): warped frame plus replayed 2D, renderFbo colour format, no MSAA
 	FBO_t				*warpOutFbo;
+	image_t				*warpDepthImage;	// 6-DoF mesh warp: sampled scene depth
+	FBO_t				*warpDepthFbo;
+	vao_t				*warpMeshVao;		// 6-DoF mesh warp: grid vertices and indexes
+	int					warpMeshIndexes;
+	int					warpGridW, warpGridH, warpGridStep;
 	warpState_t			warp;
 } trGlobals_t;
 
@@ -2199,6 +2225,14 @@ extern  cvar_t  *r_frameWarpGunDepth;
 extern  cvar_t  *r_frameWarpGunDilate;
 extern  cvar_t  *r_frameWarpCheckpoints;
 extern  cvar_t  *r_frameWarpApTest;
+extern  cvar_t  *r_frameWarpMesh;
+extern  cvar_t  *r_frameWarpMeshTranslate;
+extern  cvar_t  *r_frameWarpMeshFill;
+extern  cvar_t  *r_frameWarpMeshStretch;
+extern  cvar_t  *r_frameWarpMeshMaxMove;
+extern  cvar_t  *r_frameWarpMeshMaxSpeed;
+extern  cvar_t  *r_frameWarpMeshDt;
+extern  cvar_t  *r_warpDebugMove;
 extern  cvar_t  *r_warpDebug;
 extern  cvar_t  *r_warpDebugPitch;
 extern  cvar_t  *r_warpDebugYaw;

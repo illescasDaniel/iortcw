@@ -3770,6 +3770,7 @@ void CL_InitRef( void ) {
 	ri.WarpLatch = Com_WarpLatch;
 	ri.PaceGpuRegister = Com_PaceGpuRegister;
 	ri.WarpCheckpoint = Com_WarpCheckpoint;
+	ri.WarpMoveDt = Com_WarpMoveDt;
 
 	ri.Z_Malloc = Z_Malloc;
 	ri.Free = Z_Free;

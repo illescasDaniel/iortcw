@@ -51,6 +51,9 @@ extern const char *fallbackShader_ssao_fp;
 extern const char *fallbackShader_ssaoup_fp;
 extern const char *fallbackShader_warpcap_fp;
 extern const char *fallbackShader_warp_fp;
+extern const char *fallbackShader_warpdepth_fp;
+extern const char *fallbackShader_warpmesh_vp;
+extern const char *fallbackShader_warpmesh_fp;
 extern const char *fallbackShader_bloombright_fp;
 extern const char *fallbackShader_grade_fp;
 extern const char *fallbackShader_texturecolor_vp;
@@ -197,6 +200,8 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_WarpMatrix", GLSL_MAT16 },
 	{ "u_WarpBox", GLSL_VEC4 },
 	{ "u_WarpParams", GLSL_VEC4 },
+	{ "u_WarpMove", GLSL_VEC4 },
+	{ "u_WarpProj", GLSL_VEC4 },
 };
 
 typedef enum
@@ -1716,6 +1721,33 @@ void GLSL_InitGPUShaders(void)
 		GLSL_FinishGPUShader(&tr.warpShader);
 
 		numEtcShaders++;
+
+		// 6-DoF mesh warp: depth grid capture and forward-reprojected mesh (r_frameWarpMesh > 0 only)
+		if (r_frameWarpMesh->integer > 0)
+		{
+			if (!GLSL_InitGPUShader(&tr.warpDepthShader, "warpdepth", attribs, qtrue, extradefines, qtrue, fallbackShader_texturecolor_vp, fallbackShader_warpdepth_fp))
+			{
+				ri.Error(ERR_FATAL, "Could not load warpdepth shader!");
+			}
+
+			GLSL_InitUniforms(&tr.warpDepthShader);
+			GLSL_SetUniformInt(&tr.warpDepthShader, UNIFORM_SCREENDEPTHMAP, TB_LIGHTMAP);
+			GLSL_FinishGPUShader(&tr.warpDepthShader);
+
+			numEtcShaders++;
+
+			if (!GLSL_InitGPUShader(&tr.warpMeshShader, "warpmesh", attribs, qtrue, extradefines, qtrue, fallbackShader_warpmesh_vp, fallbackShader_warpmesh_fp))
+			{
+				ri.Error(ERR_FATAL, "Could not load warpmesh shader!");
+			}
+
+			GLSL_InitUniforms(&tr.warpMeshShader);
+			GLSL_SetUniformInt(&tr.warpMeshShader, UNIFORM_SCREENIMAGEMAP, TB_COLORMAP);
+			GLSL_SetUniformInt(&tr.warpMeshShader, UNIFORM_SCREENDEPTHMAP, TB_LIGHTMAP);
+			GLSL_FinishGPUShader(&tr.warpMeshShader);
+
+			numEtcShaders++;
+		}
 	}
 
 
@@ -1869,6 +1901,8 @@ void GLSL_ShutdownGPUShaders(void)
 	GLSL_DeleteGPUShader(&tr.ssaoUpShader);
 	GLSL_DeleteGPUShader(&tr.warpCaptureShader);
 	GLSL_DeleteGPUShader(&tr.warpShader);
+	GLSL_DeleteGPUShader(&tr.warpDepthShader);
+	GLSL_DeleteGPUShader(&tr.warpMeshShader);
 
 	for ( i = 0; i < 4; i++)
 		GLSL_DeleteGPUShader(&tr.depthBlurShader[i]);

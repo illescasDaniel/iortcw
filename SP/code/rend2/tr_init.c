@@ -154,6 +154,14 @@ cvar_t  *r_frameWarpGunDepth;
 cvar_t  *r_frameWarpGunDilate;
 cvar_t  *r_frameWarpCheckpoints;
 cvar_t  *r_frameWarpApTest;
+cvar_t  *r_frameWarpMesh;
+cvar_t  *r_frameWarpMeshTranslate;
+cvar_t  *r_frameWarpMeshFill;
+cvar_t  *r_frameWarpMeshStretch;
+cvar_t  *r_frameWarpMeshMaxMove;
+cvar_t  *r_frameWarpMeshMaxSpeed;
+cvar_t  *r_frameWarpMeshDt;
+cvar_t  *r_warpDebugMove;
 cvar_t  *r_warpDebug;
 cvar_t  *r_warpDebugPitch;
 cvar_t  *r_warpDebugYaw;
@@ -1575,8 +1583,17 @@ void R_Register( void ) {
 	r_frameWarpGunDepth = ri.Cvar_Get( "r_frameWarpGunDepth", "0.3", CVAR_CHEAT );
 	r_frameWarpGunDilate = ri.Cvar_Get( "r_frameWarpGunDilate", "1", 0 );
 	r_frameWarpCheckpoints = ri.Cvar_Get( "r_frameWarpCheckpoints", "3", 0 );	// compositor: 1 between commands, 2 inside RB_DrawSurfs, 4/8/16 only after depth/ssao/opaque
-	r_frameWarpApTest = ri.Cvar_Get( "r_frameWarpApTest", "0", CVAR_TEMP );	// 1: zero-delta warp present at every enabled checkpoint (correctness test)
-	r_warpDebug = ri.Cvar_Get( "r_warpDebug", "0", CVAR_TEMP );	// 1 fixed delta, 2 oscillating at 1 Hz, 3 visualise
+	r_frameWarpApTest = ri.Cvar_Get( "r_frameWarpApTest", "0", CVAR_TEMP );	// 1: zero-delta warp present at every enabled checkpoint (correctness test); 2: same with the 6-DoF mesh warp
+	r_frameWarpMesh = ri.Cvar_Get( "r_frameWarpMesh", "0", CVAR_ARCHIVE | CVAR_LATCH );	// 6-DoF mesh warp for compositor presents: 0 off, 1/2/3 = depth grid step 16/8/4 px
+	ri.Cvar_CheckRange( r_frameWarpMesh, 0, 3, qtrue );
+	r_frameWarpMeshTranslate = ri.Cvar_Get( "r_frameWarpMeshTranslate", "1", 0 );	// mesh warp: apply camera translation (0 = rotation only)
+	r_frameWarpMeshFill = ri.Cvar_Get( "r_frameWarpMeshFill", "1", 0 );	// mesh warp: fill disocclusion holes
+	r_frameWarpMeshStretch = ri.Cvar_Get( "r_frameWarpMeshStretch", "2.0", 0 );	// mesh warp: max triangle stretch before a triangle is discarded
+	r_frameWarpMeshMaxMove = ri.Cvar_Get( "r_frameWarpMeshMaxMove", "16", 0 );	// mesh warp: max applied translation in world units
+	r_frameWarpMeshMaxSpeed = ri.Cvar_Get( "r_frameWarpMeshMaxSpeed", "1500", 0 );	// mesh warp: speed (units/s) above which the velocity is treated as a teleport
+	r_frameWarpMeshDt = ri.Cvar_Get( "r_frameWarpMeshDt", "0", 0 );	// dev: > 0 overrides the predicted warp dt in milliseconds
+	r_warpDebugMove = ri.Cvar_Get( "r_warpDebugMove", "0 0 0", CVAR_CHEAT );	// dev: fixed translation applied by the mesh warp
+	r_warpDebug = ri.Cvar_Get( "r_warpDebug", "0", CVAR_TEMP );	// 1 fixed delta, 2 oscillating at 1 Hz, 3 visualise, 4 mesh warp visualise
 	r_warpDebugPitch = ri.Cvar_Get( "r_warpDebugPitch", "0", 0 );
 	r_warpDebugYaw = ri.Cvar_Get( "r_warpDebugYaw", "2", 0 );
 	r_smaaTemporalWeight = ri.Cvar_Get( "r_smaaTemporalWeight", "0.5", 0 );	// weight of the history sample

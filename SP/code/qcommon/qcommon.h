@@ -1193,6 +1193,7 @@ void Com_ApCpuCheckpoint( int where );                /* CPU-side compositor slo
 #define AP_CP_BEFORE_SCR 11
 qboolean CL_WarpReady( void );                      /* the renderer holds a capture it can present a warp of */
 qboolean CL_WarpPresentNow( void );                   /* sample the input and have the renderer present a warp (compositor) */
+float Com_WarpMoveDt( void );                          /* 6-DoF warp: seconds last real present -> predicted warp completion, -1 = unknown */
 void Com_ApStatsPrint( void );                        /* one "codmod ap: k=v ..." line */
 void Com_PaceStatsReset( void );
 void Com_PaceStatsPrint( void );                      /* one "codmod pace: k=v ..." line */

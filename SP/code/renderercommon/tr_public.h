@@ -229,6 +229,8 @@ typedef struct {
 	void	(*RunOffloaded)( void ( *fn )( void * ), void *arg );
 	// late-latch: waits via gpuWait, then returns the freshest view angles; qfalse = not available; may be NULL
 	qboolean (*WarpLatch)( void ( *gpuWait )( void ), float *pitch, float *yaw );
+	// 6-DoF mesh warp: seconds from the last real present to the predicted completion of the warp being drawn; -1 = unknown; may be NULL
+	float (*WarpMoveDt)( void );
 } refimport_t;
 
 

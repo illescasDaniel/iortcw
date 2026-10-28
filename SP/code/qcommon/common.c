@@ -3074,6 +3074,7 @@ static struct {
 	apWarp_t  warps[AP_WRECS];
 	int       nWarps;
 	int       costRing[16], costPos;    // warp GPU cost, us (not reset with the stats)
+	long long warpPredDoneUs;   // predicted completion of the warp being drawn (set at the decision, before the renderer draws it)
 	long long lastDoneUs, prevLastDoneUs;       // predicted GPU completion of the last warp / real present
 	qboolean  inflight;         // a warp present was asked for and its swap has not happened yet
 	long long swapT0;
@@ -3094,6 +3095,7 @@ static struct {
 	int       gap[PSTAT_N], gapN;       // GPU time between consecutive checkpoint positions of a frame
 	int       s2g[PSTAT_N], s2gN;       // warp input sample -> GPU done
 	int       swap[PSTAT_N], swapN;     // CPU time of SDL_GL_SwapWindow for warp presents
+	int       meshDt[64], meshDtN;      // Com_WarpMoveDt results, us (ring)
 	long long done[AP_DONE_N];          // GPU completion of every present (warps and real frames), CPU clock
 	int       doneN;
 	int       warps, fails, realFrames, marks, sleeps, cpWarps;
@@ -4007,6 +4009,7 @@ static qboolean Com_ApDecideInner( int where, int boundUs ) {
 	ap.nWarps++;
 	ap.prevLastDoneUs = ap.lastDoneUs;
 	ap.lastDoneUs = pc;
+	ap.warpPredDoneUs = pc;
 	ap.prevRealSince = ap.realSinceWarp;
 	ap.realSinceWarp = qfalse;
 	ap.inflight = qtrue;
@@ -4175,6 +4178,32 @@ static void Com_ApNoteRealPresent( long long now ) {
 	}
 }
 
+// 6-DoF mesh warp: seconds from the last real present to the predicted completion of the warp being drawn,
+// clamped to [0, 3 T1]; -1 = unknown. r_frameWarpMeshDt 1: the nominal warpsSinceReal * T1 instead.
+float Com_WarpMoveDt( void ) {
+	double dt, maxDt;
+
+	if ( !ap.running || !ap.inflight || ap.T1 <= 0 ) {
+		return -1.0f;
+	}
+	maxDt = 3.0 * ap.T1 * 1e-6;
+	if ( Cvar_VariableIntegerValue( "r_frameWarpMeshDt" ) == 1 ) {
+		dt = ap.warpsSinceReal * ap.T1 * 1e-6;
+	} else {
+		if ( ap.warpPredDoneUs <= 0 || com_lastPresentUs <= 0 ) {
+			return -1.0f;
+		}
+		dt = (double)( ap.warpPredDoneUs - com_lastPresentUs ) * 1e-6;
+	}
+	if ( dt < 0 ) {
+		dt = 0;
+	} else if ( dt > maxDt ) {
+		dt = maxDt;
+	}
+	aps.meshDt[aps.meshDtN++ % 64] = (int)( dt * 1e6 );
+	return (float)dt;
+}
+
 static int Com_ApCmpLL( const void *a, const void *b ) {
 	long long d = *(const long long *)a - *(const long long *)b;
 
@@ -4236,6 +4265,13 @@ void Com_ApStatsPrint( void ) {
 		Com_Printf( "codmod ap hist (slot fractions <.5 <1 <1.5 <2 <2.5 <3 <4 more, %%): %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f\n",
 					100.0 * hist[0] / ni, 100.0 * hist[1] / ni, 100.0 * hist[2] / ni, 100.0 * hist[3] / ni,
 					100.0 * hist[4] / ni, 100.0 * hist[5] / ni, 100.0 * hist[6] / ni, 100.0 * hist[7] / ni );
+	}
+	if ( aps.meshDtN > 0 ) {
+		int mv[64], mn = aps.meshDtN < 64 ? aps.meshDtN : 64;
+
+		Com_Memcpy( mv, aps.meshDt, mn * sizeof( int ) );
+		qsort( mv, mn, sizeof( int ), Com_PaceCmpInt );
+		Com_Printf( "codmod ap mesh dt: p50 %d p98 %d us (n=%d)\n", mv[( mn - 1 ) / 2], mv[(int)( ( mn - 1 ) * 0.98 + 0.5 )], mn );
 	}
 	Q_strncpyz( why, ap.running || !ap.deny ? "none" : ap.deny, sizeof( why ) );
 	for ( i = 0; why[i]; i++ ) {

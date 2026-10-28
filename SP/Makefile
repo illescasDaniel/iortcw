@@ -1928,7 +1928,10 @@ Q3R2STRINGOBJ = \
   $(B)/rend2/glsl/tonemap_fp.o \
   $(B)/rend2/glsl/tonemap_vp.o \
   $(B)/rend2/glsl/warp_fp.o \
-  $(B)/rend2/glsl/warpcap_fp.o
+  $(B)/rend2/glsl/warpcap_fp.o \
+  $(B)/rend2/glsl/warpdepth_fp.o \
+  $(B)/rend2/glsl/warpmesh_fp.o \
+  $(B)/rend2/glsl/warpmesh_vp.o
 
 ifneq ($(USE_RENDERER_DLOPEN), 0)
   Q3R2OBJ += \
