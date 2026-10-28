@@ -854,8 +854,8 @@ typedef enum
 	UNIFORM_WARPMATRIX, // frame warp: new view NDC -> old view homogeneous NDC (3x3 in the upper left)
 	UNIFORM_WARPBOX, // frame warp: 3D viewport box in pixels (x, y, w, h)
 	UNIFORM_WARPPARAMS, // frame warp: capture x = gun depth, y = dilate radius; warp x = debug visualise; warpdepth (gunDepth, zNear, zFar, step)
-	UNIFORM_WARPMOVE, // mesh warp: xyz = camera translation in the capture's view space, w = fill / stretch flags
-	UNIFORM_WARPPROJ, // mesh warp: x = tanX, y = tanY, z = zNear, w = zFar
+	UNIFORM_WARPMOVE, // mesh warp: xyz = translation in new-camera forward/left/up world units, w = zNear
+	UNIFORM_WARPPROJ, // mesh warp: tanX, tanY, grid step in pixels (z), w unused
 
 	UNIFORM_COUNT
 } uniform_t;

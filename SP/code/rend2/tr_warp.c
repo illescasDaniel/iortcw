@@ -28,7 +28,7 @@ static float latchRing[WARP_LATCH_RING];
 static int latchSamples, latchCalls, latchApplied, latchSkipped, latchDenied, latchNoCapture;
 
 // mesh warp: sample counters for speedRing / dtRing (the rings themselves live in tr.warp)
-static int meshSpeedSamples, meshDtSamples, meshDtUnknown;
+static int meshSpeedSamples, meshDtSamples, meshDtUnknown, meshMoveSamples;
 
 // the 2D commands that followed the captured view, kept so a later chunk can replay them over a warped frame
 static void *warpTailBuf[( MAX_RENDER_COMMANDS + sizeof( void * ) - 1 ) / sizeof( void * )];
@@ -142,7 +142,7 @@ void R_WarpInitTargets( void ) {
 	tr.warpMeshVao = NULL;
 	tr.warpMeshIndexes = 0;
 	tr.warpGridW = tr.warpGridH = tr.warpGridStep = 0;
-	meshSpeedSamples = meshDtSamples = meshDtUnknown = 0;
+	meshSpeedSamples = meshDtSamples = meshDtUnknown = meshMoveSamples = 0;
 
 	if ( r_frameWarp->integer <= 0 && !r_warpDebug->integer ) {
 		return;
@@ -245,13 +245,98 @@ static void R_WarpMatrix( const vec3_t oldAxis[3], const vec3_t newAxis[3], floa
 
 /*
 =============
-RB_WarpApply
-
-Draws the captured main view into tr.renderFbo as seen from the captured direction plus (dPitch, dYaw)
-degrees. Returns qfalse when there is nothing valid to warp. Not exported yet; chunk 2 uses it for presents.
+R_WarpMeshAvailable
 =============
 */
-static qboolean RB_WarpApplyTo( FBO_t *dst, float dPitch, float dYaw ) {
+static qboolean R_WarpMeshAvailable( void ) {
+	return r_frameWarpMesh->integer > 0 && tr.warpMeshVao && tr.warpMeshIndexes > 0 && tr.warpMeshShader.program &&
+		   tr.warpDepthImage && tr.warpOutFbo;
+}
+
+/*
+=============
+RB_WarpMeshTo
+
+6-DoF mesh warp: draws the depth grid mesh into dst (needs a depth attachment: tr.warpOutFbo). The shader gets
+R = OLD capture camera -> NEW camera rotation (R[i][j] = dot( newAxis[i], oldAxis[j] ), axis order forward, left,
+up; mat3( u_WarpMatrix ) * v with v in old-camera components gives new-camera components) and
+T = moveWorld (newOrigin - oldOrigin) in the new camera's (forward, left, up) components, w = capture zNear.
+dst's colour and depth are cleared; depth test is left disabled for the 2D tail.
+=============
+*/
+static void RB_WarpMeshTo( FBO_t *dst, float dPitch, float dYaw, const vec3_t moveWorld ) {
+	vec3_t angles, newAxis[3];
+	vec4_t box, params, move, proj;
+	vec2_t invTexRes;
+	mat4_t m;
+	float maxDeg = r_frameWarpMaxDeg->value;
+	int i, j;
+
+	if ( maxDeg < 0.0f ) {
+		maxDeg = 0.0f;
+	}
+
+	R_WarpAxisToAngles( (const vec3_t *)tr.warp.axis, angles );
+	angles[PITCH] = R_WarpClamp( angles[PITCH] + R_WarpClamp( dPitch, maxDeg ), 87.9f );
+	angles[YAW] += R_WarpClamp( dYaw, maxDeg );
+	AnglesToAxis( angles, newAxis );
+
+	Com_Memset( m, 0, sizeof( mat4_t ) );
+	for ( i = 0; i < 3; i++ ) {
+		for ( j = 0; j < 3; j++ ) {
+			m[j * 4 + i] = DotProduct( newAxis[i], tr.warp.axis[j] );
+		}
+	}
+	m[15] = 1.0f;
+
+	VectorSet4( move, DotProduct( newAxis[0], moveWorld ), DotProduct( newAxis[1], moveWorld ),
+				DotProduct( newAxis[2], moveWorld ), tr.warp.zNear );
+	VectorSet4( proj, tr.warp.tanX, tr.warp.tanY, (float)tr.warpGridStep, 0.0f );
+	VectorSet4( box, tr.warp.box[0], tr.warp.box[1], tr.warp.box[2], tr.warp.box[3] );
+	VectorSet4( params, r_warpDebug->integer == 3 ? 1.0f : 0.0f, r_frameWarpEdgeBlur->value,
+				r_frameWarpMeshFill->value, r_frameWarpMeshStretch->value );
+	invTexRes[0] = 1.0f / tr.warpImage->width;
+	invTexRes[1] = 1.0f / tr.warpImage->height;
+
+	FBO_Bind( dst );
+	qglViewport( 0, 0, dst->width, dst->height );
+	qglScissor( 0, 0, dst->width, dst->height );
+
+	// a false depth mask blocks the depth clear
+	GL_State( GLS_DEPTHMASK_TRUE | GLS_DEPTHTEST_DISABLE );
+	qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
+	qglClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+
+	GL_Cull( CT_TWO_SIDED );
+	GL_State( GLS_DEPTHMASK_TRUE );
+
+	GLSL_BindProgram( &tr.warpMeshShader );
+	GL_BindToTMU( tr.warpImage, TB_COLORMAP );
+	GL_BindToTMU( tr.warpDepthImage, TB_LIGHTMAP );
+	GLSL_SetUniformMat4( &tr.warpMeshShader, UNIFORM_WARPMATRIX, m );
+	GLSL_SetUniformVec4( &tr.warpMeshShader, UNIFORM_WARPBOX, box );
+	GLSL_SetUniformVec4( &tr.warpMeshShader, UNIFORM_WARPPARAMS, params );
+	GLSL_SetUniformVec2( &tr.warpMeshShader, UNIFORM_INVTEXRES, invTexRes );
+	GLSL_SetUniformVec4( &tr.warpMeshShader, UNIFORM_WARPMOVE, move );
+	GLSL_SetUniformVec4( &tr.warpMeshShader, UNIFORM_WARPPROJ, proj );
+
+	R_BindVao( tr.warpMeshVao );
+	R_DrawElements( tr.warpMeshIndexes, 0 );
+
+	// the 2D tail draws with GLS_DEPTHTEST_DISABLE per call; leave the state that way
+	GL_State( GLS_DEPTHTEST_DISABLE );
+}
+
+/*
+=============
+RB_WarpApply
+
+Draws the captured main view into dst as seen from the captured direction plus (dPitch, dYaw)
+degrees. Returns qfalse when there is nothing valid to warp. moveWorld (may be NULL) selects the 6-DoF mesh
+warp when it is available; NULL always uses the rotation-only homography.
+=============
+*/
+static qboolean RB_WarpApplyTo( FBO_t *dst, float dPitch, float dYaw, const vec3_t moveWorld ) {
 	vec3_t angles, newAxis[3];
 	vec4_t box, params;
 	mat4_t m;
@@ -260,6 +345,11 @@ static qboolean RB_WarpApplyTo( FBO_t *dst, float dPitch, float dYaw ) {
 	if ( !tr.warpFbo || !tr.warp.valid || !dst ) {
 		tr.warp.reasons[WARP_REASON_STALE]++;
 		return qfalse;
+	}
+
+	if ( moveWorld && R_WarpMeshAvailable() && dst == tr.warpOutFbo ) {
+		RB_WarpMeshTo( dst, dPitch, dYaw, moveWorld );
+		return qtrue;
 	}
 
 	if ( maxDeg < 0.0f ) {
@@ -287,7 +377,57 @@ static qboolean RB_WarpApplyTo( FBO_t *dst, float dPitch, float dYaw ) {
 }
 
 qboolean RB_WarpApply( float dPitch, float dYaw ) {
-	return RB_WarpApplyTo( tr.renderFbo, dPitch, dYaw );
+	return RB_WarpApplyTo( tr.renderFbo, dPitch, dYaw, NULL );
+}
+
+/*
+=============
+R_WarpDebugMoveWorld
+
+r_warpDebugMove ("forward left up", in the capture camera's axes) as a world-space translation.
+=============
+*/
+static void R_WarpDebugMoveWorld( vec3_t out ) {
+	float f = 0.0f, l = 0.0f, u = 0.0f;
+
+	sscanf( r_warpDebugMove->string, "%f %f %f", &f, &l, &u );
+	VectorClear( out );
+	VectorMA( out, f, tr.warp.axis[0], out );
+	VectorMA( out, l, tr.warp.axis[1], out );
+	VectorMA( out, u, tr.warp.axis[2], out );
+}
+
+/*
+=============
+R_WarpPresentMove
+
+World-space camera translation a compositor present applies: velocity * dt (none when the dt is unknown or
+r_frameWarpMeshTranslate is 0), clamped to r_frameWarpMeshMaxMove; r_frameWarpApTest 2 uses r_warpDebugMove
+instead and 1 none. The applied length goes into the move ring.
+=============
+*/
+static void R_WarpPresentMove( float moveDt, vec3_t out ) {
+	float maxMove = r_frameWarpMeshMaxMove->value;
+	float len;
+
+	VectorClear( out );
+
+	if ( r_frameWarpApTest->integer == 2 ) {
+		R_WarpDebugMoveWorld( out );
+	} else if ( r_frameWarpApTest->integer == 0 && moveDt >= 0.0f && r_frameWarpMeshTranslate->integer ) {
+		VectorScale( tr.warp.velocity, moveDt, out );
+	}
+
+	len = VectorLength( out );
+	if ( maxMove < 0.0f ) {
+		maxMove = 0.0f;
+	}
+	if ( len > maxMove ) {
+		VectorScale( out, maxMove / len, out );
+		len = maxMove;
+	}
+
+	tr.warp.moveRing[meshMoveSamples++ % WARP_MESH_RING] = len;
 }
 
 /*
@@ -490,6 +630,7 @@ void RB_WarpCapture( const postProcessCommand_t *cmd, FBO_t *srcFbo ) {
 	GLSL_SetUniformVec4( &tr.warpCaptureShader, UNIFORM_WARPPARAMS, params );
 	GL_BindToTMU( tr.renderDepthImage, TB_LIGHTMAP );
 	FBO_BlitFromTexture( srcFbo->colorImage[0], NULL, NULL, tr.warpFbo, NULL, &tr.warpCaptureShader, NULL, GLS_DEPTHTEST_DISABLE );
+	RB_GpuMark( "warp_color" );
 
 	if ( tr.warpMeshVao && tr.warpDepthFbo && tr.warpDepthShader.program ) {
 		RB_WarpMeshCapture( cmd );
@@ -526,6 +667,15 @@ void RB_WarpCapture( const postProcessCommand_t *cmd, FBO_t *srcFbo ) {
 
 			VectorSet4( scale, 1.0f / 1024.0f, 1.0f / 1024.0f, 1.0f / 1024.0f, 1.0f );
 			FBO_BlitFromTexture( tr.warpDepthImage, NULL, NULL, tr.renderFbo, NULL, NULL, scale, GLS_DEPTHTEST_DISABLE );
+		} else if ( R_WarpMeshAvailable() ) {
+			// mesh preview: draw into the warp target (it has the depth attachment), then copy into the render FBO
+			vec3_t moveWorld;
+
+			R_WarpDebugMoveWorld( moveWorld );
+			if ( RB_WarpApplyTo( tr.warpOutFbo, dPitch, dYaw, moveWorld ) ) {
+				// FBO_Blit, not FBO_BlitFromTexture with NULL corners: that one samples the texture upside down
+				FBO_Blit( tr.warpOutFbo, NULL, NULL, tr.renderFbo, NULL, NULL, NULL, GLS_DEPTHTEST_DISABLE );
+			}
 		} else {
 			RB_WarpApply( dPitch, dYaw );
 		}
@@ -611,7 +761,8 @@ qboolean RE_WarpPresent( float pitch, float yaw ) {
 	mat4_t savedModelview, savedProjection;
 	uint32_t savedStateBits;
 	int savedCulling, savedCullFront;
-	qboolean savedFinishCalled, ok;
+	qboolean savedFinishCalled, ok, useMesh = qfalse;
+	vec3_t moveWorld;
 	GLint viewport[4], scissor[4];
 	GLboolean colorMask[4];
 
@@ -668,7 +819,21 @@ qboolean RE_WarpPresent( float pitch, float yaw ) {
 	qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 
 	// asked before the replayed tail: its swap ends the pacer's in-flight present, after which the dt is unknown
-	if ( tr.warpMeshVao ) {
+	if ( R_WarpMeshAvailable() ) {
+		float moveDt = ri.WarpMoveDt ? ri.WarpMoveDt() : -1.0f;
+
+		if ( moveDt >= 0.0f ) {
+			tr.warp.dtRing[meshDtSamples++ % WARP_MESH_RING] = moveDt;
+		} else {
+			meshDtUnknown++;
+		}
+		if ( moveDt >= 0.0f && r_frameWarpMeshDt->value > 0.0f ) {
+			moveDt = r_frameWarpMeshDt->value * 0.001f;
+		}
+		R_WarpPresentMove( moveDt, moveWorld );
+		useMesh = qtrue;
+	} else if ( tr.warpMeshVao ) {
+		// mesh level 0 resources exist without the shader path: still keep the pacer's dt bookkeeping
 		float moveDt = ri.WarpMoveDt ? ri.WarpMoveDt() : -1.0f;
 
 		if ( moveDt >= 0.0f ) {
@@ -678,7 +843,8 @@ qboolean RE_WarpPresent( float pitch, float yaw ) {
 		}
 	}
 
-	ok = RB_WarpApplyTo( tr.warpOutFbo, pitch - tr.warp.refAngles[0], AngleNormalize180( yaw - tr.warp.refAngles[1] ) );
+	ok = RB_WarpApplyTo( tr.warpOutFbo, pitch - tr.warp.refAngles[0], AngleNormalize180( yaw - tr.warp.refAngles[1] ),
+						 useMesh ? moveWorld : NULL );
 
 	if ( ok ) {
 		tr.renderFbo = tr.warpOutFbo;
@@ -805,6 +971,7 @@ void R_WarpStats_f( void ) {
 			   tr.warpGridW, tr.warpGridH, tr.warpGridStep, tr.warp.velResets );
 	R_WarpPrintRing( "speed", "units/s", tr.warp.speedRing, meshSpeedSamples, 1.0f );
 	R_WarpPrintRing( "dt", "ms", tr.warp.dtRing, meshDtSamples, 1000.0f );
+	R_WarpPrintRing( "move", "units", tr.warp.moveRing, meshMoveSamples, 1.0f );
 	if ( meshDtUnknown ) {
 		ri.Printf( PRINT_ALL, "warp mesh: dt unknown for %d presents\n", meshDtUnknown );
 	}

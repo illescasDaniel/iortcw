@@ -1442,8 +1442,8 @@ const void *RB_StretchPicGradient( const void *data ) {
 RB_WarpCheckpoint
 
 Compositor (r_frameWarp 2): a point where the real frame may be interrupted by a warp present. The common side
-decides (ri.WarpCheckpoint); r_frameWarpApTest forces a zero-delta present instead, to prove the real frame is
-unaffected. RE_WarpPresent puts all GL and backend state back. Never reached from the replayed 2D tail
+decides (ri.WarpCheckpoint); r_frameWarpApTest forces a zero-angle present instead (1: no translation, 2: the synthetic
+r_warpDebugMove translation of the mesh warp), to prove the real frame is unaffected. RE_WarpPresent puts all GL and backend state back. Never reached from the replayed 2D tail
 (presenting). Callers guarantee a half-done framebuffer/MSAA resolve is not pending and the SMAA velocity
 draw-buffer state is not active.
 =============
