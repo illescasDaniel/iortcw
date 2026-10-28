@@ -8,6 +8,8 @@
 +		rect 6 10 84 12
 @@ 62 63
 +		textalignx 42
+@@ 441 442
++		rect 181 300 100 20
 @@ 466 467
 +		rect 264 10 84 12
 @@ 468 469
@@ -115,17 +117,6 @@
 =ui/controls.menu 518 522
 =ui/ingame_system.menu 130 135
 =ui/ingame_system.menu 489 492
-+		name display
-=ui/ingame_system.menu 94 96
-+		text "Warp Parallax:"
-+		cvar "r_frameWarpMesh"
-+		cvarTest "r_frameWarp"
-+		disableCvar { "0" "1" }
-+		cvarFloatList { "Off" 0 "Low" 1 "Medium" 2 "High" 3 }
-+		rect 82 200 290 12
-=ui/options.menu 97 104
-=ui/credit.menu 414 417
-=ui/ingame_system.menu 53 54
 +		name effects
 =ui/ingame_system.menu 94 96
 +		text "Anti-Aliasing:"
@@ -226,6 +217,17 @@
 +		cvar "r_parallaxMapping"
 +		cvarFloatList { "Off" 0 "On" 2 "On + Self-Shadows" 3 }
 +		rect 82 260 290 12
+=ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/ingame_system.menu 53 54
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Warp Parallax:"
++		cvar "r_frameWarpMesh"
++		cvarTest "r_frameWarp"
++		disableCvar { "0" "1" }
++		cvarFloatList { "Off" 0 "Low" 1 "Medium" 2 "High" 3 }
++		rect 82 280 290 12
 =ui/options.menu 97 104
 =ui/credit.menu 414 417
 =ui/ingame_system.menu 53 54
