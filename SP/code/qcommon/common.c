@@ -121,6 +121,9 @@ static cvar_t	*com_frameWarpHz;   // r_frameWarpHz: refresh rate override (0 = m
 static cvar_t	*com_frameWarpAp;   // r_frameWarpAp: compositor (r_frameWarp 2) 0 kill switch back to late-latch, 1 on, 2 also windowed (dev/headless)
 static cvar_t	*com_frameWarpK;    // r_frameWarpK: compositor real-frame divisor, 0 = auto
 static cvar_t	*com_frameWarpDeny;         // r_frameWarpDeny: 1 = AP denies itself when slower than late-latch (0 only for measurements)
+static cvar_t	*com_frameWarpDenyGain;     // r_frameWarpDenyGain: AP must deliver this multiple of the late-latch estimate's distinct presents/s (internal)
+static cvar_t	*com_frameWarpDenyMinGap;   // r_frameWarpDenyMinGap: a present counts as distinct after this fraction of a slot (internal)
+static cvar_t	*com_frameWarpSeed;         // r_frameWarpSeed: 1 = AP starts at a rate seeded from the late-latch measurements, 0 = at S_max (internal)
 static cvar_t	*com_frameWarpEarly;        // r_frameWarpEarly: fraction of a slot a warp may be placed early (dev)
 static cvar_t	*com_frameWarpMarkUs;       // r_frameWarpMarkUs: min CPU spacing of AP marks at plain command boundaries, us (dev)
 static cvar_t	*com_frameWarpLate;         // r_frameWarpLate: how far behind its deadline (fraction of a slot) a warp may complete before the real present serves the slot (dev)
@@ -2551,6 +2554,9 @@ void Com_Init( char *commandLine ) {
 	com_frameWarpLate = Cvar_Get( "r_frameWarpLate", "1", 0 );
 	com_frameWarpMarkUs = Cvar_Get( "r_frameWarpMarkUs", "0", 0 );
 	com_frameWarpDeny = Cvar_Get( "r_frameWarpDeny", "1", 0 );
+	com_frameWarpDenyGain = Cvar_Get( "r_frameWarpDenyGain", "1.10", 0 );
+	com_frameWarpDenyMinGap = Cvar_Get( "r_frameWarpDenyMinGap", "0.5", 0 );
+	com_frameWarpSeed = Cvar_Get( "r_frameWarpSeed", "1", 0 );
 	Cmd_AddCommand( "apstats", Com_ApStats_f );
 	Cmd_AddCommand( "warpstats", Com_WarpStats_f );
 	Cmd_AddCommand( "pacestats", Com_PaceStats_f );
@@ -2916,6 +2922,7 @@ typedef struct {
 	int       recIdx;           // index of this frame's record in paceRecs (-1 none)
 	int       leadUs;           // lead used by the top-of-frame wait (fence mode)
 	int       markedFrame;      // com_frameNumber + 1 the GPU mark was taken for
+	long long latchWaitUs;      // this frame: time spent waiting inside Com_WarpLatch (not CPU work)
 } pacer_t;
 
 static pacer_t pacer;
@@ -2977,6 +2984,9 @@ typedef struct {
 	qboolean  apRun;            // AP was running when the frame started (else it is a late-latch / plain frame: baseline sample)
 	long long firstCmdUs;       // AP: CPU time of the frame's first backend command (checkpoint), 0 = none seen
 	double    apS;              // AP: slot rate the frame was scheduled with
+	long long swapUs;           // AP: when the real present's swap returned (com_lastPresentUs), 0 = not yet
+	qboolean  denyFree;         // CL_WarpDeny() was NULL when the frame started (late-latch baseline samples only count then)
+	int       cpuUs;            // late-latch / plain frame: CPU time from the frame start to the end of command submission, waits excluded, 0 = n/a
 } paceRec_t;
 
 static const paceGpu_t *paceOps;
@@ -3010,6 +3020,11 @@ real frame start (Com_ApCalibrate).
 #define AP_BASE_MIN    90       // baseline samples needed before AP may start (else it measures late-latch first)
 #define AP_BASE_WAIT   2500000  // longest that measurement waits, us
 #define AP_WIN_US      3000000  // deny evaluation window
+#define AP_WINT_N      2048     // present timestamps kept per deny window
+#define AP_CPU_N       128      // late-latch CPU frame times kept
+#define AP_BASE_FRESH  60000000 // the late-latch measurements are used for the deny while younger than this, us
+#define AP_TRIAL_US    2000000  // late-latch trial length
+#define AP_TRIAL_SETTLE_US 500000   // ... of which the first part is not measured
 #define AP_DENY_MIN_US 30000000
 #define AP_DENY_MAX_US 300000000
 
@@ -3055,13 +3070,28 @@ static struct {
 	// late-latch / plain baseline: GPU completion interval EMA of frames AP did not control
 	double    baseIvEma;
 	int       baseN;
-	long long baseLastG, baseWaitUs;
-	// "never slower than late-latch" deny: evaluated over 3 s windows of clean running
-	long long winStartUs, denyUntilUs, denyDurUs, lastDenyEndUs;
-	int       winReal, winDone, winBusyN;
-	double    winExp, winBusySum;
+	long long baseLastG, baseWaitAccum, baseWaitLast, baseUpdUs;
+	double    llBusyEma;        // late-latch GPU busy time per real frame (same definition as busyEma)
+	int       llBusyN;
+	int       cpuRing[AP_CPU_N], cpuPos;    // late-latch CPU frame times, us
+	char      mapName[MAX_QPATH];           // the map the baseline and the held rate belong to
+	// start-up: the last slot rate that held for 5 s on this map
+	double    heldS, heldCand;
+	long long heldCandSince;
+	// "never slower than late-latch" deny: evaluated over 3 s windows of clean running (the clock pauses on non-clean frames)
+	long long winLastUs, winElapsedUs, denyUntilUs, denyDurUs, lastDenyEndUs;
+	qboolean  winDirty;
+	double    winSlot;          // slot rate the window started at
+	int       winBusyN, winTN;
+	double    winBusySum;
+	long long winT[AP_WINT_N];  // present times of the window (unsorted: two harvest paths feed it)
+	// empirical A/B: a short late-latch trial when the estimate says AP might be slower
+	long long trialStartUs, trialEndUs, nextTrialUs, trialKeepUs;
+	double    trialApRate;
+	long long trialT[AP_WINT_N];
+	int       trialN;
 	const char *denyWhy;
-	int       denies[3];        // by reason: slower fps, slots served, GPU cannot hold S_min
+	int       denies[2];        // by reason: slower than late-latch, GPU cannot hold S_min
 	apMark_t  marks[AP_MARKS];
 	int       mHead, mTail;     // pending marks, monotonic
 	int       tagSeq;
@@ -3101,7 +3131,8 @@ static struct {
 	int       warps, fails, realFrames, marks, sleeps, cpWarps;
 	long long cpUs, sleepUs, midSleepUs, firstFrameUs, lastFrameUs;
 	int    decl[6];                     // declined checkpoints: mark spacing, end bound, not ready, too soon, reserved slot, taken
-	double expected;                    // slots the scheduler owed while running (integral of S dt)
+	double holdSum;                     // real present hold (Com_PresentWait), us
+	int holdN;
 } aps;
 
 static void Com_ApStatsReset( void ) {
@@ -3115,12 +3146,24 @@ static void Com_ApCalibrate( long long cpuUs, long long gpuNs ) {
 	ap.calValid = qtrue;
 }
 
-static void Com_ApPushDoneNs( long long gpuNs ) {
+// a present's time (CPU clock) for the interval statistics and the deny window; real = a real frame's present
+static void Com_ApNoteDone( long long t, qboolean real ) {
+	aps.done[aps.doneN++ % AP_DONE_N] = ( t << 1 ) | ( real ? 1 : 0 );
+	if ( !ap.winDirty && ap.winTN < AP_WINT_N ) {
+		ap.winT[ap.winTN++] = t;
+	}
+}
+
+/*
+A real frame's present: the later of its GPU completion and its swap return. The fence is queued before the present
+hold, so GPU done alone is when the frame finished rendering, not when it was shown. swapUs 0 = the swap has not been
+stamped. Only the interval records use it: the busy time and the rate controller stay on GPU completion.
+*/
+static void Com_ApPushDoneNs( long long gpuNs, long long swapUs ) {
 	if ( ap.calValid ) {
 		double g = (double)gpuNs / 1000.0 + ap.calOff;
 
-		aps.done[aps.doneN++ % AP_DONE_N] = ( (long long)g << 1 ) | 1;
-		ap.winDone++;
+		Com_ApNoteDone( swapUs > (long long)g ? swapUs : (long long)g, qtrue );
 		// the real present's actual completion: the swap returns before the GPU is done, so the prediction made at
 		// that moment can be early, which lets the next warp land too close behind it
 		if ( ap.nResolved && (long long)( g - ap.biasUs ) > ap.lastDoneUs ) {
@@ -3263,20 +3306,35 @@ static void Com_PaceHarvest( void ) {
 					pacer.ring[pacer.ringPos++ % PACE_RING] = cost;
 				}
 			}
-			if ( r->apRun ) {
-				ap.baseLastG = 0;
+			if ( r->apRun || !r->denyFree ) {
+				ap.baseLastG = 0;       // AP frames, and frames the client denied (menu, load, cutscene...), never feed the baseline
 			} else {
 				// late-latch / plain frame: the baseline AP has to beat (long gaps are menus, loads, pauses)
 				if ( ap.baseLastG && gUs > ap.baseLastG && gUs - ap.baseLastG < 100000 ) {
 					double iv = (double)( gUs - ap.baseLastG );
+					long long start = r->firstCmdUs ? r->firstCmdUs : r->startUs;
+					double busy;
 
 					ap.baseIvEma = ap.baseN ? ap.baseIvEma + ( iv - ap.baseIvEma ) / 64.0 : iv;
 					ap.baseN++;
+					ap.baseUpdUs = Sys_Microseconds();
+					// GPU busy time as in Com_ApNoteReal, without the mark bias (no marks are queued while AP is off)
+					if ( ap.baseLastG > start ) {
+						start = ap.baseLastG;
+					}
+					busy = (double)( gUs - start );
+					if ( busy > 0 && busy < 100000.0 ) {
+						ap.llBusyEma = ap.llBusyN ? ap.llBusyEma + ( busy - ap.llBusyEma ) / 32.0 : busy;
+						ap.llBusyN++;
+					}
+					if ( r->cpuUs > 0 && r->cpuUs < 100000 ) {
+						ap.cpuRing[ap.cpuPos++ % AP_CPU_N] = r->cpuUs;
+					}
 				}
 				ap.baseLastG = gUs;
 			}
 			if ( ap.running && r->active ) {
-				Com_ApPushDoneNs( gpuNs );
+				Com_ApPushDoneNs( gpuNs, r->swapUs );
 				Com_ApNoteReal( r, gUs );
 			}
 			if ( ps.lastG && gUs > ps.lastG ) {
@@ -3317,11 +3375,12 @@ static void Com_PaceRecBegin( long long startUs, long long startGpuNs, qboolean 
 	r->periodUs = pacer.periodUs;
 	r->active = active;
 	r->apRun = ap.running;
+	r->denyFree = CL_WarpDeny() == NULL;
 	if ( ap.running ) {
 		r->apS = ap.slotRate;
 		r->apClean = active && ap.warm == 0 && pacer.lateWhy != 2 && ap.slotRate == ap.sTarget;
 		if ( !r->apClean ) {
-			ap.winStartUs = 0;      // a transition frame restarts the deny window (Com_ApUpdate)
+			ap.winDirty = qtrue;    // a transition frame pauses the deny window's clock (Com_ApDenyCheck)
 		}
 		if ( ap.warm > 0 ) {
 			ap.warm--;
@@ -3435,6 +3494,9 @@ static void Com_PaceStats_f( void ) {
 	Com_PaceStatsPrint();
 }
 
+static void Com_ApTrialAbort( long long now, int backoffS );
+static qboolean Com_ApTrialFinish( long long now );
+
 /*
 =================
 Compositor warp scheduler (r_frameWarp 2, "AP")
@@ -3458,6 +3520,9 @@ is held (at most half a slot) behind a warp that landed late.
 static const char *Com_ApWhyNot( void ) {
 	double refresh = com_displayRefresh->value, hz = com_frameWarpHz->value;
 	const char *deny;
+	long long baseWaitLast = ap.baseWaitLast;
+
+	ap.baseWaitLast = 0;        // set again below when this call gets as far as the baseline wait
 
 	if ( !com_frameWarpAp->integer ) {
 		return "r_frameWarpAp 0 (late-latch only)";
@@ -3485,6 +3550,9 @@ static const char *Com_ApWhyNot( void ) {
 	}
 	deny = CL_WarpDeny();
 	if ( deny ) {
+		if ( ap.trialEndUs ) {
+			Com_ApTrialAbort( Sys_Microseconds(), 10 );     // the client stopped allowing the warp: no verdict
+		}
 		return deny;
 	}
 	if ( hz <= 1 && refresh <= 1 ) {
@@ -3504,14 +3572,28 @@ static const char *Com_ApWhyNot( void ) {
 		ap.denyUntilUs = 0;
 		ap.lastDenyEndUs = Sys_Microseconds();
 	}
-	if ( ap.baseN < AP_BASE_MIN ) {
-		// no late-latch baseline yet: run as late-latch for a moment to measure what AP has to beat
+	if ( ap.trialEndUs ) {
 		long long now = Sys_Microseconds();
 
-		if ( !ap.baseWaitUs ) {
-			ap.baseWaitUs = now;
+		if ( now < ap.trialEndUs ) {
+			return "late-latch trial (measuring)";
 		}
-		if ( now - ap.baseWaitUs < AP_BASE_WAIT ) {
+		if ( now > ap.trialEndUs + 1000000 ) {
+			Com_ApTrialAbort( now, 10 );
+		} else if ( Com_ApTrialFinish( now ) ) {
+			return ap.denyWhy;
+		}
+	}
+	if ( ap.baseN < AP_BASE_MIN ) {
+		// no late-latch baseline yet: run as late-latch for a moment to measure what AP has to beat. Only time in which
+		// the client allows the warp counts (a denied stretch gives no samples); the clock is kept in baseWaitAccum
+		long long now = Sys_Microseconds();
+
+		if ( baseWaitLast && now - baseWaitLast < 100000 ) {
+			ap.baseWaitAccum += now - baseWaitLast;
+		}
+		ap.baseWaitLast = now;
+		if ( ap.baseWaitAccum < AP_BASE_WAIT ) {
 			return "measuring the late-latch baseline";
 		}
 	}
@@ -3547,79 +3629,271 @@ static void Com_ApPrintRate( long long now, const char *why ) {
 }
 
 /*
-"Never slower than late-latch": over a 3 s window of clean running AP must deliver real frames at 0.9 x the slower of
-the late-latch baseline fps (what the same GPU did without AP) and the rate it was scheduled at (S / k), and must serve
-85% of its slots; otherwise AP is denied for 30 s (doubling on repeats up to 5 min) and the engine runs late-latch,
-which keeps the baseline measurable. qtrue = denied now.
+"Never slower than late-latch": over a 3 s window of clean running (the window's clock pauses on non-clean frames,
+and so does the collection of presents) AP must deliver at least r_frameWarpDenyGain (1.10) x what late-latch would
+(Com_ApLLEstimate) in distinct presents per second, else it is denied for 30 s (doubling on repeats up to 5 min) and
+the engine runs late-latch, which keeps the baseline measurable. A present counts as distinct only when it is at
+least r_frameWarpDenyMinGap x a slot after the last counted one, so presents that are back to back (a warp right
+behind a held real frame) do not inflate the rate. The deny also needs P98 of the counted intervals <= 1.6 k T1:
+a window with larger gaps is a hitch (load, stall), not a verdict on the mode. The guard is measured against the real
+period k T1, not one slot: a healthy k = 2 run has real frames without a warp in front of them, so its P98 is about
+2 T1 and a 1.6 T1 limit would never let the deny fire. qtrue = denied now.
 */
 static float Com_EffectiveFps( void );
 static int Com_ApWarpCost( void );
 
-static qboolean Com_ApDenyCheck( long long now ) {
-	static const char *whyFps = "AP slower than late-latch (real fps)", *whySrv = "AP slower than late-latch (slots served)";
-	double dur, fps, expS, served, lim, bfps = 0;
-	const char *why = NULL;
+// recent late-latch CPU frame times, P90, us (0 = unknown)
+static int Com_ApCpuP90( void ) {
+	int tmp[AP_CPU_N], n = ap.cpuPos < AP_CPU_N ? ap.cpuPos : AP_CPU_N;
 
-	if ( !com_frameWarpDeny->integer ) {
-		return qfalse;
+	if ( n < 30 ) {
+		return 0;
 	}
-	if ( !ap.winStartUs ) {
-		ap.winStartUs = now;
-		ap.winReal = ap.winDone = ap.winBusyN = 0;
-		ap.winExp = ap.winBusySum = 0;
-		return qfalse;
-	}
-	if ( now - ap.winStartUs < AP_WIN_US ) {
-		return qfalse;
-	}
-	dur = (double)( now - ap.winStartUs ) * 1e-6;
-	fps = ap.winReal / dur;
-	expS = ap.winExp / dur;
-	served = ap.winExp > 1 ? 100.0 * ap.winDone / ap.winExp : 100.0;
-	lim = expS / ap.k;
-	// what late-latch gets: the measured baseline, or (the baseline can be stale or from a different scene) what
-	// the GPU could do with the warps taken out of the busy time, whichever is higher, and never above the user's cap
-	if ( ap.baseN >= AP_BASE_MIN && ap.baseIvEma > 0 ) {
-		bfps = 1000000.0 / ap.baseIvEma;
-	}
-	if ( ap.winBusyN >= 30 ) {
-		double plain = ap.winBusySum / ap.winBusyN - ( ap.k - 1 ) * (double)Com_ApWarpCost(), cap = Com_EffectiveFps();
+	Com_Memcpy( tmp, ap.cpuRing, sizeof( tmp ) );
+	qsort( tmp, n, sizeof( int ), Com_PaceCmpInt );
+	return tmp[(int)( ( n - 1 ) * 0.90 + 0.5 )];
+}
 
-		if ( plain > 1000.0 ) {
-			plain = 1000000.0 / plain;
-			if ( cap > 0 && plain > cap ) {
-				plain = cap;
+static double Com_ApMinPos( double est, double v ) {
+	return v > 0 && ( est <= 0 || v < est ) ? v : est;
+}
+
+/*
+What late-latch would deliver on this scene, fps: the lowest of the user's cap, the refresh rate (the override stands
+in for the display), 1 / plain GPU busy time, 1 / CPU frame time P90 and, while it is fresh, the measured late-latch
+interval. The busy time and CPU time come from the late-latch frames themselves while those are fresh, else from
+AP's own window (busy minus the extra warps). 0 = unknown.
+*/
+static struct { double cap, refresh, busy, cpu, base; int src; } apLLIn;   // inputs of the last estimate (for the deny message)
+
+static double Com_ApLLEstimate( long long now ) {
+	double est = 0, refresh = com_frameWarpHz->value > 1 ? (double)com_frameWarpHz->value : (double)com_displayRefresh->value;
+	double busy = 0, cap = Com_EffectiveFps(), measured = 0;
+	qboolean fresh = ap.baseN >= AP_BASE_MIN && ap.baseUpdUs && now - ap.baseUpdUs < AP_BASE_FRESH;
+	int cpu = 0;
+
+	apLLIn.src = 0;
+	// busy time per real frame, best source first: fresh late-latch frames, AP's own frames minus the extra warps,
+	// older late-latch frames of this map
+	if ( fresh && ap.llBusyN >= 30 ) {
+		busy = ap.llBusyEma;
+		apLLIn.src = 1;
+	} else if ( ap.busyN >= 24 ) {
+		busy = ap.busyEma - ( ap.k - 1 ) * (double)Com_ApWarpCost();
+		apLLIn.src = 2;
+	} else if ( ap.winBusyN >= 30 ) {
+		busy = ap.winBusySum / ap.winBusyN - ( ap.k - 1 ) * (double)Com_ApWarpCost();
+		apLLIn.src = 2;
+	} else if ( ap.llBusyN >= 30 ) {
+		busy = ap.llBusyEma;
+		apLLIn.src = 3;
+	}
+	if ( fresh || ap.llBusyN >= 30 ) {
+		cpu = Com_ApCpuP90();
+	}
+	apLLIn.cap = cap;
+	apLLIn.refresh = refresh;
+	apLLIn.busy = busy;
+	apLLIn.cpu = cpu;
+	apLLIn.base = fresh ? ap.baseIvEma : 0;
+	// a measured term is required: the cap and the refresh rate alone say nothing about what the GPU does
+	if ( busy > 1000.0 ) {
+		measured = Com_ApMinPos( measured, 1000000.0 / busy );
+	}
+	if ( cpu > 1000 ) {
+		measured = Com_ApMinPos( measured, 1000000.0 / cpu );
+	}
+	if ( fresh && ap.baseIvEma > 0 ) {
+		measured = Com_ApMinPos( measured, 1000000.0 / ap.baseIvEma );
+	}
+	if ( measured <= 0 ) {
+		return 0;
+	}
+	est = Com_ApMinPos( measured, cap );
+	est = Com_ApMinPos( est, refresh > 1 ? refresh : 0 );
+	return est;
+}
+
+static int Com_ApCmpLL( const void *a, const void *b );
+
+/*
+Sorted present times -> the distinct ones: counted presents, with the intervals between consecutive counted ones in iv.
+shift 1 for aps.done (bit 0 = real). Returns the count of counted presents.
+*/
+static int Com_ApDistinct( const long long *t, int n, int shift, double minGapUs, int *iv ) {
+	long long last = 0;
+	int i, c = 0;
+
+	for ( i = 0; i < n; i++ ) {
+		long long v = t[i] >> shift;
+
+		if ( c == 0 || (double)( v - last ) >= minGapUs ) {
+			if ( c ) {
+				iv[c - 1] = (int)( v - last );
 			}
-			if ( plain > bfps ) {
-				bfps = plain;
-			}
+			c++;
+			last = v;
 		}
 	}
-	if ( bfps > 0 && bfps < lim ) {
-		lim = bfps;
-	}
-	if ( fps < 0.9 * lim ) {
-		why = whyFps;
-		ap.denies[0]++;
-	} else if ( served < 85.0 ) {
-		why = whySrv;
-		ap.denies[1]++;
-	}
-	ap.winStartUs = now;
-	ap.winReal = ap.winDone = ap.winBusyN = 0;
-	ap.winExp = ap.winBusySum = 0;
-	if ( !why ) {
+	return c;
+}
+
+static void Com_ApWindowReset( void ) {
+	ap.winElapsedUs = 0;
+	ap.winTN = 0;
+	ap.winBusyN = 0;
+	ap.winBusySum = 0;
+	ap.winLastUs = 0;
+	ap.winDirty = qfalse;
+}
+
+static qboolean Com_ApDenyCheck( long long now ) {
+	static long long tmpT[AP_WINT_N];
+	static int tmpIv[AP_WINT_N];
+	double dur, delivered, ll, gain, p98 = 0;
+	long long dt;
+	int n, c;
+
+	if ( !com_frameWarpDeny->integer ) {
+		Com_ApWindowReset();
 		return qfalse;
 	}
+	dt = ap.winLastUs ? now - ap.winLastUs : 0;
+	ap.winLastUs = now;
+	if ( ap.winDirty || dt > 100000 ) {
+		ap.winDirty = qfalse;       // a non-clean frame or a stall: the clock pauses
+		return qfalse;
+	}
+	if ( fabs( ap.slotRate - ap.winSlot ) > 0.01 ) {
+		Com_ApWindowReset();        // a window spanning a slot-rate change mixes two T1: start over
+		ap.winSlot = ap.slotRate;
+		ap.winLastUs = now;
+		return qfalse;
+	}
+	ap.winElapsedUs += dt;
+	if ( ap.winElapsedUs < AP_WIN_US ) {
+		return qfalse;
+	}
+	dur = (double)ap.winElapsedUs * 1e-6;
+	n = ap.winTN;
+	Com_Memcpy( tmpT, ap.winT, n * sizeof( long long ) );
+	qsort( tmpT, n, sizeof( long long ), Com_ApCmpLL );
+	c = Com_ApDistinct( tmpT, n, 0, com_frameWarpDenyMinGap->value * ap.T1, tmpIv );
+	delivered = c / dur;
+	ll = Com_ApLLEstimate( now );
+	gain = com_frameWarpDenyGain->value;
+	if ( c > 31 ) {
+		qsort( tmpIv, c - 1, sizeof( int ), Com_PaceCmpInt );
+		p98 = tmpIv[(int)( ( c - 2 ) * 0.98 + 0.5 )];
+	}
+	Com_ApWindowReset();
+	ap.winLastUs = now;
+	if ( c <= 100 || ll <= 0 || gain <= 0 || delivered >= gain * ll || p98 > 1.6 * ap.k * ap.T1 ) {
+		return qfalse;
+	}
+	// the estimate (advisory: formulas misjudge the real late-latch rate) says AP might be slower: measure it instead
+	if ( now < ap.nextTrialUs || CL_WarpDeny() ) {
+		return qfalse;
+	}
+	ap.trialStartUs = now;
+	ap.trialEndUs = now + AP_TRIAL_US;
+	ap.trialApRate = delivered;
+	ap.trialN = 0;
+	Com_Printf( "frame warp AP: AP %.0f/s vs estimate %.0f/s: late-latch trial for %d s\n", delivered, ll, AP_TRIAL_US / 1000000 );
+	return qtrue;       // the next frames run late-latch
+}
+
+static void Com_ApTrialAbort( long long now, int backoffS ) {
+	ap.trialEndUs = 0;
+	ap.nextTrialUs = now + (long long)backoffS * 1000000;
+}
+
+// the trial ran its time: late-latch's measured distinct presents/s against AP's from the window before it. qtrue = deny
+static qboolean Com_ApTrialFinish( long long now ) {
+	static long long tmpT[AP_WINT_N];
+	static int tmpIv[AP_WINT_N];
+	double dur = (double)( ap.trialEndUs - ap.trialStartUs - AP_TRIAL_SETTLE_US ) * 1e-6, ll, gain = com_frameWarpDenyGain->value;
+	long long from = ap.trialStartUs + AP_TRIAL_SETTLE_US;
+	int i, n = 0, c;
+
+	ap.trialEndUs = 0;
+	for ( i = 0; i < ap.trialN; i++ ) {
+		if ( ap.trialT[i] >= from ) {
+			tmpT[n++] = ap.trialT[i];
+		}
+	}
+	qsort( tmpT, n, sizeof( long long ), Com_ApCmpLL );
+	c = Com_ApDistinct( tmpT, n, 0, com_frameWarpDenyMinGap->value * ap.T1, tmpIv );
+	if ( c < 30 || gain <= 0 ) {
+		ap.nextTrialUs = now + 10000000;
+		Com_Printf( "frame warp AP: late-latch trial inconclusive (%d presents), AP kept\n", c );
+		return qfalse;
+	}
+	ll = c / dur;
+	if ( ll * gain < ap.trialApRate ) {
+		ap.trialKeepUs = ap.trialKeepUs ? ap.trialKeepUs * 2 : 60000000;
+		if ( ap.trialKeepUs > 960000000 ) {
+			ap.trialKeepUs = 960000000;
+		}
+		ap.nextTrialUs = now + ap.trialKeepUs;
+		Com_Printf( "frame warp AP: measured late-latch %.0f/s vs AP %.0f/s (needs AP >= %.2f x): AP kept, next trial in %d s\n",
+					ll, ap.trialApRate, gain, (int)( ap.trialKeepUs / 1000000 ) );
+		return qfalse;
+	}
+	ap.trialKeepUs = 0;
+	ap.denies[0]++;
 	ap.denyDurUs = ap.lastDenyEndUs && now - ap.lastDenyEndUs < 120000000 && ap.denyDurUs ? ap.denyDurUs * 2 : AP_DENY_MIN_US;
 	if ( ap.denyDurUs > AP_DENY_MAX_US ) {
 		ap.denyDurUs = AP_DENY_MAX_US;
 	}
 	ap.denyUntilUs = now + ap.denyDurUs;
-	ap.denyWhy = why;
-	Com_Printf( "frame warp AP: real %.1f fps (late-latch %.1f, scheduled %.1f), %.0f%% of slots served: AP off for %d s\n",
-				fps, bfps, expS / ap.k, served, (int)( ap.denyDurUs / 1000000 ) );
+	ap.denyWhy = "AP slower than late-latch (measured trial)";
+	Com_Printf( "frame warp AP: measured late-latch %.0f/s vs AP %.0f/s (needs AP >= %.2f x): AP off for %d s\n",
+				ll, ap.trialApRate, gain, (int)( ap.denyDurUs / 1000000 ) );
+	Com_Printf( "frame warp AP: late-latch estimate inputs: cap %.0f, refresh %.0f, busy %.0f us (src %d), cpu P90 %d us, baseline %.0f us, %d samples\n",
+				apLLIn.cap, apLLIn.refresh, apLLIn.busy, apLLIn.src, (int)apLLIn.cpu, apLLIn.base, ap.baseN );
 	return qtrue;
+}
+
+/*
+Start rate S0: the real period k / S must leave the GPU busy for AP_BUSY_AIM of it, with the late-latch busy time
+plus the (k - 1) extra warps, and the CPU frame time P90 must fit as well, clamped to [S_min, S_max].
+r_frameWarpSeed 0, or no late-latch busy samples yet: S_max.
+*/
+static double Com_ApSeedRate( void ) {
+	double d, c, s0;
+
+	if ( !com_frameWarpSeed->integer || ap.llBusyN < 30 ) {
+		return ap.sMax;
+	}
+	d = ap.llBusyEma + ( ap.k - 1 ) * (double)Com_ApWarpCost();
+	c = (double)Com_ApCpuP90() * ap.k / 2.0;
+	if ( c > d ) {
+		d = c;
+	}
+	if ( d < 1000.0 ) {
+		return ap.sMax;
+	}
+	s0 = ap.k * AP_BUSY_AIM * 1000000.0 / d;
+	return s0 < ap.sMin ? ap.sMin : s0 > ap.sMax ? ap.sMax : s0;
+}
+
+// a different map: the late-latch measurements and the held rate no longer apply
+static void Com_ApMapCheck( void ) {
+	const char *map = Cvar_VariableString( "mapname" );
+
+	if ( !Q_stricmp( map, ap.mapName ) ) {
+		return;
+	}
+	Q_strncpyz( ap.mapName, map, sizeof( ap.mapName ) );
+	ap.baseN = 0;
+	ap.baseIvEma = 0;
+	ap.baseLastG = 0;
+	ap.baseWaitAccum = ap.baseWaitLast = 0;
+	ap.baseUpdUs = 0;
+	ap.llBusyN = 0;
+	ap.cpuPos = 0;
+	ap.heldS = ap.heldCand = 0;
 }
 
 // once per Com_Frame, at the top of the paced wait: decides whether AP runs this frame and what the real cap is
@@ -3630,6 +3904,7 @@ static void Com_ApUpdate( void ) {
 	int forced;
 
 	ap.running = qfalse;
+	Com_ApMapCheck();
 	if ( r_frameWarp->integer != 2 ) {
 		ap.deny = NULL;
 		ap.reported = NULL;
@@ -3668,21 +3943,36 @@ static void Com_ApUpdate( void ) {
 
 	if ( !ap.wasRunning ) {
 		// first start, or back from a denied period (menu, loading, camera, pause...): the frames around it never count
-		ap.warm = 60;
+		ap.warm = 30;
 		ap.missRun = ap.okRun = ap.ivN = ap.busyN = 0;
-		ap.winStartUs = 0;
+		Com_ApWindowReset();
 		ap.prevRealG = 0;
 		ap.probing = qfalse;
 		if ( ap.slotRate < 1 || now - ap.lastRunUs > 3000000 ) {
-			// after a long gap the scene is a different one: decide again (a GPU hold restarts mid range)
-			ap.slotRate = ap.sTarget = ap.printedS = ap.afterHold ? ap.sMin + 0.5 * ( ap.sMax - ap.sMin ) : ap.sMax;
+			// after a long gap the scene is a different one: decide again (a GPU hold restarts mid range). The seed
+			// starts gently (S_max when r_frameWarpSeed is 0); on the same map the last rate that held for 5 s is
+			// tried first, never above the seed
+			double s0 = Com_ApSeedRate();
+
+			if ( ap.afterHold && ap.sMin + 0.5 * ( ap.sMax - ap.sMin ) < s0 ) {
+				s0 = ap.sMin + 0.5 * ( ap.sMax - ap.sMin );
+			} else if ( ap.heldS > 0 && com_frameWarpSeed->integer && ap.heldS < s0 ) {
+				s0 = ap.heldS < ap.sMin ? ap.sMin : ap.heldS;
+			}
+			ap.slotRate = ap.sTarget = ap.printedS = s0;
 			ap.afterHold = qfalse;
 			ap.probeBackoffUs = 2000000;
-			ap.probeAfterUs = now + 2000000;
+			ap.probeAfterUs = now + ( com_frameWarpSeed->integer ? 5000000 : 2000000 );     // no upward probe while it settles
+			ap.heldCand = 0;
 		}
 		ap.lastUpdateUs = 0;
 	}
 	ap.lastRunUs = now;
+	if ( !ap.calValid ) {
+		// the GPU clock mapping is taken at every real frame start; a checkpoint in this frame's top-of-frame wait comes before
+		// that, and marks resolved against an unset mapping poison lastDone for good (no warp is ever placed again)
+		Com_ApCalibrate( now, Com_PaceNowNs() );
+	}
 	if ( ap.sTarget < ap.sMin || ap.sTarget > ap.sMax ) {
 		ap.sTarget = ap.sTarget < ap.sMin ? ap.sMin : ap.sMax;
 	}
@@ -3711,7 +4001,7 @@ static void Com_ApUpdate( void ) {
 		// holds (one step, not a staircase), or hand over to late-latch when even S_min does not hold
 		if ( ap.sTarget <= ap.sMin + 0.5 ) {
 			ap.holdUntilUs = now + AP_HOLD_US;
-			ap.denies[2]++;
+			ap.denies[1]++;
 			ap.missRun = ap.okRun = ap.ivN = ap.busyN = 0;
 			ap.slotRate = ap.sTarget = ap.sMin;
 			ap.printedS = ap.sTarget;
@@ -3771,11 +4061,14 @@ static void Com_ApUpdate( void ) {
 	if ( ap.early < 0 ) {
 		ap.early = 0;
 	}
-	if ( ap.lastUpdateUs && now - ap.lastUpdateUs < 1000000 ) {
-		aps.expected += ap.slotRate * (double)( now - ap.lastUpdateUs ) * 1e-6;
-		ap.winExp += ap.slotRate * (double)( now - ap.lastUpdateUs ) * 1e-6;
-	}
 	ap.lastUpdateUs = now;
+	// the last rate that held for 5 s (the target unchanged and not on trial)
+	if ( ap.sTarget != ap.heldCand || ap.probing ) {
+		ap.heldCand = ap.probing ? 0 : ap.sTarget;
+		ap.heldCandSince = now;
+	} else if ( now - ap.heldCandSince >= 5000000 ) {
+		ap.heldS = ap.heldCand;
+	}
 	if ( Com_ApDenyCheck( now ) ) {
 		return;     // the next frame is denied
 	}
@@ -3868,8 +4161,7 @@ static void Com_ApHarvest( void ) {
 					ap.costRing[ap.costPos++ & 15] = cost;
 					Com_PaceStatPush( aps.wcost, &aps.wcostN, cost );
 					Com_PaceStatPush( aps.s2g, &aps.s2gN, (int)( (long long)g - w->sampleUs ) );
-					aps.done[aps.doneN++ % AP_DONE_N] = (long long)g << 1;
-					ap.winDone++;
+					Com_ApNoteDone( (long long)g, qfalse );
 					if ( m->warp == ap.nWarps - 1 && !ap.realSinceWarp ) {
 						ap.lastDoneUs = gc;     // the prediction was made on the same scale (never below a real present noted since)
 					}
@@ -3890,7 +4182,7 @@ static int Com_ApBacklog( long long now ) {
 	if ( ap.lastMarkUs > ap.lastSubmitUs ) {
 		e += (double)( ap.lastMarkUs - ap.lastSubmitUs );     // work submitted after the newest resolved mark: its CPU time stands for its GPU time
 	}
-	return e > 0 ? (int)e : 0;
+	return e > 0 ? ( e < 1000000.0 ? (int)e : 1000000 ) : 0;     // clamped: a bad clock mapping must not overflow the int
 }
 
 // median GPU cost of the recent warp presents, us
@@ -3916,6 +4208,18 @@ static int Com_ApEndBound( void ) {
 	qsort( tmp, n, sizeof( int ), Com_PaceCmpInt );
 	b = tmp[(int)( ( n - 1 ) * 0.98 + 0.5 )] + 500;
 	return b < 500 ? 500 : b > 10000 ? 10000 : b;
+}
+
+// P98 of (frame start -> first backend command), us; 2500 until enough samples
+static int Com_ApFeP98( void ) {
+	int tmp[AP_FE_N], n = ap.fePos < AP_FE_N ? ap.fePos : AP_FE_N;
+
+	if ( n < 16 ) {
+		return 2500;
+	}
+	Com_Memcpy( tmp, ap.feRing, sizeof( tmp ) );
+	qsort( tmp, n, sizeof( int ), Com_PaceCmpInt );
+	return tmp[(int)( ( n - 1 ) * 0.98 + 0.5 )];
 }
 
 static long long apSleptUs;
@@ -4067,9 +4371,10 @@ qboolean Com_WarpCheckpoint( int where, float *pitch, float *yaw ) {
 		Com_ApPresentEnd();
 		return qfalse;
 	}
-	if ( !ap.running || !paceOps ) {
+	if ( !paceOps ) {
 		return qfalse;
 	}
+	// the first backend command of a frame: late-latch frames measure it too (GPU busy time, front-end time)
 	if ( ap.feFrame != com_frameNumber + 1 ) {
 		ap.feFrame = com_frameNumber + 1;
 		{
@@ -4082,6 +4387,9 @@ qboolean Com_WarpCheckpoint( int where, float *pitch, float *yaw ) {
 		if ( pacer.active && pacer.frameStartUs ) {
 			ap.feRing[ap.fePos++ % AP_FE_N] = (int)( Sys_Microseconds() - pacer.frameStartUs );
 		}
+	}
+	if ( !ap.running ) {
+		return qfalse;
 	}
 	bound = where == WARP_CPX_END ? Com_ApEndBound() : com_frameWarpBacklogUs->integer;
 	if ( bound < 0 ) {
@@ -4214,10 +4522,10 @@ void Com_ApStatsPrint( void ) {
 	static long long tmp[AP_DONE_N];
 	static int iv[AP_DONE_N];
 	int n = aps.doneN < AP_DONE_N ? aps.doneN : AP_DONE_N, i, ni = 0, over = 0;
-	double served = 0, fps = 0, frames = aps.realFrames > 0 ? aps.realFrames : 1;
+	double fps = 0, frames = aps.realFrames > 0 ? aps.realFrames : 1;
 	char why[80];
-	int p2 = 0, p50 = 0, p98 = 0, kindN[4] = {0}, kindShort[4] = {0};
-	double kindSum[4] = {0};
+	int p2 = 0, p50 = 0, p98 = 0, kindN[4] = {0}, kindShort[4] = {0}, distinctP98 = 0, fe50 = 0, fe98 = 0, nfe = ap.fePos < AP_FE_N ? ap.fePos : AP_FE_N;
+	double kindSum[4] = {0}, distinctPerS = 0;
 
 	if ( r_frameWarp->integer != 2 ) {
 		return;
@@ -4238,8 +4546,26 @@ void Com_ApStatsPrint( void ) {
 				over++;
 			}
 		}
-		if ( aps.expected > 1 ) {
-			served = 100.0 * aps.doneN / aps.expected;     // presents / slots owed (S varies, so the integral of S dt)
+		{
+			// distinct presents: counted only when at least r_frameWarpDenyMinGap x a slot after the last counted one
+			static int dvIv[AP_DONE_N];
+			int c = Com_ApDistinct( tmp, n, 1, com_frameWarpDenyMinGap->value * ap.T1, dvIv );
+
+			if ( c > 1 ) {
+				long long spanUs = 0;
+
+				int used = 0;
+
+				for ( i = 0; i < c - 1; i++ ) {
+					if ( dvIv[i] < 100000 ) {      // gaps of a pause (menu, load) are not AP's rate
+						spanUs += dvIv[i];
+						used++;
+					}
+				}
+				distinctPerS = spanUs > 0 ? used * 1e6 / (double)spanUs : 0.0;
+				qsort( dvIv, c - 1, sizeof( int ), Com_PaceCmpInt );
+				distinctP98 = dvIv[(int)( ( c - 2 ) * 0.98 + 0.5 )];
+			}
 		}
 		qsort( iv, ni, sizeof( int ), Com_PaceCmpInt );
 		p2 = iv[(int)( ( ni - 1 ) * 0.02 + 0.5 )];
@@ -4273,6 +4599,14 @@ void Com_ApStatsPrint( void ) {
 		qsort( mv, mn, sizeof( int ), Com_PaceCmpInt );
 		Com_Printf( "codmod ap mesh dt: p50 %d p98 %d us (n=%d)\n", mv[( mn - 1 ) / 2], mv[(int)( ( mn - 1 ) * 0.98 + 0.5 )], mn );
 	}
+	if ( nfe > 0 ) {
+		int fe[AP_FE_N];
+
+		Com_Memcpy( fe, ap.feRing, nfe * sizeof( int ) );
+		qsort( fe, nfe, sizeof( int ), Com_PaceCmpInt );
+		fe50 = fe[( nfe - 1 ) / 2];
+		fe98 = fe[(int)( ( nfe - 1 ) * 0.98 + 0.5 )];
+	}
 	Q_strncpyz( why, ap.running || !ap.deny ? "none" : ap.deny, sizeof( why ) );
 	for ( i = 0; why[i]; i++ ) {
 		if ( why[i] == ' ' ) {
@@ -4280,16 +4614,17 @@ void Com_ApStatsPrint( void ) {
 		}
 	}
 	Com_Printf( "codmod ap: running=%d k=%d slot=%.1f cap=%.2f state=%s smin=%.0f smax=%.0f downs=%d ups=%d real_fps=%.1f frames=%d span_s=%.2f presents_total=%d warps=%d cpu_warps=%d fails=%d done=%d "
-				"served%%=%.1f wcost_p50=%d wcost_p98=%d gap_p50=%d gap_p98=%d iv_p2=%d iv_p50=%d iv_p98=%d iv_gt1p5T%%=%.1f "
+				"distinct_per_s=%.1f distinct_iv_p98=%d ll_est_fps=%.1f fe_p50=%d fe_p98=%d hold_mean=%.0f wcost_p50=%d wcost_p98=%d gap_p50=%d gap_p98=%d iv_p2=%d iv_p50=%d iv_p98=%d iv_gt1p5T%%=%.1f "
 				"s2g_p50=%d s2g_p98=%d swap_p98=%d sleeps=%d sleep_us_frame=%.0f mid_sleep_us_frame=%.0f cp_us_frame=%.0f misses=%d probes=%d reverts=%d decl=%d/%d/%d/%d/%d/%d "
-				"busy_us_per_real=%.0f busy_ema=%.0f baseline_us=%.0f baseline_n=%d denies_slower_fps=%d denies_slower_served=%d denies_gpu_hold=%d deny=%s\n",
-				ap.running, ap.k, ap.slotRate, ap.realFps, ap.probing ? "probing" : "steady", ap.sMin, ap.sMax, ap.downs, ap.ups, fps, aps.realFrames, aps.lastFrameUs > aps.firstFrameUs ? ( aps.lastFrameUs - aps.firstFrameUs ) * 1e-6 : 0.0, aps.doneN, aps.warps, aps.cpWarps, aps.fails, n, served,
+				"busy_us_per_real=%.0f busy_ema=%.0f baseline_us=%.0f baseline_n=%d denies_slower_ll=%d denies_gpu_hold=%d deny=%s\n",
+				ap.running, ap.k, ap.slotRate, ap.realFps, ap.probing ? "probing" : "steady", ap.sMin, ap.sMax, ap.downs, ap.ups, fps, aps.realFrames, aps.lastFrameUs > aps.firstFrameUs ? ( aps.lastFrameUs - aps.firstFrameUs ) * 1e-6 : 0.0, aps.doneN, aps.warps, aps.cpWarps, aps.fails, n,
+				distinctPerS, distinctP98, Com_ApLLEstimate( Sys_Microseconds() ), fe50, fe98, aps.holdN ? aps.holdSum / aps.holdN : 0.0,
 				Com_PacePct( aps.wcost, aps.wcostN, 0.5 ), Com_PacePct( aps.wcost, aps.wcostN, 0.98 ),
 				Com_PacePct( aps.gap, aps.gapN, 0.5 ), Com_PacePct( aps.gap, aps.gapN, 0.98 ),
 				p2, p50, p98, ni ? 100.0 * over / ni : 0.0,
 				Com_PacePct( aps.s2g, aps.s2gN, 0.5 ), Com_PacePct( aps.s2g, aps.s2gN, 0.98 ),
 				Com_PacePct( aps.swap, aps.swapN, 0.98 ), aps.sleeps, aps.sleepUs / frames, aps.midSleepUs / frames, aps.cpUs / frames, ap.missTotal, ap.probes, ap.reverts, aps.decl[0], aps.decl[1], aps.decl[2], aps.decl[3], aps.decl[4], aps.decl[5],
-				aps.busyCount ? aps.busySum / aps.busyCount : 0.0, ap.busyEma, ap.baseN ? ap.baseIvEma : 0.0, ap.baseN, ap.denies[0], ap.denies[1], ap.denies[2], why );
+				aps.busyCount ? aps.busySum / aps.busyCount : 0.0, ap.busyEma, ap.baseN ? ap.baseIvEma : 0.0, ap.baseN, ap.denies[0], ap.denies[1], why );
 }
 
 static void Com_ApStats_f( void ) {
@@ -4769,8 +5104,17 @@ static void Com_FrameWaitTopFence( long long arrivedUs ) {
 		} else if ( lead > ( q + 1 ) * T ) {
 			lead = (int)( ( q + 1 ) * T );
 		}
-		if ( ap.running && lead > T * 0.9 ) {
-			lead = (int)( T * 0.9 );        // a frame never starts before the previous deadline (else every frame re-anchors)
+		if ( ap.running ) {
+			// AP phase: the first mid-period warp slot W (previous deadline + T1) must fall inside the backend, not in the
+			// front-end gap or the present hold, so the frame starts at or before W - front-end P98 - warp cost
+			int need = (int)( T - ap.T1 ) + Com_ApFeP98() + Com_ApWarpCost();
+
+			if ( need > lead ) {
+				lead = need;
+			}
+			if ( lead > T * 0.9 ) {
+				lead = (int)( T * 0.9 );        // a frame never starts before the previous deadline (else every frame re-anchors)
+			}
 		}
 	}
 	pacer.leadUs = lead;
@@ -4819,7 +5163,6 @@ static void Com_FrameWaitTopFence( long long arrivedUs ) {
 		}
 		aps.lastFrameUs = now;
 		aps.realFrames++;
-		ap.winReal++;
 	}
 }
 
@@ -4836,6 +5179,7 @@ static void Com_FrameWaitTop( void ) {
 	pacer.readyRecorded = qfalse;
 	pacer.fence = qfalse;
 	pacer.recIdx = -1;
+	pacer.latchWaitUs = 0;
 
 	if ( com_minimized->integer && com_maxfpsMinimized->value > 0 ) {
 		fps = com_maxfpsMinimized->value;
@@ -4857,6 +5201,7 @@ static void Com_FrameWaitTop( void ) {
 	Com_ApUpdate();
 	if ( ap.running ) {
 		fps = (float)ap.realFps;
+		pacer.mode = 2;     // AP has its own phase (present held to the deadline, frame started a lead early), whatever com_maxfpsMode is; the cvar is not written
 	}
 
 	// low latency vsync: lock to the display unless the user capped below it
@@ -4961,6 +5306,16 @@ void Com_PresentWait( void ( *finish )( void ) ) {
 
 	if ( pacer.fence ) {
 		Com_PaceMark();     // before the early returns: also uncapped frames get a GPU timestamp
+		if ( !ap.running && pacer.frameStartUs && pacer.presentedFrame != com_frameNumber + 1 ) {
+			paceRec_t *r = Com_PaceRecCur();
+
+			// late-latch CPU frame time for AP's estimate: frame start to the end of submission, without the latch's waits
+			if ( r && !r->cpuUs ) {
+				long long cpu = Sys_Microseconds() - pacer.frameStartUs - pacer.latchWaitUs;
+
+				r->cpuUs = cpu > 0 ? (int)cpu : 0;
+			}
+		}
 	}
 	fenceMode = pacer.fence && pacer.active && !pacer.vblankLock;
 
@@ -5059,6 +5414,10 @@ void Com_PresentWait( void ( *finish )( void ) ) {
 	Sys_WaitUntil( (long long)holdTo, com_maxfpsSpinUs->integer );
 	ps.holdSum += (double)( Sys_Microseconds() - t0 );
 	ps.holdN++;
+	if ( ap.running ) {
+		aps.holdSum += (double)( Sys_Microseconds() - t0 );
+		aps.holdN++;
+	}
 }
 
 /*
@@ -5219,7 +5578,15 @@ void Com_PresentDone( void ( *finish )( void ) ) {
 		return;
 	}
 	com_lastPresentUs = Sys_Microseconds();
+	if ( !ap.running && ap.trialEndUs && ap.trialN < AP_WINT_N ) {
+		ap.trialT[ap.trialN++] = com_lastPresentUs;
+	}
 	if ( ap.running ) {
+		paceRec_t *r = Com_PaceRecCur();
+
+		if ( r ) {
+			r->swapUs = com_lastPresentUs;
+		}
 		Com_ApNoteRealPresent( com_lastPresentUs );
 	}
 	if ( ps.lastSwapUs && com_lastPresentUs - ps.lastSwapUs < 500000 ) {
@@ -5955,8 +6322,11 @@ qboolean Com_WarpLatch( void ( *gpuWait )( void ), float *pitch, float *yaw ) {
 		int n = latch.leadPos < LATCH_RING ? latch.leadPos : LATCH_RING;
 		int lead = 1500;
 
+		long long w0 = Sys_Microseconds();
+
 		gpuWait();
 		now = Sys_Microseconds();
+		pacer.latchWaitUs += now - w0;
 		pacer.ring[pacer.ringPos++ % PACE_RING] = (int)( now - pacer.frameStartUs );
 		pacer.readyUs = now;
 		pacer.readyRecorded = qtrue;
@@ -5977,6 +6347,7 @@ qboolean Com_WarpLatch( void ( *gpuWait )( void ), float *pitch, float *yaw ) {
 			latch.late++;
 		} else {
 			Sys_WaitUntil( target, com_maxfpsSpinUs->integer );
+			pacer.latchWaitUs += Sys_Microseconds() - now;
 		}
 	}
 
