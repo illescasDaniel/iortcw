@@ -3863,7 +3863,8 @@ r_frameWarpSeed 0, or no late-latch busy samples yet: S_max.
 static double Com_ApSeedRate( void ) {
 	double d, c, s0;
 
-	if ( !com_frameWarpSeed->integer || ap.llBusyN < 30 ) {
+	// only late-latch busy samples from the last ~20 s count (older ones come from a different scene)
+	if ( !com_frameWarpSeed->integer || ap.llBusyN < 30 || !ap.baseUpdUs || Sys_Microseconds() - ap.baseUpdUs > 20000000 ) {
 		return ap.sMax;
 	}
 	d = ap.llBusyEma + ( ap.k - 1 ) * (double)Com_ApWarpCost();
@@ -3874,6 +3875,7 @@ static double Com_ApSeedRate( void ) {
 	if ( d < 1000.0 ) {
 		return ap.sMax;
 	}
+	d *= 1.12;      // headroom: late-latch samples tend to be taken at lighter moments than AP sees
 	s0 = ap.k * AP_BUSY_AIM * 1000000.0 / d;
 	return s0 < ap.sMin ? ap.sMin : s0 > ap.sMax ? ap.sMax : s0;
 }
@@ -4009,11 +4011,9 @@ static void Com_ApUpdate( void ) {
 		} else {
 			double t = AP_BUSY_AIM * ap.k * 1000000.0 / ap.busyEma;
 
-			if ( t < ap.sTarget * 0.7 ) {
-				t = ap.sTarget * 0.7;
-			}
-			if ( t > ap.sTarget * 0.98 ) {
-				t = ap.sTarget * 0.98;
+			// the full computed target (it is below 0.96 x sTarget by construction); only a floor against wild busy readings
+			if ( t < ap.sTarget * 0.5 ) {
+				t = ap.sTarget * 0.5;
 			}
 			Com_ApRetarget( t < ap.sMin ? ap.sMin : t );
 			ap.downs++;
