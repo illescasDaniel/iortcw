@@ -3,6 +3,11 @@ uniform sampler2D u_ScreenDepthMap; // full resolution scene depth (raw)
 uniform vec2   u_InvTexRes;   // 1 / size of the scene depth
 uniform vec4   u_WarpParams;  // x = gun depth threshold (raw), y = zNear, z = zFar, w = grid step in pixels
 
+// object motion (USE_VELOCITY: second output, RG16F; the host adds the define only when the velocity buffer exists)
+uniform sampler2D u_VelocityMap;   // SMAA T2x velocity: ndc cur - prev, camera included, (0,0) = none (world, sky)
+uniform mat4   u_ReprojMatrix;     // current unjittered NDC -> previous NDC (the matrix the prepass used)
+uniform vec4   u_WarpParams2;      // x = velocity valid this frame, y = teleport limit (NDC length), zw = projection jitter in NDC
+
 varying vec2   var_Tex1;
 
 // one R32F grid texel per step x step source pixels: nearest forward (view space) distance over the footprint
@@ -18,6 +23,8 @@ void main()
 	float nearest = 1.0e30;
 	bool anyValid = false;
 	bool anySolid = false;
+	vec2 nearP = base;
+	float nearD = 1.0;
 
 	for (int j = 0; j < 9; j++)
 	{
@@ -41,7 +48,12 @@ void main()
 
 			float ndc = d * 2.0 - 1.0;
 			float z = 2.0 * u_WarpParams.y * u_WarpParams.z / ((u_WarpParams.z + u_WarpParams.y) - ndc * (u_WarpParams.z - u_WarpParams.y));
-			nearest = min(nearest, z);
+			if (z < nearest)
+			{
+				nearest = z;
+				nearP = p;
+				nearD = d;
+			}
 			anySolid = true;
 		}
 	}
@@ -51,4 +63,26 @@ void main()
 		result = anySolid ? nearest : 0.0;
 
 	gl_FragColor = vec4(result, 0.0, 0.0, 1.0);
+
+#if defined(USE_VELOCITY)
+	// motion of the tap that won the nearest-depth test: velocity minus what the camera alone does to that
+	// depth. World and sky hold the (0,0) sentinel, gun taps never win; a huge object motion is a teleport.
+	vec2 motion = vec2(0.0);
+	if (u_WarpParams2.x > 0.5 && anySolid)
+	{
+		vec2 vel = texelFetch(u_VelocityMap, ivec2(nearP), 0).rg;
+		if (vel.x != 0.0 || vel.y != 0.0)
+		{
+			vec2 ndc = nearP * u_InvTexRes * 2.0 - 1.0 - u_WarpParams2.zw;
+			vec4 pr = u_ReprojMatrix * vec4(ndc, nearD * 2.0 - 1.0, 1.0);
+			if (pr.w > 0.0)
+			{
+				vec2 obj = vel - (ndc - pr.xy / pr.w);
+				if (length(obj) <= u_WarpParams2.y)
+					motion = obj;
+			}
+		}
+	}
+	out_Velocity = motion;
+#endif
 }

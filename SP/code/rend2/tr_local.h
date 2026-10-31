@@ -856,6 +856,7 @@ typedef enum
 	UNIFORM_WARPPARAMS, // frame warp: capture x = gun depth, y = dilate radius; warp x = debug visualise; warpdepth (gunDepth, zNear, zFar, step)
 	UNIFORM_WARPMOVE, // mesh warp: xyz = translation in new-camera forward/left/up world units, w = zNear
 	UNIFORM_WARPPROJ, // mesh warp: tanX, tanY, grid step in pixels (z), w unused
+	UNIFORM_WARPPARAMS2, // object motion: warpdepth (valid, teleport limit NDC, jitter NDC xy); warpmesh (alpha, max px)
 
 	UNIFORM_COUNT
 } uniform_t;
@@ -1772,6 +1773,13 @@ typedef struct {
 	float		dtRing[WARP_MESH_RING];		// recent predicted warp dt (s)
 	float		moveRing[WARP_MESH_RING];	// recent applied move lengths (units)
 	int			ringPos;
+
+	// object motion (SMAA T2x velocity, r_frameWarpMeshObjects): set by RB_SMAATemporal when the velocity prepass wrote this frame
+	qboolean	velValid;		// the velocity buffer of frame velFrame is usable (history valid, prepass wrote it)
+	int			velFrame;		// tr.frameCount of that frame
+	float		velReproj[16];	// current unjittered NDC -> previous NDC (the matrix the prepass used)
+	float		velJitter[2];	// projection jitter of that frame in NDC
+	float		captureDt;		// seconds between this capture and the previous one (0 = unknown), the span the motion covers
 } warpState_t;
 
 /*
@@ -2032,6 +2040,7 @@ typedef struct {
 	image_t				*warpOutImage;	// compositor warp (RE_WarpPresent): warped frame plus replayed 2D, renderFbo colour format, no MSAA
 	FBO_t				*warpOutFbo;
 	image_t				*warpDepthImage;	// 6-DoF mesh warp: sampled scene depth
+	image_t				*warpMotionImage;	// 6-DoF mesh warp: object motion of the nearest tap (RG16F NDC per real frame), attachment 1 of warpDepthFbo
 	FBO_t				*warpDepthFbo;
 	vao_t				*warpMeshVao;		// 6-DoF mesh warp: grid vertices and indexes
 	int					warpMeshIndexes;
@@ -2232,6 +2241,9 @@ extern  cvar_t  *r_frameWarpMeshStretch;
 extern  cvar_t  *r_frameWarpMeshMaxMove;
 extern  cvar_t  *r_frameWarpMeshMaxSpeed;
 extern  cvar_t  *r_frameWarpMeshDt;
+extern  cvar_t  *r_frameWarpMeshObjects;
+extern  cvar_t  *r_frameWarpMeshObjMax;
+extern  cvar_t  *r_warpDebugObjDt;
 extern  cvar_t  *r_warpDebugMove;
 extern  cvar_t  *r_warpDebug;
 extern  cvar_t  *r_warpDebugPitch;

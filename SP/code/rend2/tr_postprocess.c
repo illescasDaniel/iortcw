@@ -480,6 +480,8 @@ void RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox)
 	if (!vp->smaaJitter)
 		return;
 
+	tr.warp.velValid = qfalse;	// frame warp object motion: re-armed below when this frame's velocity buffer is valid
+
 	if (!tr.smaaResolveAvailable || !tr.smaaHistoryFbo || !tr.screenScratchFbo || !tr.hdrDepthImage ||
 		srcFbo != tr.renderFbo || !r_smaaTemporal->integer || (r_smaaDebug->integer && !debug) ||
 		srcFbo->width != tr.smaaHistoryFbo->width || srcFbo->height != tr.smaaHistoryFbo->height ||
@@ -512,6 +514,17 @@ void RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox)
 
 	if (debug && !valid && !(tr.frameCount & 63))
 		ri.Printf(PRINT_ALL, "T2x history invalid: histValid %d frame %d/%d\n", tr.smaaHistoryValid, tr.frameCount, tr.smaaHistoryFrame);
+
+	// frame warp (RB_WarpMeshCapture runs after this and the prepass of the next frame overwrites the buffer): keep
+	// the matrix the velocity was built against
+	if (valid && velocity)
+	{
+		Com_Memcpy(tr.warp.velReproj, reproj, sizeof(tr.warp.velReproj));
+		tr.warp.velJitter[0] = vp->smaaJitterNdc[0];
+		tr.warp.velJitter[1] = vp->smaaJitterNdc[1];
+		tr.warp.velFrame = tr.frameCount;
+		tr.warp.velValid = qtrue;
+	}
 
 	// remember this frame for the next one (before any early-out below)
 	Com_Memcpy(tr.smaaPrevViewProj, vp->smaaViewProj, sizeof(tr.smaaPrevViewProj));

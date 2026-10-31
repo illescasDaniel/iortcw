@@ -202,6 +202,7 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_WarpParams", GLSL_VEC4 },
 	{ "u_WarpMove", GLSL_VEC4 },
 	{ "u_WarpProj", GLSL_VEC4 },
+	{ "u_WarpParams2", GLSL_VEC4 },
 };
 
 typedef enum
@@ -1725,6 +1726,11 @@ void GLSL_InitGPUShaders(void)
 		// 6-DoF mesh warp: depth grid capture and forward-reprojected mesh (r_frameWarpMesh > 0 only)
 		if (r_frameWarpMesh->integer > 0)
 		{
+			// object motion output: same condition as the velocity buffer itself (tr_image.c R_CreateSmaaImages)
+			if (r_hdr->integer && glRefConfig.textureFloat && r_ext_framebuffer_multisample->integer < 2 &&
+				(glRefConfig.glslMajorVersion > 1 || (glRefConfig.glslMajorVersion == 1 && glRefConfig.glslMinorVersion >= 30)))
+				Q_strcat(extradefines, 1024, "#define USE_VELOCITY\n");
+
 			if (!GLSL_InitGPUShader(&tr.warpDepthShader, "warpdepth", attribs, qtrue, extradefines, qtrue, fallbackShader_texturecolor_vp, fallbackShader_warpdepth_fp))
 			{
 				ri.Error(ERR_FATAL, "Could not load warpdepth shader!");
@@ -1732,7 +1738,9 @@ void GLSL_InitGPUShaders(void)
 
 			GLSL_InitUniforms(&tr.warpDepthShader);
 			GLSL_SetUniformInt(&tr.warpDepthShader, UNIFORM_SCREENDEPTHMAP, TB_LIGHTMAP);
+			GLSL_SetUniformInt(&tr.warpDepthShader, UNIFORM_VELOCITYMAP, TB_SPECULARMAP);
 			GLSL_FinishGPUShader(&tr.warpDepthShader);
+			extradefines[0] = '\0';
 
 			numEtcShaders++;
 
@@ -1744,6 +1752,7 @@ void GLSL_InitGPUShaders(void)
 			GLSL_InitUniforms(&tr.warpMeshShader);
 			GLSL_SetUniformInt(&tr.warpMeshShader, UNIFORM_SCREENIMAGEMAP, TB_COLORMAP);
 			GLSL_SetUniformInt(&tr.warpMeshShader, UNIFORM_SCREENDEPTHMAP, TB_LIGHTMAP);
+			GLSL_SetUniformInt(&tr.warpMeshShader, UNIFORM_VELOCITYMAP, TB_SPECULARMAP);
 			GLSL_FinishGPUShader(&tr.warpMeshShader);
 
 			numEtcShaders++;

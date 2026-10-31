@@ -67,9 +67,32 @@ static void R_WarpInitMesh( void ) {
 	qglTextureParameteriEXT( tr.warpDepthImage->texnum, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 	tr.warpDepthFbo = FBO_Create( "_warpDepth", gw, gh );
 	FBO_AttachImage( tr.warpDepthFbo, tr.warpDepthImage, GL_COLOR_ATTACHMENT0, 0 );
+
+	// object motion (SMAA T2x velocity buffer exists): attachment 1, filled by the same pass as the depth grid
+	if ( tr.velocityImage ) {
+		tr.warpMotionImage = R_CreateImage( "*warpMotion", NULL, gw, gh, IMGTYPE_COLORALPHA,
+											IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_RG16F );
+		qglTextureParameteriEXT( tr.warpMotionImage->texnum, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		qglTextureParameteriEXT( tr.warpMotionImage->texnum, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		FBO_AttachImage( tr.warpDepthFbo, tr.warpMotionImage, GL_COLOR_ATTACHMENT1, 0 );
+		if ( !R_CheckFBO( tr.warpDepthFbo ) ) {
+			qglNamedFramebufferTexture2DEXT( tr.warpDepthFbo->frameBuffer, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0 );
+			tr.warpDepthFbo->colorImage[1] = NULL;
+			tr.warpMotionImage = NULL;
+		} else {
+			static const GLenum bufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+			FBO_t *oldFbo = glState.currentFBO;
+
+			FBO_Bind( tr.warpDepthFbo );
+			qglDrawBuffers( 2, bufs );
+			FBO_Bind( oldFbo );
+		}
+	}
+
 	if ( !R_CheckFBO( tr.warpDepthFbo ) ) {
 		tr.warpDepthFbo = NULL;
 		tr.warpDepthImage = NULL;
+		tr.warpMotionImage = NULL;
 		return;
 	}
 
@@ -138,6 +161,7 @@ void R_WarpInitTargets( void ) {
 	tr.warpOutImage = NULL;
 	tr.warpOutFbo = NULL;
 	tr.warpDepthImage = NULL;
+	tr.warpMotionImage = NULL;
 	tr.warpDepthFbo = NULL;
 	tr.warpMeshVao = NULL;
 	tr.warpMeshIndexes = 0;
@@ -253,6 +277,9 @@ static qboolean R_WarpMeshAvailable( void ) {
 		   tr.warpDepthImage && tr.warpOutFbo;
 }
 
+// seconds of object motion the next mesh draw extrapolates (set by the caller; 0 = camera only)
+static float warpObjDt;
+
 /*
 =============
 RB_WarpMeshTo
@@ -266,7 +293,7 @@ dst's colour and depth are cleared; depth test is left disabled for the 2D tail.
 */
 static void RB_WarpMeshTo( FBO_t *dst, float dPitch, float dYaw, const vec3_t moveWorld ) {
 	vec3_t angles, newAxis[3];
-	vec4_t box, params, move, proj;
+	vec4_t box, params, move, proj, objParams;
 	vec2_t invTexRes;
 	mat4_t m;
 	float maxDeg = r_frameWarpMaxDeg->value;
@@ -298,6 +325,12 @@ static void RB_WarpMeshTo( FBO_t *dst, float dPitch, float dYaw, const vec3_t mo
 	invTexRes[0] = 1.0f / tr.warpImage->width;
 	invTexRes[1] = 1.0f / tr.warpImage->height;
 
+	// object motion: fraction of the capture's real frame interval the present is ahead of the capture
+	VectorSet4( objParams, 0.0f, r_frameWarpMeshObjMax->value, 0.0f, 0.0f );
+	if ( r_frameWarpMeshObjects->integer && tr.warpMotionImage && tr.warp.captureDt > 0.0f && warpObjDt > 0.0f ) {
+		objParams[0] = warpObjDt >= tr.warp.captureDt ? 1.0f : warpObjDt / tr.warp.captureDt;
+	}
+
 	FBO_Bind( dst );
 	qglViewport( 0, 0, dst->width, dst->height );
 	qglScissor( 0, 0, dst->width, dst->height );
@@ -313,6 +346,8 @@ static void RB_WarpMeshTo( FBO_t *dst, float dPitch, float dYaw, const vec3_t mo
 	GLSL_BindProgram( &tr.warpMeshShader );
 	GL_BindToTMU( tr.warpImage, TB_COLORMAP );
 	GL_BindToTMU( tr.warpDepthImage, TB_LIGHTMAP );
+	GL_BindToTMU( objParams[0] > 0.0f ? tr.warpMotionImage : tr.warpDepthImage, TB_SPECULARMAP );
+	GLSL_SetUniformVec4( &tr.warpMeshShader, UNIFORM_WARPPARAMS2, objParams );
 	GLSL_SetUniformMat4( &tr.warpMeshShader, UNIFORM_WARPMATRIX, m );
 	GLSL_SetUniformVec4( &tr.warpMeshShader, UNIFORM_WARPBOX, box );
 	GLSL_SetUniformVec4( &tr.warpMeshShader, UNIFORM_WARPPARAMS, params );
@@ -543,14 +578,28 @@ anything else (teleport, map change, stall) zeroes it and counts a reset.
 */
 static void RB_WarpMeshCapture( const postProcessCommand_t *cmd ) {
 	const viewParms_t *vp = &cmd->viewParms;
-	vec4_t params;
+	vec4_t params, params2;
 	vec3_t delta;
 	float dt, speed, maxSpeed;
-	int dtMs;
+	int dtMs = cmd->refdef.time - tr.warp.prevTime;
+	qboolean consecutive = tr.warp.prevFrameCount > 0 && tr.frameCount == tr.warp.prevFrameCount + 1 && dtMs > 0 && dtMs <= 100;
+	// object motion needs this frame's T2x velocity buffer (consumed here: it is overwritten by the next prepass)
+	qboolean objects = r_frameWarpMeshObjects->integer && tr.warpMotionImage && tr.velocityImage && tr.warp.velValid &&
+					   tr.warp.velFrame == tr.frameCount && consecutive;
+
+	tr.warp.velValid = qfalse;
+	tr.warp.captureDt = consecutive ? dtMs * 0.001f : 0.0f;
 
 	VectorSet4( params, r_frameWarpGunDepth->value, r_znear->value, vp->zFar, (float)tr.warpGridStep );
+	VectorSet4( params2, objects ? 1.0f : 0.0f, 0.5f, tr.warp.velJitter[0], tr.warp.velJitter[1] );
 	GLSL_BindProgram( &tr.warpDepthShader );
 	GLSL_SetUniformVec4( &tr.warpDepthShader, UNIFORM_WARPPARAMS, params );
+	GLSL_SetUniformVec4( &tr.warpDepthShader, UNIFORM_WARPPARAMS2, params2 );
+	if ( objects ) {
+		// 0.5 NDC = a quarter of the screen per real frame: beyond that it is a teleport, not motion
+		GLSL_SetUniformMat4( &tr.warpDepthShader, UNIFORM_REPROJMATRIX, tr.warp.velReproj );
+		GL_BindToTMU( tr.velocityImage, TB_SPECULARMAP );
+	}
 	GL_BindToTMU( tr.renderDepthImage, TB_LIGHTMAP );
 	FBO_BlitFromTexture( tr.renderDepthImage, NULL, NULL, tr.warpDepthFbo, NULL, &tr.warpDepthShader, NULL, GLS_DEPTHTEST_DISABLE );
 	RB_GpuMark( "warp_depth" );
@@ -562,11 +611,10 @@ static void RB_WarpMeshCapture( const postProcessCommand_t *cmd ) {
 	tr.warp.tanX = tan( DEG2RAD( vp->fovX ) * 0.5f );
 	tr.warp.tanY = tan( DEG2RAD( vp->fovY ) * 0.5f );
 
-	dtMs = tr.warp.time - tr.warp.prevTime;
 	maxSpeed = r_frameWarpMeshMaxSpeed->value;
 	VectorClear( tr.warp.velocity );
 
-	if ( tr.warp.prevFrameCount > 0 && tr.frameCount == tr.warp.prevFrameCount + 1 && dtMs > 0 && dtMs <= 100 ) {
+	if ( consecutive ) {
 		dt = dtMs * 0.001f;
 		VectorSubtract( tr.warp.origin, tr.warp.prevOrigin, delta );
 		VectorScale( delta, 1.0f / dt, delta );
@@ -667,11 +715,18 @@ void RB_WarpCapture( const postProcessCommand_t *cmd, FBO_t *srcFbo ) {
 
 			VectorSet4( scale, 1.0f / 1024.0f, 1.0f / 1024.0f, 1.0f / 1024.0f, 1.0f );
 			FBO_BlitFromTexture( tr.warpDepthImage, NULL, NULL, tr.renderFbo, NULL, NULL, scale, GLS_DEPTHTEST_DISABLE );
+		} else if ( r_warpDebug->integer == 5 && tr.warpMotionImage && tr.warpDepthFbo ) {
+			// object motion grid: red = +x, green = +y, 1.0 = 0.005 NDC (about 6 px at 2560 wide) per real frame (negative motion is black)
+			vec4_t scale;
+
+			VectorSet4( scale, 200.0f, 200.0f, 0.0f, 1.0f );
+			FBO_BlitFromTexture( tr.warpMotionImage, NULL, NULL, tr.renderFbo, NULL, NULL, scale, GLS_DEPTHTEST_DISABLE );
 		} else if ( R_WarpMeshAvailable() ) {
 			// mesh preview: draw into the warp target (it has the depth attachment), then copy into the render FBO
 			vec3_t moveWorld;
 
 			R_WarpDebugMoveWorld( moveWorld );
+			warpObjDt = r_warpDebugObjDt->value * 0.001f;
 			if ( RB_WarpApplyTo( tr.warpOutFbo, dPitch, dYaw, moveWorld ) ) {
 				// FBO_Blit, not FBO_BlitFromTexture with NULL corners: that one samples the texture upside down
 				FBO_Blit( tr.warpOutFbo, NULL, NULL, tr.renderFbo, NULL, NULL, NULL, GLS_DEPTHTEST_DISABLE );
@@ -819,6 +874,7 @@ qboolean RE_WarpPresent( float pitch, float yaw ) {
 	qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 
 	// asked before the replayed tail: its swap ends the pacer's in-flight present, after which the dt is unknown
+	warpObjDt = 0.0f;
 	if ( R_WarpMeshAvailable() ) {
 		float moveDt = ri.WarpMoveDt ? ri.WarpMoveDt() : -1.0f;
 
@@ -831,6 +887,9 @@ qboolean RE_WarpPresent( float pitch, float yaw ) {
 			moveDt = r_frameWarpMeshDt->value * 0.001f;
 		}
 		R_WarpPresentMove( moveDt, moveWorld );
+		if ( moveDt >= 0.0f && r_frameWarpApTest->integer == 0 ) {
+			warpObjDt = moveDt;
+		}
 		useMesh = qtrue;
 	} else if ( tr.warpMeshVao ) {
 		// mesh level 0 resources exist without the shader path: still keep the pacer's dt bookkeeping

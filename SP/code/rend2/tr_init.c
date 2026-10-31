@@ -161,6 +161,9 @@ cvar_t  *r_frameWarpMeshStretch;
 cvar_t  *r_frameWarpMeshMaxMove;
 cvar_t  *r_frameWarpMeshMaxSpeed;
 cvar_t  *r_frameWarpMeshDt;
+cvar_t  *r_frameWarpMeshObjects;
+cvar_t  *r_frameWarpMeshObjMax;
+cvar_t  *r_warpDebugObjDt;
 cvar_t  *r_warpDebugMove;
 cvar_t  *r_warpDebug;
 cvar_t  *r_warpDebugPitch;
@@ -1592,6 +1595,9 @@ void R_Register( void ) {
 	r_frameWarpMeshMaxMove = ri.Cvar_Get( "r_frameWarpMeshMaxMove", "16", 0 );	// mesh warp: max applied translation in world units
 	r_frameWarpMeshMaxSpeed = ri.Cvar_Get( "r_frameWarpMeshMaxSpeed", "1500", 0 );	// mesh warp: speed (units/s) above which the velocity is treated as a teleport
 	r_frameWarpMeshDt = ri.Cvar_Get( "r_frameWarpMeshDt", "0", 0 );	// dev: > 0 overrides the predicted warp dt in milliseconds
+	r_frameWarpMeshObjects = ri.Cvar_Get( "r_frameWarpMeshObjects", "1", 0 );	// mesh warp: move enemies/doors with their T2x velocity (needs r_aa 8; 0 = camera motion only)
+	r_frameWarpMeshObjMax = ri.Cvar_Get( "r_frameWarpMeshObjMax", "24", 0 );	// mesh warp: max object displacement per warp present, pixels
+	r_warpDebugObjDt = ri.Cvar_Get( "r_warpDebugObjDt", "0", 0 );	// dev: object extrapolation time in ms for the r_warpDebug mesh preview
 	r_warpDebugMove = ri.Cvar_Get( "r_warpDebugMove", "0 0 0", CVAR_CHEAT );	// dev: fixed translation applied by the mesh warp
 	r_warpDebug = ri.Cvar_Get( "r_warpDebug", "0", CVAR_TEMP );	// 1 fixed delta, 2 oscillating at 1 Hz, 3 visualise, 4 mesh warp visualise
 	r_warpDebugPitch = ri.Cvar_Get( "r_warpDebugPitch", "0", 0 );

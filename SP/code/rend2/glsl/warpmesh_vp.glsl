@@ -20,6 +20,8 @@ uniform mat4   u_WarpMatrix;
 uniform vec4   u_WarpBox;     // 3D viewport in pixels: x, y, w, h
 uniform vec4   u_WarpMove;
 uniform vec4   u_WarpProj;
+uniform sampler2D u_VelocityMap;   // RG16F object motion grid (NDC per real frame), same layout as the depth grid
+uniform vec4   u_WarpParams2;      // x = extrapolation fraction of a real frame (0 = off), y = max displacement in pixels
 
 // Original image positions, premultiplied by the vertex's old-camera forward depth zo, with zo in .z. GL's
 // perspective-correct interpolation (weights 1/w, w = new forward depth) of (zo * px, zo) followed by the divide in
@@ -58,6 +60,7 @@ void main()
 	float farthest = -1.0;          // farthest depth, sky counts as infinite, gun taps ignored
 	float farSolid = 0.0;           // farthest solid depth, for gun-covered vertices
 	vec2 farG = gc;
+	vec2 nearG = gc;
 	float centre = texelFetch(u_ScreenDepthMap, ivec2(gc), 0).r;
 	bool anySky = false;
 
@@ -72,7 +75,11 @@ void main()
 				continue;                       // gun only
 			if (d > 0.0)
 			{
-				nearest = min(nearest, d);
+				if (d < nearest)
+				{
+					nearest = d;
+					nearG = q;
+				}
 				farSolid = max(farSolid, d);
 			}
 			else
@@ -96,6 +103,22 @@ void main()
 	vec3 r = vec3(1.0, -ndc.x * u_WarpProj.x, ndc.y * u_WarpProj.y);
 	vec3 rr = mat3(u_WarpMatrix) * r;
 	vec3 c = sky ? rr : z * rr - u_WarpMove.xyz;
+
+	// object motion: the tap that gave z moved by m (NDC) over the last real frame; push the vertex along it in the
+	// OLD camera space (before the camera rotation), scaled to the time since the capture. Skirt and gun-covered
+	// vertices stay put.
+	if (!sky && u_WarpParams2.x > 0.0 && attr_Position.z < 0.5 && centre > -0.5)
+	{
+		vec2 m = texelFetch(u_VelocityMap, ivec2(nearG), 0).rg * u_WarpParams2.x;
+		float px = length(m * 0.5 * u_WarpBox.zw);
+		if (px > u_WarpParams2.y)
+			m *= u_WarpParams2.y / px;
+		if (m.x != 0.0 || m.y != 0.0)
+		{
+			vec3 p = z * r + z * vec3(0.0, -m.x * u_WarpProj.x, m.y * u_WarpProj.y);
+			c = mat3(u_WarpMatrix) * p - u_WarpMove.xyz;
+		}
+	}
 
 	float zo = sky ? 1.0 : z;
 	var_Px = vec3(ndcToPx(ndc) * zo, zo);
