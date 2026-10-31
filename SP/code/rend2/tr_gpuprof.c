@@ -32,6 +32,8 @@ along with RTCW SP Source Code.  If not, see <http://www.gnu.org/licenses/>.
 #endif
 
 #include "tr_local.h"
+FBO_t *FBO_Create( const char *name, int width, int height );
+qboolean R_CheckFBO( const FBO_t *fbo );
 
 #ifndef GL_TIMESTAMP
 #define GL_TIMESTAMP 0x8E28
@@ -317,4 +319,112 @@ void R_ShutdownGpuProf( void ) {
 		}
 	}
 	Com_Memset( &gp, 0, sizeof( gp ) );
+}
+
+/*
+=============
+RB_GpuLoad
+
+Dev-only synthetic GPU load (r_gpuLoad = microseconds per real frame): one full draw of an ALU-heavy shader into a
+small private target that is never read. The iteration count self-calibrates from GL_TIME_ELAPSED queries read a few
+frames later, so the added cost tracks the requested time. Called only from the world scene pass of a real frame
+(never for a warp present, the 2D/HUD path or the present path). Restores the FBO (FBO_BlitFromTexture) and viewport.
+=============
+*/
+#ifndef GL_TIME_ELAPSED
+#define GL_TIME_ELAPSED 0x88BF
+#endif
+#define GPULOAD_SIZE	512
+#define GPULOAD_SLOTS	4
+
+static struct {
+	GLuint		queries[GPULOAD_SLOTS];
+	qboolean	pending[GPULOAD_SLOTS];
+	int			slot;
+	float		iters;
+	qboolean	failed;
+	int			lastFrame;
+	getQueryObjectui64vProc_t	getQueryObjectui64v;
+} gload;
+
+void RB_GpuLoad( void ) {
+	vec4_t color;
+	image_t *img;
+	int i;
+
+	if ( gload.failed ) {
+		return;
+	}
+	// the world scene can be drawn more than once per frame: charge the load once
+	if ( gload.lastFrame == tr.frameCount ) {
+		return;
+	}
+	gload.lastFrame = tr.frameCount;
+
+	if ( !tr.gpuLoadFbo ) {
+		// first use, or after a vid_restart (tr is cleared): create the target, shader and queries
+		Com_Memset( &gload, 0, sizeof( gload ) );
+		gload.getQueryObjectui64v = (getQueryObjectui64vProc_t)SDL_GL_GetProcAddress( "glGetQueryObjectui64v" );
+		if ( !gload.getQueryObjectui64v || !qglGenQueries || !qglBeginQuery || !qglEndQuery || !GLSL_InitGpuLoadShader() ) {
+			ri.Printf( PRINT_WARNING, "r_gpuLoad: not available\n" );
+			gload.failed = qtrue;
+			return;
+		}
+		img = R_CreateImage( "*gpuLoad", NULL, GPULOAD_SIZE, GPULOAD_SIZE, IMGTYPE_COLORALPHA,
+							 IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_RGBA8 );
+		tr.gpuLoadFbo = FBO_Create( "_gpuLoad", GPULOAD_SIZE, GPULOAD_SIZE );
+		FBO_AttachImage( tr.gpuLoadFbo, img, GL_COLOR_ATTACHMENT0, 0 );
+		if ( !R_CheckFBO( tr.gpuLoadFbo ) ) {
+			gload.failed = qtrue;
+			return;
+		}
+		qglGenQueries( GPULOAD_SLOTS, gload.queries );
+		gload.iters = 64.0f;
+	}
+
+	// harvest finished timings (oldest first, never blocking) and steer the iteration count to the target
+	for ( i = 1; i <= GPULOAD_SLOTS; i++ ) {
+		int s = ( gload.slot + i ) % GPULOAD_SLOTS;
+		GLint available = 0;
+		GLuint64 ns = 0;
+
+		if ( !gload.pending[s] ) {
+			continue;
+		}
+		qglGetQueryObjectiv( gload.queries[s], GL_QUERY_RESULT_AVAILABLE, &available );
+		if ( !available ) {
+			continue;
+		}
+		gload.getQueryObjectui64v( gload.queries[s], GL_QUERY_RESULT, &ns );
+		gload.pending[s] = qfalse;
+		if ( ns > 20000 ) {
+			float ratio = r_gpuLoad->value * 1000.0f / (float)ns;
+			if ( ratio > 4.0f ) ratio = 4.0f;
+			if ( ratio < 0.25f ) ratio = 0.25f;
+			gload.iters *= 1.0f + 0.5f * ( ratio - 1.0f );
+			if ( gload.iters < 1.0f ) gload.iters = 1.0f;
+			if ( gload.iters > 4.0e6f ) gload.iters = 4.0e6f;
+		}
+	}
+
+	if ( tess.numIndexes ) {
+		RB_EndSurface();
+	}
+
+	gload.slot = ( gload.slot + 1 ) % GPULOAD_SLOTS;
+	VectorSet4( color, (float)(int)gload.iters, (float)( tr.frameCount & 255 ) * 0.01f, 0, 1 );
+	if ( !gload.pending[gload.slot] ) {
+		qglBeginQuery( GL_TIME_ELAPSED, gload.queries[gload.slot] );
+	}
+	FBO_BlitFromTexture( tr.whiteImage, NULL, NULL, tr.gpuLoadFbo, NULL, &tr.gpuLoadShader, color, GLS_DEPTHTEST_DISABLE );
+	if ( !gload.pending[gload.slot] ) {
+		qglEndQuery( GL_TIME_ELAPSED );
+		gload.pending[gload.slot] = qtrue;
+	}
+
+	// FBO_BlitFromTexture restores the FBO but leaves the small viewport/scissor behind
+	qglViewport( backEnd.viewParms.viewportX, backEnd.viewParms.viewportY,
+		backEnd.viewParms.viewportWidth, backEnd.viewParms.viewportHeight );
+	qglScissor( backEnd.viewParms.viewportX, backEnd.viewParms.viewportY,
+		backEnd.viewParms.viewportWidth, backEnd.viewParms.viewportHeight );
 }

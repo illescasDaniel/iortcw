@@ -1939,6 +1939,8 @@ typedef struct {
 	shaderProgram_t flashShadowmaskShader;
 	shaderProgram_t ssaoShader[2]; // 0 = hemisphere, 1 = GTAO
 	shaderProgram_t ssaoUpShader;
+	shaderProgram_t gpuLoadShader;		// r_gpuLoad synthetic load (tr_gpuprof.c), created lazily
+	FBO_t *gpuLoadFbo;
 	shaderProgram_t warpCaptureShader;	// frame warp (tr_warp.c): colour + gun mask capture
 	shaderProgram_t warpShader;			// frame warp: rotation reprojection
 	shaderProgram_t warpDepthShader;	// 6-DoF mesh warp: depth grid capture
@@ -2170,6 +2172,7 @@ extern	cvar_t	*r_finish;
 extern	cvar_t	*r_swapFinish;
 extern	cvar_t	*r_flaresAsync;
 extern	cvar_t	*r_gpuProfile;
+extern	cvar_t	*r_gpuLoad;
 extern	cvar_t	*r_smaaStencil;
 extern	cvar_t	*r_ssaoDepthMips;
 extern	cvar_t	*r_textureMode;
@@ -2717,6 +2720,8 @@ void R_ShutdownFlareQueries( void );
 // tr_gpuprof.c
 void RB_GpuMark( const char *name );
 void RB_GpuMark3D( void );
+void RB_GpuLoad( void );
+qboolean GLSL_InitGpuLoadShader( void );
 void RB_GpuProfEndFrame( void );
 void R_GpuProf_f( void );
 void R_NormalCov_f( void );

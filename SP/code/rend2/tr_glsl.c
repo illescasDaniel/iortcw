@@ -52,6 +52,7 @@ extern const char *fallbackShader_ssaoup_fp;
 extern const char *fallbackShader_warpcap_fp;
 extern const char *fallbackShader_warp_fp;
 extern const char *fallbackShader_warpdepth_fp;
+extern const char *fallbackShader_gpuload_fp;
 extern const char *fallbackShader_warpmesh_vp;
 extern const char *fallbackShader_warpmesh_fp;
 extern const char *fallbackShader_bloombright_fp;
@@ -982,6 +983,30 @@ void GLSL_DeleteGPUShader(shaderProgram_t *program)
 	}
 }
 
+/*
+=============
+GLSL_InitGpuLoadShader
+
+r_gpuLoad synthetic load shader (tr_gpuprof.c): compiled on first use only.
+=============
+*/
+qboolean GLSL_InitGpuLoadShader(void)
+{
+	char extradefines[1024] = "";
+
+	if (tr.gpuLoadShader.program)
+		return qtrue;
+
+	if (!GLSL_InitGPUShader(&tr.gpuLoadShader, "gpuload", ATTR_POSITION | ATTR_TEXCOORD, qtrue, extradefines, qtrue,
+			fallbackShader_texturecolor_vp, fallbackShader_gpuload_fp))
+		return qfalse;
+
+	GLSL_InitUniforms(&tr.gpuLoadShader);
+	GLSL_SetUniformInt(&tr.gpuLoadShader, UNIFORM_TEXTUREMAP, TB_DIFFUSEMAP);
+	GLSL_FinishGPUShader(&tr.gpuLoadShader);
+	return qtrue;
+}
+
 void GLSL_InitGPUShaders(void)
 {
 	int             startTime, endTime;
@@ -1910,6 +1935,7 @@ void GLSL_ShutdownGPUShaders(void)
 	GLSL_DeleteGPUShader(&tr.ssaoUpShader);
 	GLSL_DeleteGPUShader(&tr.warpCaptureShader);
 	GLSL_DeleteGPUShader(&tr.warpShader);
+	GLSL_DeleteGPUShader(&tr.gpuLoadShader);
 	GLSL_DeleteGPUShader(&tr.warpDepthShader);
 	GLSL_DeleteGPUShader(&tr.warpMeshShader);
 

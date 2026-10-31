@@ -296,6 +296,7 @@ cvar_t  *r_finish;
 cvar_t  *r_swapFinish;
 cvar_t  *r_flaresAsync;
 cvar_t  *r_gpuProfile;
+cvar_t  *r_gpuLoad;
 cvar_t  *r_smaaStencil;
 cvar_t  *r_ssaoDepthMips;
 cvar_t  *r_clear;
@@ -1772,6 +1773,7 @@ void R_Register( void ) {
 	// 1 = flare visibility via occlusion queries; 0 = stock depth readback (stalls the GPU)
 	r_flaresAsync = ri.Cvar_Get( "r_flaresAsync", "1", 0 );
 	r_gpuProfile = ri.Cvar_Get( "r_gpuProfile", "0", 0 );
+	r_gpuLoad = ri.Cvar_Get( "r_gpuLoad", "0", 0 );	// dev only: synthetic GPU work per real frame in microseconds (tr_gpuprof.c), 0 = off
 	r_smaaStencil = ri.Cvar_Get( "r_smaaStencil", "1", 0 );
 	r_ssaoDepthMips = ri.Cvar_Get( "r_ssaoDepthMips", "1", 0 );
 	r_textureMode = ri.Cvar_Get( "r_textureMode", "GL_LINEAR_MIPMAP_LINEAR", CVAR_ARCHIVE );
