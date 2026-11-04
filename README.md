@@ -28,10 +28,15 @@ in [rend2-cvars.txt](rend2-cvars.txt); the mod, menus, scripts and asset-baking 
 - **GTAO** ambient occlusion (`r_ao`), **bloom** and **colour grade** with a tonemap highlight roll-off (`r_bloom*`, `r_grade*`)
 - **Stable sun shadows** (`r_sunShadowStable` bitmask: texel-snapped cascades, bilinear PCF, cascade blend)
 - **Flashlight / dynamic lights**: per-pixel lights on models, spot shadow map with a screen-space mask (`r_flashlightShadow`)
+- **Frame warp** (`r_frameWarp` 0 off / 2 on; 1 = late-latch, console only): single-threaded asynchronous reprojection.
+  Cooperative GPU checkpoints insert warp presents of the previous real frame (mouse-look rotation, optional depth-mesh
+  6-DoF `r_frameWarpMesh`, object motion under SMAA T2x) so the display refresh rate is fed even when real frames are
+  slower. Learned per-checkpoint GPU timing, a GPU-paced regime for heavy frames and a measured deny trial fall back to
+  late-latch automatically. Needs fullscreen, `r_vsync` 0-3, `com_maxfpsGpuSync 2`. Stats: `apstats`
 - **Performance**: GPU pass profiler (`r_gpuProfile`), no per-frame `glFinish`, async flare queries, SMAA without copies
 
 Design notes for each feature are in the outer repo's `docs/` (`parallax.md`, `smaa.md`, `smaa-motion-plan.md`, `ssao.md`,
-`sun-shadows.md`, `flashlight-shadows.md`, `post-effects.md`, `performance.md`).
+`sun-shadows.md`, `flashlight-shadows.md`, `post-effects.md`, `performance.md`, `frame-warp.md`).
 
 ### Changes in this fork
 
