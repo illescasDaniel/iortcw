@@ -6662,9 +6662,9 @@ static void Com_FrameWarpConflicts( void ) {
 			Cvar_Set( "r_vsync", "3" );
 			vsync = 3;
 		} else {
-			Com_Printf( "r_vsync 4 does not work with r_frameWarp 2: r_frameWarp set to 1 (late latch)\n" );
-			Cvar_Set( "r_frameWarp", "1" );
-			warp = 1;
+			Com_Printf( "r_vsync 4 does not work with r_frameWarp 2: r_frameWarp set to 0 (off)\n" );
+			Cvar_Set( "r_frameWarp", "0" );
+			warp = 0;
 		}
 	}
 	lastWarp = warp;
