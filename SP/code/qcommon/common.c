@@ -134,6 +134,10 @@ static cvar_t	*com_frameWarpModel;        // r_frameWarpModel: 1 = learned per-c
 static cvar_t	*com_frameWarpGpuPaced;     // r_frameWarpGpuPaced: 1 = GPU-paced regime when the GPU cannot hold 2 slots per real frame, S fixed at S_max (internal); 0 = slot-rate step controller
 static cvar_t	*com_frameWarpPacedGap;     // r_frameWarpPacedGap: GPU-paced regime, min distance of a warp to its neighbours, fraction of the real interval (dev)
 static cvar_t	*com_frameWarpPacedTgt;     // r_frameWarpPacedTgt: GPU-paced regime warp target, 0 = lastRealDisp + (R_est + cost) / 2, 1 = middle to the predicted end of this real frame (dev)
+static cvar_t	*com_frameWarpPacedEnter;   // r_frameWarpPacedEnter: GPU-paced regime on when median busy per real frame (last 16) exceeds this fraction of 2 T1 (dev)
+static cvar_t	*com_frameWarpPacedLeave;   // r_frameWarpPacedLeave: ... off when P90 of the last 32 is under this fraction (dev)
+static cvar_t	*com_frameWarpPacedDwell;   // r_frameWarpPacedDwell: min ms between regime changes, and fresh real frames (8 + the window) before the next test (dev)
+static cvar_t	*com_frameWarpLeadPct;      // r_frameWarpLeadPct: AP real-frame start lead = this percentile of the recent top->ready times (0 or 1 = near-max, the plain pacer) (dev)
 static cvar_t	*com_frameWarpPacedWin;     // r_frameWarpPacedWin: GPU-paced regime, warp target window, fraction of half the real interval (dev)
 static cvar_t	*com_frameWarpBacklogUs;    // r_frameWarpBacklogUs: compositor mid-frame GPU backlog bound, us (0 = never sleep mid-frame)
 int com_frameFracUs;
@@ -2563,6 +2567,10 @@ void Com_Init( char *commandLine ) {
 	com_frameWarpModel = Cvar_Get( "r_frameWarpModel", "1", 0 );
 	com_frameWarpGpuPaced = Cvar_Get( "r_frameWarpGpuPaced", "1", 0 );
 	com_frameWarpPacedGap = Cvar_Get( "r_frameWarpPacedGap", "0.30", 0 );
+	com_frameWarpPacedEnter = Cvar_Get( "r_frameWarpPacedEnter", "0.85", 0 );
+	com_frameWarpPacedLeave = Cvar_Get( "r_frameWarpPacedLeave", "0.74", 0 );
+	com_frameWarpPacedDwell = Cvar_Get( "r_frameWarpPacedDwell", "250", 0 );
+	com_frameWarpLeadPct = Cvar_Get( "r_frameWarpLeadPct", "0.75", 0 );
 	com_frameWarpPacedWin = Cvar_Get( "r_frameWarpPacedWin", "0.35", 0 );
 	com_frameWarpPacedTgt = Cvar_Get( "r_frameWarpPacedTgt", "0", 0 );
 	com_frameWarpMarkUs = Cvar_Get( "r_frameWarpMarkUs", "0", 0 );
@@ -2965,6 +2973,14 @@ static int Com_PaceCmpInt( const void *a, const void *b ) {
 	return *(const int *)a - *(const int *)b;
 }
 
+static int Com_PaceLeadPct( double p ) {
+	int tmp[PACE_RING];
+
+	Com_Memcpy( tmp, pacer.ring, sizeof( tmp ) );
+	qsort( tmp, PACE_RING, sizeof( int ), Com_PaceCmpInt );
+	return tmp[(int)( ( PACE_RING - 1 ) * p + 0.5 )];
+}
+
 static int Com_PaceLead( void ) {
 	int tmp[PACE_RING];
 
@@ -3183,6 +3199,8 @@ static struct {
 	int       lastRealTag;      // frameTag of the real present lastRealDisp belongs to
 	// GPU-paced regime (r_frameWarpGpuPaced): the GPU, not the slot clock, sets the real frame rate
 	qboolean  paced;
+	int       pacedFresh;       // real busy samples since the last regime change
+	long long pacedFlipUs;      // time of the last regime change
 	int       pacedFlips;       // regime transitions since the stats reset
 	int       rIv[16], rIvN;    // real display intervals on the GPU clock (ring), us
 	int       pacedReals;       // real frames started in the regime
@@ -3631,6 +3649,7 @@ static void Com_ApNoteReal( paceRec_t *r, long long gUs ) {
 			ap.busyEma = ap.busyN ? ap.busyEma + ( busy - ap.busyEma ) / 16.0 : busy;
 			ap.busyRing[ap.busyN % AP_BUSY_N] = (int)busy;
 			ap.busyN++;
+			ap.pacedFresh++;
 			ap.winBusySum += busy;
 			ap.winBusyN++;
 			aps.busySum += busy;
@@ -4064,20 +4083,34 @@ static long long Com_ApPacedDisplay( long long now ) {
 
 static void Com_ApPacedUpdate( void ) {
 	double twoT = 2.0 * ap.T1, v;
+	long long now = Sys_Microseconds();
+	int nIn = ap.paced ? 32 : 16;
 
+	// the frames right after a change are transients (queue drain / refill): they must not count towards the next
+	// change. Wait the dwell time and nIn + 8 fresh samples, so the test window holds none of them.
+	if ( ap.pacedFlipUs && now - ap.pacedFlipUs < (long long)com_frameWarpPacedDwell->integer * 1000 ) {
+		return;
+	}
+	if ( ap.pacedFlipUs && ap.pacedFresh < nIn + 8 ) {
+		return;
+	}
 	if ( !ap.paced ) {
 		v = Com_ApBusyLast( 16, 0.5 );
-		if ( v > 0 && v > AP_PACED_ENTER * twoT ) {
+		if ( v > 0 && v > com_frameWarpPacedEnter->value * twoT ) {
 			ap.paced = qtrue;
 			ap.pacedFlips++;
-			Com_Printf( "frame warp AP: GPU-paced regime on (busy median %.0f us > %.0f)\n", v, AP_PACED_ENTER * twoT );
+			ap.pacedFlipUs = now;
+			ap.pacedFresh = 0;
+			Com_Printf( "frame warp AP: GPU-paced regime on (busy median %.0f us > %.0f)\n", v, com_frameWarpPacedEnter->value * twoT );
 		}
 	} else {
 		v = Com_ApBusyLast( 32, 0.9 );
-		if ( v > 0 && v < AP_PACED_LEAVE * twoT ) {
+		if ( v > 0 && v < com_frameWarpPacedLeave->value * twoT ) {
 			ap.paced = qfalse;
 			ap.pacedFlips++;
-			Com_Printf( "frame warp AP: GPU-paced regime off (busy P90 %.0f us < %.0f)\n", v, AP_PACED_LEAVE * twoT );
+			ap.pacedFlipUs = now;
+			ap.pacedFresh = 0;
+			Com_Printf( "frame warp AP: GPU-paced regime off (busy P90 %.0f us < %.0f)\n", v, com_frameWarpPacedLeave->value * twoT );
 		}
 	}
 }
@@ -4441,6 +4474,7 @@ static void Com_ApUpdate( void ) {
 		ap.missRun = ap.okRun = ap.ivN = ap.busyN = 0;
 		ap.rIvN = 0;
 		ap.paced = qfalse;
+		ap.pacedFlipUs = 0;
 		ap.calmSinceUs = 0;
 		Com_ApWindowReset();
 		ap.prevRealG = 0;
@@ -6004,6 +6038,11 @@ static void Com_FrameWaitTopFence( long long arrivedUs ) {
 		} else if ( lead > ( q + 1 ) * T ) {
 			lead = (int)( ( q + 1 ) * T );
 		}
+		if ( ap.running && com_frameWarpLeadPct->value > 0 && com_frameWarpLeadPct->value < 1 && pacer.presentedFrame != 0 ) {
+			// AP: the near-max of the ring is dominated by outliers; a lead that large starts a short frame so early that
+			// it is over before the first mid-period warp slot (no warp for that real frame)
+			lead = Com_PaceLeadPct( com_frameWarpLeadPct->value ) + 500;
+		}
 		if ( ap.running ) {
 			// AP phase: the first mid-period warp slot W (previous deadline + T1) must fall inside the backend, not in the
 			// front-end gap or the present hold, so the frame starts at or before W - front-end P98 - warp cost
@@ -6647,7 +6686,7 @@ Com_FrameWarpConflicts
 
 r_frameWarp 2 (compositor) needs r_vsync 0-3; r_vsync 4 (low latency) is its own pacer. Last change wins, with a
 console line: r_frameWarp -> 2 while r_vsync is 4 sets r_vsync 3; r_vsync -> 4 while r_frameWarp is 2 sets
-r_frameWarp 1. r_frameWarp is latched, so its pending value counts (the menu applies it with a vid_restart).
+r_frameWarp 0. r_frameWarp is latched, so its pending value counts (the menu applies it with a vid_restart).
 At startup a saved 2 + 4 combination keeps the compositor.
 ================
 */
