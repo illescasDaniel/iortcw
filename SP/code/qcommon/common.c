@@ -130,6 +130,11 @@ static cvar_t	*com_frameWarpSeed;         // r_frameWarpSeed: 1 = AP starts at a
 static cvar_t	*com_frameWarpEarly;        // r_frameWarpEarly: fraction of a slot a warp may be placed early (dev)
 static cvar_t	*com_frameWarpMarkUs;       // r_frameWarpMarkUs: min CPU spacing of AP marks at plain command boundaries, us (dev)
 static cvar_t	*com_frameWarpLate;         // r_frameWarpLate: how far behind its deadline (fraction of a slot) a warp may complete before the real present serves the slot (dev)
+static cvar_t	*com_frameWarpModel;        // r_frameWarpModel: 1 = learned per-checkpoint GPU profile predicts checkpoint times, 0 = backlog model (dev)
+static cvar_t	*com_frameWarpGpuPaced;     // r_frameWarpGpuPaced: 1 = GPU-paced regime when the GPU cannot hold 2 slots per real frame, S fixed at S_max (internal); 0 = slot-rate step controller
+static cvar_t	*com_frameWarpPacedGap;     // r_frameWarpPacedGap: GPU-paced regime, min distance of a warp to its neighbours, fraction of the real interval (dev)
+static cvar_t	*com_frameWarpPacedTgt;     // r_frameWarpPacedTgt: GPU-paced regime warp target, 0 = lastRealDisp + (R_est + cost) / 2, 1 = middle to the predicted end of this real frame (dev)
+static cvar_t	*com_frameWarpPacedWin;     // r_frameWarpPacedWin: GPU-paced regime, warp target window, fraction of half the real interval (dev)
 static cvar_t	*com_frameWarpBacklogUs;    // r_frameWarpBacklogUs: compositor mid-frame GPU backlog bound, us (0 = never sleep mid-frame)
 int com_frameFracUs;
 long long com_frameClockUs;   // smooth frame clock (paced schedule, or real time uncapped)
@@ -2555,6 +2560,11 @@ void Com_Init( char *commandLine ) {
 	com_frameWarpBacklogUs = Cvar_Get( "r_frameWarpBacklogUs", "0", 0 );
 	com_frameWarpEarly = Cvar_Get( "r_frameWarpEarly", "0", 0 );
 	com_frameWarpLate = Cvar_Get( "r_frameWarpLate", "1", 0 );
+	com_frameWarpModel = Cvar_Get( "r_frameWarpModel", "1", 0 );
+	com_frameWarpGpuPaced = Cvar_Get( "r_frameWarpGpuPaced", "1", 0 );
+	com_frameWarpPacedGap = Cvar_Get( "r_frameWarpPacedGap", "0.30", 0 );
+	com_frameWarpPacedWin = Cvar_Get( "r_frameWarpPacedWin", "0.35", 0 );
+	com_frameWarpPacedTgt = Cvar_Get( "r_frameWarpPacedTgt", "0", 0 );
 	com_frameWarpMarkUs = Cvar_Get( "r_frameWarpMarkUs", "0", 0 );
 	com_frameWarpDeny = Cvar_Get( "r_frameWarpDeny", "1", 0 );
 	com_frameWarpDenyGain = Cvar_Get( "r_frameWarpDenyGain", "1.10", 0 );
@@ -2994,6 +3004,8 @@ typedef struct {
 	int       doneIdx;          // AP: the record's entry in aps.done when it was harvested before its swap (stamped late), else -1
 	qboolean  denyFree;         // CL_WarpDeny() was NULL when the frame started (late-latch baseline samples only count then)
 	int       cpuUs;            // late-latch / plain frame: CPU time from the frame start to the end of command submission, waits excluded, 0 = n/a
+	long long gDoneUs;          // AP: GPU completion on the CPU clock once harvested (else 0)
+	qboolean  winFed;           // the deny window / trial series got this present's display time
 } paceRec_t;
 
 static const paceGpu_t *paceOps;
@@ -3045,7 +3057,42 @@ typedef struct {
 	qboolean  post;             // the mark after the warp's swap (else: the mark before the warp, or a plain checkpoint)
 	int       frame;            // com_frameNumber at placement
 	long long submitUs;
+	int       where;            // checkpoint id the mark was queued at, -1 = not a profile sample (warp post mark, extra pre mark)
+	int       ord;              // ordinal of that checkpoint id within the frame
+	int       shape;            // frame-shape id (see Com_ApShape)
+	int       wb;               // warps placed in this frame before the mark was queued
 } apMark_t;
+
+/*
+Learned GPU-offset profile: for each (shape, checkpoint id, ordinal within the frame) the median of
+(GPU time the checkpoint's mark resolved at) - (the frame's GPU start) - (cost of the warps placed earlier in the frame).
+AP_PROF_REAL is the real frame's own completion. Used by Com_ApPredictCp instead of assuming that unresolved GPU work
+costs what it cost the CPU to submit (wrong when the GPU work is not proportional to the CPU time, e.g. alternating
+sun-shadow cascade frames).
+*/
+#define AP_PROF_N      16
+#define AP_PROF_WHERE  16
+#define AP_PROF_ORD    24
+#define AP_PROF_REAL   15
+#define AP_PROF_MIN    4        // samples before a key is trusted
+#define AP_SHAPES      2
+
+typedef struct {
+	int       v[AP_PROF_N];
+	int       n, med;           // samples pushed (monotonic), median of the last AP_PROF_N
+} apProf_t;
+
+typedef struct {
+	int       sFrame, wFrame;   // frame number startG / warps are valid for
+	long long startG;           // GPU time (CPU clock, raw) the frame's work starts at
+	int       warps;            // warps placed in the frame
+} apFrame_t;
+
+typedef struct {
+	qboolean  valid;
+	int       frame, shape, where, ord, wb, profMed;
+	long long g;                // raw GPU time of the anchor mark
+} apAnchor_t;
 
 typedef struct {
 	int       idx;              // monotonic warp number (ring slot validity)
@@ -3054,6 +3101,7 @@ typedef struct {
 	long long predUs;           // predicted GPU completion at the decision
 	long long swapUs;           // CPU time the warp's swap returned, 0 = not yet
 	long long doneG;            // raw GPU completion (CPU clock) of the post mark, 0 = not yet
+	qboolean  winFed;           // the deny window has this warp's display time (later of swap return and GPU done)
 	qboolean  failed;
 } apWarp_t;
 
@@ -3121,6 +3169,23 @@ static struct {
 	int       trialN;
 	const char *denyWhy;
 	int       denies[2];        // by reason: slower than late-latch, GPU cannot hold S_min
+	// learned per-checkpoint GPU offset profile (Com_ApPredictCp)
+	apProf_t  prof[AP_SHAPES][AP_PROF_WHERE][AP_PROF_ORD];
+	short     next[AP_SHAPES][AP_PROF_WHERE][AP_PROF_ORD];     // checkpoint that followed (where << 8 | ord) + 1, 0 = none seen
+	apFrame_t frm[4];
+	apAnchor_t anch;            // newest resolved trained checkpoint mark
+	int       pvWhere, pvOrd, pvShape, pvFrame;     // previous resolved profile mark (sequence links)
+	int       fwFrame, frameWarps, prevFrameWarps;  // frame the warp / ordinal counters belong to
+	int       ordCount[AP_PROF_WHERE], curShape, curCascade, lastOrd;
+	long long curFirstSubmit;   // submit time of the first mark of the current frame
+	long long lastRealG;        // raw GPU completion of the newest real frame
+	long long lastRealDisp;     // predicted (then actual) display time of the newest real present, CPU clock (gc scale)
+	int       lastRealTag;      // frameTag of the real present lastRealDisp belongs to
+	// GPU-paced regime (r_frameWarpGpuPaced): the GPU, not the slot clock, sets the real frame rate
+	qboolean  paced;
+	int       pacedFlips;       // regime transitions since the stats reset
+	int       rIv[16], rIvN;    // real display intervals on the GPU clock (ring), us
+	int       pacedReals;       // real frames started in the regime
 	apMark_t  marks[AP_MARKS];
 	int       mHead, mTail;     // pending marks, monotonic
 	int       tagSeq;
@@ -3159,6 +3224,7 @@ static struct {
 	int       doneN;
 	int       warps, fails, realFrames, marks, sleeps, cpWarps;
 	long long cpUs, sleepUs, midSleepUs, firstFrameUs, lastFrameUs;
+	int    modelUse, modelFallback;     // checkpoint predictions from the profile model / the backlog fallback
 	int    decl[6];                     // declined checkpoints: mark spacing, end bound, not ready, too soon, reserved slot, taken
 	double holdSum;                     // real present hold (Com_PresentWait), us
 	int holdN;
@@ -3260,7 +3326,7 @@ static void Com_ApNoteDone( long long t, qboolean real ) {
 	aps.done[aps.doneN++ % AP_DONE_N] = ( t << 1 ) | ( real ? 1 : 0 );
 }
 
-// the deny window collects present times on the swap-return clock (the same clock as the late-latch trial's presents)
+// the deny window collects present times on the display clock: the later of a present's swap return and its GPU completion
 static void Com_ApWinSwap( long long t ) {
 	if ( !ap.winDirty && ap.winTN < AP_WINT_N ) {
 		ap.winT[ap.winTN++] = t;
@@ -3287,6 +3353,140 @@ static void Com_ApFixDone( paceRec_t *r ) {
 	r->doneIdx = -1;
 }
 
+static int Com_ApWarpCost( void );
+
+// shape of a frame for the profile keys: parity while the sun-shadow cascades alternate (no renderer import), else 0
+static int Com_ApShapeOf( int frame ) {
+	return ap.curCascade > 1 ? ( frame & 1 ) : 0;
+}
+
+// once per frame: the per-frame warp and checkpoint-ordinal counters roll over
+static void Com_ApFrameSync( void ) {
+	if ( ap.fwFrame == com_frameNumber ) {
+		return;
+	}
+	if ( ap.fwFrame >= 0 ) {
+		apFrame_t *f = &ap.frm[ap.fwFrame & 3];
+
+		f->wFrame = ap.fwFrame;
+		f->warps = ap.frameWarps;
+	}
+	ap.prevFrameWarps = ap.fwFrame == com_frameNumber - 1 ? ap.frameWarps : 0;
+	ap.fwFrame = com_frameNumber;
+	ap.frameWarps = 0;
+	Com_Memset( ap.ordCount, 0, sizeof( ap.ordCount ) );
+	ap.curFirstSubmit = 0;
+	ap.curCascade = Cvar_VariableIntegerValue( "r_sunShadowCascadeUpdate" );
+	ap.curShape = Com_ApShapeOf( com_frameNumber );
+}
+
+// warps placed in `frame`, 0 when unknown
+static int Com_ApFrameWarps( int frame ) {
+	if ( frame == ap.fwFrame ) {
+		return ap.frameWarps;
+	}
+	return ap.frm[frame & 3].wFrame == frame ? ap.frm[frame & 3].warps : 0;
+}
+
+static apProf_t *Com_ApProf( int shape, int where, int ord ) {
+	if ( shape < 0 || shape >= AP_SHAPES || where < 0 || where >= AP_PROF_WHERE ) {
+		return NULL;
+	}
+	return &ap.prof[shape][where][ord < 0 ? 0 : ord >= AP_PROF_ORD ? AP_PROF_ORD - 1 : ord];
+}
+
+static void Com_ApProfPush( apProf_t *p, int v ) {
+	int tmp[AP_PROF_N], n;
+
+	p->v[p->n++ % AP_PROF_N] = v;
+	n = p->n < AP_PROF_N ? p->n : AP_PROF_N;
+	Com_Memcpy( tmp, p->v, n * sizeof( int ) );
+	qsort( tmp, n, sizeof( int ), Com_PaceCmpInt );
+	p->med = tmp[n / 2];
+}
+
+// a resolved checkpoint mark (raw GPU time g): feeds its key's profile, the anchor and the sequence links
+static void Com_ApProfSample( const apMark_t *m, long long g ) {
+	apFrame_t *f = &ap.frm[m->frame & 3];
+	apProf_t *p;
+	long long off;
+
+	if ( f->sFrame != m->frame || !f->startG ) {
+		f->sFrame = m->frame;
+		f->startG = ap.lastRealG > g ? ap.lastRealG : g;
+	}
+	p = Com_ApProf( m->shape, m->where, m->ord );
+	if ( !p ) {
+		return;
+	}
+	off = g - f->startG - (long long)m->wb * Com_ApWarpCost();
+	if ( off < 0 ) {
+		off = 0;
+	}
+	if ( p->n >= AP_PROF_MIN ) {
+		ap.anch.valid = qtrue;
+		ap.anch.frame = m->frame;
+		ap.anch.shape = m->shape;
+		ap.anch.where = m->where;
+		ap.anch.ord = m->ord;
+		ap.anch.wb = m->wb;
+		ap.anch.profMed = p->med;
+		ap.anch.g = g;
+	}
+	if ( off < 100000 ) {
+		Com_ApProfPush( p, (int)off );
+	}
+	if ( ap.pvFrame == m->frame && ap.pvWhere >= 0 ) {
+		ap.next[ap.pvShape][ap.pvWhere][ap.pvOrd] = (short)( ( m->where << 8 | m->ord ) + 1 );
+	}
+	ap.pvFrame = m->frame;
+	ap.pvWhere = m->where;
+	ap.pvOrd = m->ord;
+	ap.pvShape = m->shape;
+}
+
+/*
+Predicted GPU time (CPU clock, scale of lastDoneUs: raw minus the mark bias) the GPU reaches checkpoint (shape, where, ord)
+of the current frame, never before `now`; -1 = the model cannot say (untrained key, no anchor, anchor too old).
+The anchor is the newest resolved trained checkpoint mark: in this frame the GPU position is anchor + profile difference;
+in the previous frame the frame start is predicted from that frame's end (anchor + END profile - anchor profile, or the
+first submit of this frame when the GPU is idle by then) and the key's offset added.
+*/
+static long long Com_ApPredictCp( int shape, int where, int ord, long long now ) {
+	apProf_t *p = Com_ApProf( shape, where, ord );
+	long long G, bias = (long long)ap.biasUs;
+	int cost;
+
+	if ( !com_frameWarpModel->integer || !p || p->n < AP_PROF_MIN || !ap.anch.valid || ( ap.anch.shape != shape && ap.anch.frame == com_frameNumber ) ) {
+		return -1;
+	}
+	Com_ApFrameSync();
+	cost = Com_ApWarpCost();
+	if ( ap.anch.frame == com_frameNumber ) {
+		G = ap.anch.g + p->med - ap.anch.profMed + (long long)( ap.frameWarps - ap.anch.wb ) * cost;
+	} else if ( ap.anch.frame == com_frameNumber - 1 ) {
+		apProf_t *pe = Com_ApProf( ap.anch.shape, AP_PROF_REAL, 0 );
+		long long endG, start;
+
+		if ( !pe || pe->n < AP_PROF_MIN ) {
+			return -1;
+		}
+		endG = ap.anch.g + pe->med - ap.anch.profMed + (long long)( Com_ApFrameWarps( ap.anch.frame ) - ap.anch.wb ) * cost;
+		start = ( ap.curFirstSubmit ? ap.curFirstSubmit : now ) + bias;
+		if ( endG > start ) {
+			start = endG;
+		}
+		G = start + p->med + (long long)ap.frameWarps * cost;
+	} else {
+		return -1;
+	}
+	G -= bias;
+	if ( G < now ) {
+		G = now;
+	}
+	return G > now + 1000000 ? -1 : G;
+}
+
 /*
 A real frame's present: the later of its GPU completion and its swap return. The fence is queued before the present
 hold, so GPU done alone is when the frame finished rendering, not when it was shown. swapUs 0 = the swap has not been
@@ -3295,10 +3495,29 @@ stamped. Only the interval records use it: the busy time and the rate controller
 static void Com_ApPushDoneNs( paceRec_t *r, long long gpuNs, long long swapUs ) {
 	if ( ap.calValid ) {
 		double g = (double)gpuNs / 1000.0 + ap.calOff;
+		int frame = r->frameTag - 1;
+		apFrame_t *fr = &ap.frm[frame & 3];
 
+		// the real frame's own completion: profile key AP_PROF_REAL (offset from the frame's GPU start, warps of the frame excluded)
+		if ( fr->sFrame == frame && fr->startG ) {
+			long long off = (long long)g - fr->startG - (long long)Com_ApFrameWarps( frame ) * Com_ApWarpCost();
+			apProf_t *pe = Com_ApProf( Com_ApShapeOf( frame ), AP_PROF_REAL, 0 );
+
+			if ( pe && off > 0 && off < 100000 ) {
+				Com_ApProfPush( pe, (int)off );
+			}
+		}
+		if ( (long long)g > ap.lastRealG ) {
+			ap.lastRealG = (long long)g;
+		}
 		Com_ApNoteDone( swapUs > (long long)g ? swapUs : (long long)g, qtrue );
+		r->gDoneUs = (long long)g;
 		if ( !swapUs ) {
 			r->doneIdx = aps.doneN - 1;
+		} else if ( !r->winFed ) {
+			// the deny window sees the display clock: a present is shown when its GPU work is done
+			Com_ApWinSwap( swapUs > (long long)g ? swapUs : (long long)g );
+			r->winFed = qtrue;
 		}
 		if ( swapUs ) {
 			Com_PaceStatPush( aps.rskew, &aps.rskewN, (int)( swapUs - (long long)g ) );
@@ -3307,6 +3526,10 @@ static void Com_ApPushDoneNs( paceRec_t *r, long long gpuNs, long long swapUs ) 
 		// that moment can be early, which lets the next warp land too close behind it
 		if ( ap.nResolved && (long long)( g - ap.biasUs ) > ap.lastDoneUs ) {
 			ap.lastDoneUs = (long long)( g - ap.biasUs );
+		}
+		// the newest real present's display time is now known (not just predicted)
+		if ( ap.nResolved && r->frameTag == ap.lastRealTag ) {
+			ap.lastRealDisp = (long long)( g - ap.biasUs );
 		}
 	}
 }
@@ -3319,6 +3542,14 @@ static void Com_ApReset( void ) {
 	ap.inflight = qfalse;
 	ap.gapValid = qfalse;
 	ap.lastDoneUs = 0;
+	Com_Memset( ap.prof, 0, sizeof( ap.prof ) );
+	Com_Memset( ap.next, 0, sizeof( ap.next ) );
+	Com_Memset( ap.frm, 0, sizeof( ap.frm ) );
+	ap.anch.valid = qfalse;
+	ap.pvFrame = -1;
+	ap.fwFrame = -1;
+	ap.frameWarps = ap.prevFrameWarps = 0;
+	ap.lastRealG = ap.lastRealDisp = ap.curFirstSubmit = 0;
 }
 
 void Com_PaceStatsReset( void ) {
@@ -3389,6 +3620,9 @@ static void Com_ApNoteReal( paceRec_t *r, long long gUs ) {
 
 		ap.ivEma = ap.ivN ? ap.ivEma + ( ratio - ap.ivEma ) / 32.0 : ratio;
 		ap.ivN++;
+		if ( gUs - ap.prevRealG < 100000 ) {
+			ap.rIv[ap.rIvN++ & 15] = (int)( gUs - ap.prevRealG );      // real display interval on the GPU clock
+		}
 		if ( ap.prevRealG > start ) {
 			start = ap.prevRealG;
 		}
@@ -3474,9 +3708,14 @@ static void Com_PaceHarvest( void ) {
 				}
 				ap.baseLastG = gUs;
 			}
+			r->gDoneUs = gUs;
 			if ( ap.running && r->active ) {
 				Com_ApPushDoneNs( r, gpuNs, r->swapUs );
 				Com_ApNoteReal( r, gUs );
+			} else if ( !ap.running && ap.trialEndUs && ap.trialN < AP_WINT_N && r->swapUs && !r->winFed ) {
+				// late-latch trial: the presents of the trial on the display clock, as AP's window
+				ap.trialT[ap.trialN++] = r->swapUs > gUs ? r->swapUs : gUs;
+				r->winFed = qtrue;
 			}
 			if ( ps.lastG && gUs > ps.lastG ) {
 				Com_PaceStatPush( ps.giv, &ps.givN, (int)( gUs - ps.lastG ) );
@@ -3779,6 +4018,68 @@ static double Com_ApBusyP90( void ) {
 	Com_Memcpy( tmp, ap.busyRing, n * sizeof( int ) );
 	qsort( tmp, n, sizeof( int ), Com_PaceCmpInt );
 	return (double)tmp[(int)( ( n - 1 ) * 0.90 + 0.5 )];
+}
+
+// median (p 0.5) or P90 of the last n real-frame busy times, us; 0 = fewer than n samples since the last reset
+static double Com_ApBusyLast( int n, double p ) {
+	int tmp[AP_BUSY_N], i;
+
+	if ( n > AP_BUSY_N || ap.busyN < n ) {
+		return 0;
+	}
+	for ( i = 0; i < n; i++ ) {
+		tmp[i] = ap.busyRing[( ap.busyN - 1 - i ) % AP_BUSY_N];
+	}
+	qsort( tmp, n, sizeof( int ), Com_PaceCmpInt );
+	return (double)tmp[(int)( ( n - 1 ) * p + 0.5 )];
+}
+
+/*
+GPU-paced regime (r_frameWarpGpuPaced 1). When the GPU needs more than two slots for a real frame, the slot clock
+cannot be held and lowering S only idles the GPU (hold + lead + front end serialise). The regime drops the clock:
+real frames start as soon as the fence gate allows, the real present is not held, and the one warp per real frame goes
+to the middle of the real display interval R_est (median of the last 16 real GPU-done intervals). Entered when the
+median busy time of the last 16 real frames is over ENTER x 2 T1, left when P90 of the last 32 is under LEAVE x 2 T1.
+S stays at S_max, k at 2.
+*/
+#define AP_PACED_ENTER 0.93
+#define AP_PACED_LEAVE 0.88
+
+// real display interval estimate, us (2 T1 until there are samples)
+static double Com_ApREst( void ) {
+	int tmp[16], n = ap.rIvN < 16 ? ap.rIvN : 16;
+
+	if ( n < 8 ) {
+		return 2.0 * ap.T1;
+	}
+	Com_Memcpy( tmp, ap.rIv, sizeof( tmp ) );
+	qsort( tmp, n, sizeof( int ), Com_PaceCmpInt );
+	return (double)tmp[n / 2];
+}
+
+// predicted display time of the real frame that starts now (CPU clock, gc scale)
+static long long Com_ApPacedDisplay( long long now ) {
+	return ( ap.lastRealDisp > now ? ap.lastRealDisp : now ) + (long long)Com_ApREst();
+}
+
+static void Com_ApPacedUpdate( void ) {
+	double twoT = 2.0 * ap.T1, v;
+
+	if ( !ap.paced ) {
+		v = Com_ApBusyLast( 16, 0.5 );
+		if ( v > 0 && v > AP_PACED_ENTER * twoT ) {
+			ap.paced = qtrue;
+			ap.pacedFlips++;
+			Com_Printf( "frame warp AP: GPU-paced regime on (busy median %.0f us > %.0f)\n", v, AP_PACED_ENTER * twoT );
+		}
+	} else {
+		v = Com_ApBusyLast( 32, 0.9 );
+		if ( v > 0 && v < AP_PACED_LEAVE * twoT ) {
+			ap.paced = qfalse;
+			ap.pacedFlips++;
+			Com_Printf( "frame warp AP: GPU-paced regime off (busy P90 %.0f us < %.0f)\n", v, AP_PACED_LEAVE * twoT );
+		}
+	}
 }
 
 // S changed its target: the frames around the change never count
@@ -4092,6 +4393,7 @@ static void Com_ApUpdate( void ) {
 	long long now = Sys_Microseconds();
 	double refresh = com_displayRefresh->value, step;
 	int forced;
+	qboolean gpuPaced;
 
 	ap.running = qfalse;
 	Com_ApMapCheck();
@@ -4131,11 +4433,14 @@ static void Com_ApUpdate( void ) {
 	}
 	forced = com_frameWarpK->integer;
 	ap.k = forced > 0 ? ( forced > 8 ? 8 : forced ) : 2;
+	gpuPaced = com_frameWarpGpuPaced->integer != 0 && forced <= 0;
 
 	if ( !ap.wasRunning ) {
 		// first start, or back from a denied period (menu, loading, camera, pause...): the frames around it never count
 		ap.warm = 30;
 		ap.missRun = ap.okRun = ap.ivN = ap.busyN = 0;
+		ap.rIvN = 0;
+		ap.paced = qfalse;
 		ap.calmSinceUs = 0;
 		Com_ApWindowReset();
 		ap.prevRealG = 0;
@@ -4144,9 +4449,11 @@ static void Com_ApUpdate( void ) {
 			// after a long gap the scene is a different one: decide again (a GPU hold restarts mid range). The seed
 			// starts gently (S_max when r_frameWarpSeed is 0); on the same map the last rate that held for 5 s is
 			// tried first, never above the seed
-			double s0 = Com_ApSeedRate();
+			double s0 = gpuPaced ? ap.sMax : Com_ApSeedRate();
 
-			if ( ap.afterHold && ap.sMin + 0.5 * ( ap.sMax - ap.sMin ) < s0 ) {
+			if ( gpuPaced ) {
+				ap.heldS = 0;       // S never moves in GPU-paced mode: nothing to remember
+			} else if ( ap.afterHold && ap.sMin + 0.5 * ( ap.sMax - ap.sMin ) < s0 ) {
 				s0 = ap.sMin + 0.5 * ( ap.sMax - ap.sMin );
 			} else if ( ap.heldS > 0 && com_frameWarpSeed->integer && ap.heldS < s0 ) {
 				s0 = ap.heldS < ap.sMin ? ap.sMin : ap.heldS;
@@ -4171,9 +4478,10 @@ static void Com_ApUpdate( void ) {
 		ap.sTarget = ap.sTarget < ap.sMin ? ap.sMin : ap.sMax;
 	}
 
-	if ( forced > 0 ) {
-		ap.sTarget = ap.sMax;       // dev override: fixed rate
+	if ( forced > 0 || gpuPaced ) {
+		ap.sTarget = ap.sMax;       // dev override, or GPU-paced mode: fixed rate, no steps
 		ap.probing = qfalse;
+		ap.calmSinceUs = 0;
 	} else if ( ap.probing ) {
 		// a raised S is on trial: kept after AP_PROBE_KEEP clean frames, else back (and the next calm is twice as long)
 		double per = ap.k * 1000000.0 / ap.sTarget;
@@ -4278,6 +4586,12 @@ static void Com_ApUpdate( void ) {
 		ap.early = 0;
 	}
 	ap.lastUpdateUs = now;
+	if ( gpuPaced ) {
+		Com_ApPacedUpdate();
+	} else if ( ap.paced ) {
+		ap.paced = qfalse;
+		ap.pacedFlips++;
+	}
 	// the last rate that held for 5 s (the target unchanged and not on trial)
 	if ( ap.sTarget != ap.heldCand || ap.probing ) {
 		ap.heldCand = ap.probing ? 0 : ap.sTarget;
@@ -4302,10 +4616,13 @@ static void Com_ApUpdate( void ) {
 }
 
 // queue a tagged timestamp mark (warp = index of the warp it brackets, -1 none)
-static void Com_ApMark( int warp, qboolean post ) {
+static void Com_ApMark( int warp, qboolean post, int where ) {
 	apMark_t *m;
 	long long t0 = Sys_Microseconds();
 	int tag;
+
+	ap.lastOrd = -1;
+	Com_ApFrameSync();
 
 	if ( ap.mTail - ap.mHead >= AP_MARKS ) {
 		ap.mHead++;
@@ -4320,6 +4637,22 @@ static void Com_ApMark( int warp, qboolean post ) {
 	m->post = post;
 	m->frame = com_frameNumber;
 	m->submitUs = t0;
+	m->where = post ? -1 : where;
+	m->ord = 0;
+	m->shape = ap.curShape;
+	m->wb = ap.frameWarps;
+	if ( m->where >= 0 && m->where < AP_PROF_WHERE ) {
+		m->ord = ap.ordCount[m->where]++;
+		if ( m->ord >= AP_PROF_ORD ) {
+			m->ord = AP_PROF_ORD - 1;
+		}
+		ap.lastOrd = m->ord;
+	} else {
+		m->where = -1;
+	}
+	if ( !ap.curFirstSubmit ) {
+		ap.curFirstSubmit = t0;
+	}
 	ap.lastMarkUs = t0;
 	aps.marks++;
 }
@@ -4354,6 +4687,9 @@ static void Com_ApHarvest( void ) {
 		ap.lastG = (long long)g;
 		ap.lastSubmitUs = m->submitUs;
 		ap.nResolved++;
+		if ( m->where >= 0 && !m->post ) {
+			Com_ApProfSample( m, (long long)g );
+		}
 		gc = (long long)( g - ap.biasUs );
 
 		if ( !m->post ) {
@@ -4384,6 +4720,11 @@ static void Com_ApHarvest( void ) {
 					}
 					if ( w->swapUs ) {
 						Com_PaceStatPush( aps.wskew, &aps.wskewN, (int)( w->swapUs - w->doneG ) );
+						if ( !w->winFed ) {
+							// a warp is shown when its GPU work is done, not when its swap call returned (queued ms earlier)
+							Com_ApWinSwap( w->swapUs > w->doneG ? w->swapUs : w->doneG );
+							w->winFed = qtrue;
+						}
 					}
 					if ( m->warp == ap.nWarps - 1 && !ap.realSinceWarp ) {
 						ap.lastDoneUs = gc;     // the prediction was made on the same scale (never below a real present noted since)
@@ -4449,8 +4790,11 @@ static long long apSleptUs;
 
 static qboolean Com_ApDecideInner( int where, int boundUs ) {
 	long long now = Sys_Microseconds(), t0 = now, pc, reserve;
-	int backlog, cost, markIdx;
+	int backlog, cost, markIdx, ordThis;
+	qboolean model = qfalse;
 	qboolean cpu = where >= AP_CP_AFTER_SV, slept = qfalse;
+	qboolean paced = ap.paced;
+	long long gap = (long long)ap.Tmin - (long long)ap.early, pTgt = 0;
 	apWarp_t *w;
 
 	if ( where != WARP_CPX_END ) {
@@ -4460,13 +4804,15 @@ static qboolean Com_ApDecideInner( int where, int boundUs ) {
 		}
 	}
 	markIdx = ap.mTail;
+	ordThis = -1;
 	{
 		long long workUs = ap.lastMarkUs;
 
-		Com_ApMark( -1, qfalse );
+		Com_ApMark( -1, qfalse, where );
 		if ( cpu ) {
 			ap.lastMarkUs = workUs;     // a CPU checkpoint submits no GPU work: its time must not count as GPU work done after the last mark
 		}
+		ordThis = ap.lastOrd;
 	}
 	Com_ApHarvest();
 	backlog = Com_ApBacklog( now );
@@ -4504,24 +4850,85 @@ static qboolean Com_ApDecideInner( int where, int boundUs ) {
 
 	cost = Com_ApWarpCost();
 	pc = now + backlog + cost;
-	if ( pc < ap.lastDoneUs + (long long)( ap.Tmin - ap.early ) ) {
-		aps.decl[3]++;
-		return qfalse;
+	if ( ordThis >= 0 ) {
+		long long G = Com_ApPredictCp( ap.curShape, where, ordThis, now );
+
+		if ( G >= 0 ) {
+			pc = G + cost;
+			model = qtrue;
+			aps.modelUse++;
+		}
 	}
-	reserve = ( pacer.active && pacer.deadlineUs > 0 && pacer.presentedFrame != com_frameNumber + 1 ) ? (long long)pacer.deadlineUs : 0;
-	if ( reserve > now && pc + (long long)ap.Tmin > reserve + (long long)( com_frameWarpLate->value * ap.T1 ) ) {
-		aps.decl[4]++;
-		return qfalse;      // the real present serves this slot
+	if ( !model ) {
+		aps.modelFallback++;
+	}
+	reserve = 0;
+	if ( paced ) {
+		// GPU-paced regime: one warp per real frame, in the middle of the real display interval. No deadline: the
+		// neighbours are the display of the previous real frame (known or predicted) and of this one (predicted).
+		double R = Com_ApREst();
+		long long realDisp = ap.lastRealDisp, realEnd = 0, win;
+
+		if ( !model || realDisp <= 0 || ap.warpsSinceReal >= ap.k - 1 ) {
+			aps.decl[model && realDisp > 0 ? 4 : 3]++;
+			return qfalse;
+		}
+		gap = (long long)( com_frameWarpPacedGap->value * R );
+		if ( gap > (long long)ap.Tmin ) {
+			gap = (long long)ap.Tmin;
+		}
+		if ( com_frameWarpPacedTgt->integer == 1 ) {
+			Com_ApFrameSync();
+			realEnd = Com_ApPredictCp( ap.curShape, AP_PROF_REAL, 0, now );
+		}
+		if ( realEnd > realDisp ) {
+			pTgt = realDisp + ( realEnd - realDisp + cost ) / 2;
+		} else {
+			realEnd = realDisp + (long long)R;
+			pTgt = realDisp + (long long)( ( R + cost ) * 0.5 );
+		}
+		win = (long long)( com_frameWarpPacedWin->value * R * 0.5 );
+		if ( pc < pTgt - win || pc > pTgt + win || pc < realDisp + gap || pc + gap > realEnd + cost ||
+			 pc < ap.lastDoneUs + gap ) {
+			aps.decl[3]++;
+			return qfalse;      // no checkpoint near the middle: this real frame goes without a warp (plain late-latch)
+		}
+	} else {
+		if ( pc < ap.lastDoneUs + gap ) {
+			aps.decl[3]++;
+			return qfalse;
+		}
+		reserve = ( pacer.active && pacer.deadlineUs > 0 && pacer.presentedFrame != com_frameNumber + 1 ) ? (long long)pacer.deadlineUs : 0;
+		if ( reserve > now && pc + (long long)ap.Tmin > reserve + (long long)( com_frameWarpLate->value * ap.T1 ) ) {
+			aps.decl[4]++;
+			return qfalse;      // the real present serves this slot
+		}
+
+		if ( ap.warpsSinceReal >= ap.k - 1 + ( reserve && now > reserve ? (int)( (double)( now - reserve ) / ap.T1 ) : 0 ) ) {
+			aps.decl[4]++;
+			return qfalse;      // this real period already has its k - 1 warps (more only while the real frame is overdue)
+		}
 	}
 
-	if ( ap.warpsSinceReal >= ap.k - 1 + ( reserve && now > reserve ? (int)( (double)( now - reserve ) / ap.T1 ) : 0 ) ) {
-		aps.decl[4]++;
-		return qfalse;      // this real period already has its k - 1 warps (more only while the real frame is overdue)
+	// nearest checkpoint: the next one in the frame's sequence is nearer the target (mid-period after the last real) than this
+	if ( model && ordThis >= 0 && ap.next[ap.curShape][where < AP_PROF_WHERE ? where : 0][ordThis] ) {
+		int nk = ap.next[ap.curShape][where][ordThis] - 1;
+
+		if ( ( nk >> 8 ) != WARP_CPX_END ) {
+			long long Gn = Com_ApPredictCp( ap.curShape, nk >> 8, nk & 255, now );
+			long long target = paced ? pTgt : ( ap.warpsSinceReal == 0 && ap.lastRealDisp ? ap.lastRealDisp : ap.lastDoneUs ) + (long long)ap.T1;
+			long long d0 = pc - target, d1 = Gn + cost - target;
+
+			if ( Gn >= 0 && ( d1 < 0 ? -d1 : d1 ) < ( d0 < 0 ? -d0 : d0 ) ) {
+				aps.decl[3]++;
+				return qfalse;
+			}
+		}
 	}
 
 	// the pre mark: the checkpoint's own when nothing slept in between and it is still pending
 	if ( slept || markIdx < ap.mHead || markIdx >= ap.mTail ) {
-		Com_ApMark( ap.nWarps, qfalse );
+		Com_ApMark( ap.nWarps, qfalse, -1 );
 	} else {
 		ap.marks[markIdx % AP_MARKS].warp = ap.nWarps;
 	}
@@ -4535,8 +4942,10 @@ static qboolean Com_ApDecideInner( int where, int boundUs ) {
 	w->predUs = pc;
 	w->swapUs = 0;
 	w->doneG = 0;
+	w->winFed = qfalse;
 	w->failed = qfalse;
 	ap.nWarps++;
+	ap.frameWarps++;
 	ap.prevLastDoneUs = ap.lastDoneUs;
 	ap.lastDoneUs = pc;
 	ap.warpPredDoneUs = pc;
@@ -4566,6 +4975,9 @@ static qboolean Com_ApDecide( int where, int boundUs ) {
 static void Com_ApPresentAbort( void ) {
 	if ( ap.inflight ) {
 		ap.warpsSinceReal--;
+		if ( ap.frameWarps > 0 ) {
+			ap.frameWarps--;
+		}
 		ap.warps[( ap.nWarps - 1 ) % AP_WRECS].failed = qtrue;
 		ap.lastDoneUs = ap.prevLastDoneUs;
 		ap.realSinceWarp = ap.prevRealSince;
@@ -4576,6 +4988,9 @@ static void Com_ApPresentAbort( void ) {
 static void Com_ApPresentEnd( void ) {
 	if ( ap.inflight ) {
 		ap.warpsSinceReal--;
+		if ( ap.frameWarps > 0 ) {
+			ap.frameWarps--;
+		}
 		ap.warps[( ap.nWarps - 1 ) % AP_WRECS].failed = qtrue;
 		ap.lastDoneUs = ap.prevLastDoneUs;
 		ap.realSinceWarp = ap.prevRealSince;
@@ -4688,7 +5103,7 @@ static qboolean Com_ApWarpPresentWait( void ) {
 		return qfalse;
 	}
 	ap.swapT0 = Sys_Microseconds();
-	Com_ApMark( ap.nWarps - 1, qtrue );
+	Com_ApMark( ap.nWarps - 1, qtrue, -1 );
 	return qtrue;
 }
 
@@ -4702,10 +5117,11 @@ static qboolean Com_ApWarpPresentDone( void ) {
 	Com_PaceStatPush( aps.swap, &aps.swapN, (int)( now - ap.swapT0 ) );
 	// same-clock series: the swap return, as for the real presents (Com_PresentDone)
 	aps.sdone[aps.sdoneN++ % AP_DONE_N] = now << 1;
-	Com_ApWinSwap( now );
 	w->swapUs = now;
 	if ( w->doneG ) {
 		Com_PaceStatPush( aps.wskew, &aps.wskewN, (int)( now - w->doneG ) );
+		Com_ApWinSwap( now > w->doneG ? now : w->doneG );
+		w->winFed = qtrue;
 	}
 	if ( ap.warpsSinceReal == 1 && com_lastPresentUs > 0 && now - com_lastPresentUs < 100000 ) {
 		Com_PaceStatPush( aps.wlate, &aps.wlateN, (int)( now - ( com_lastPresentUs + (long long)ap.T1 ) ) );
@@ -4717,7 +5133,15 @@ static qboolean Com_ApWarpPresentDone( void ) {
 
 // the real frame's swap returned: its present is the newest thing on the GPU
 static void Com_ApNoteRealPresent( long long now ) {
-	long long done = now + Com_ApBacklog( now );
+	long long done = now + Com_ApBacklog( now ), G;
+
+	// the real present's display time: the profile's end-of-frame prediction (the backlog model when untrained)
+	Com_ApFrameSync();
+	G = Com_ApPredictCp( ap.curShape, AP_PROF_REAL, 0, now );
+	if ( G >= 0 ) {
+		done = G;
+	}
+	ap.lastRealDisp = done;
 
 	ap.warpsSinceReal = 0;
 	ap.realSinceWarp = qtrue;
@@ -4738,10 +5162,14 @@ float Com_WarpMoveDt( void ) {
 	if ( Cvar_VariableIntegerValue( "r_frameWarpMeshDt" ) == 1 ) {
 		dt = ap.warpsSinceReal * ap.T1 * 1e-6;
 	} else {
-		if ( ap.warpPredDoneUs <= 0 || com_lastPresentUs <= 0 ) {
+		if ( ap.paced && ap.lastRealDisp > 0 && ap.warpPredDoneUs > 0 ) {
+			// GPU-paced: the real frame is shown when its GPU work is done, long after its swap returned
+			dt = (double)( ap.warpPredDoneUs - ap.lastRealDisp ) * 1e-6;
+		} else if ( ap.warpPredDoneUs <= 0 || com_lastPresentUs <= 0 ) {
 			return -1.0f;
+		} else {
+			dt = (double)( ap.warpPredDoneUs - com_lastPresentUs ) * 1e-6;
 		}
-		dt = (double)( ap.warpPredDoneUs - com_lastPresentUs ) * 1e-6;
 	}
 	if ( dt < 0 ) {
 		dt = 0;
@@ -4828,33 +5256,60 @@ static void Com_ApDiagPrint( void ) {
 	Com_ApSwapSeriesPrint();
 	Com_Printf( "codmod ap diag (us, p2/p50/p98): warp_actual_minus_pred %d/%d/%d (n=%d) | warp_late_vs_realswap+T1 %d/%d/%d (n=%d) | "
 				"swapret_minus_gpudone warp %d/%d/%d real %d/%d/%d | hold target-from-prev-swap p50 %d result p50 %d, swapret_minus_target %d/%d/%d (n=%d) | "
-				"trials started=%d kept=%d denied=%d aborted=%d\n",
+				"trials started=%d kept=%d denied=%d aborted=%d | model_use=%d model_fallback=%d\n",
 				Com_PacePct( aps.wpred, aps.wpredN, 0.02 ), Com_PacePct( aps.wpred, aps.wpredN, 0.5 ), Com_PacePct( aps.wpred, aps.wpredN, 0.98 ), aps.wpredN,
 				Com_PacePct( aps.wlate, aps.wlateN, 0.02 ), Com_PacePct( aps.wlate, aps.wlateN, 0.5 ), Com_PacePct( aps.wlate, aps.wlateN, 0.98 ), aps.wlateN,
 				Com_PacePct( aps.wskew, aps.wskewN, 0.02 ), Com_PacePct( aps.wskew, aps.wskewN, 0.5 ), Com_PacePct( aps.wskew, aps.wskewN, 0.98 ),
 				Com_PacePct( aps.rskew, aps.rskewN, 0.02 ), Com_PacePct( aps.rskew, aps.rskewN, 0.5 ), Com_PacePct( aps.rskew, aps.rskewN, 0.98 ),
 				Com_PacePct( aps.hTgt, aps.hTgtN, 0.5 ), Com_PacePct( aps.hRes, aps.hResN, 0.5 ),
 				Com_PacePct( aps.hOver, aps.hOverN, 0.02 ), Com_PacePct( aps.hOver, aps.hOverN, 0.5 ), Com_PacePct( aps.hOver, aps.hOverN, 0.98 ), aps.hOverN,
-				ap.trials[0], ap.trials[1], ap.trials[2], ap.trials[3] );
+				ap.trials[0], ap.trials[1], ap.trials[2], ap.trials[3], aps.modelUse, aps.modelFallback );
 }
 
-// distinct presents (the swap-return series) per timeline bucket
-static void Com_ApTlDistinct( int *cnt ) {
+// apstats prof: the learned checkpoint offset profile (median us from the frame's GPU start / samples) with the sequence links
+static void Com_ApProfPrint( void ) {
+	int sh, w, o;
+
+	for ( sh = 0; sh < AP_SHAPES; sh++ ) {
+		Com_Printf( "APPROF shape %d (where.ord:median_us/samples -> next where.ord)\n", sh );
+		for ( w = 0; w < AP_PROF_WHERE; w++ ) {
+			for ( o = 0; o < AP_PROF_ORD; o++ ) {
+				apProf_t *p = &ap.prof[sh][w][o];
+
+				if ( p->n > 0 ) {
+					int nx = ap.next[sh][w][o] - 1;
+
+					Com_Printf( "APPROF  %d.%d:%d/%d -> %d.%d\n", w, o, p->med, p->n, nx >= 0 ? nx >> 8 : -1, nx >= 0 ? nx & 255 : -1 );
+				}
+			}
+		}
+	}
+}
+
+// distinct presents of a series (aps.sdone swap-return, aps.done GPU completion) per timeline bucket; low (optional)
+// counts intervals shorter than half a slot per bucket
+static void Com_ApTlDistinctSeries( const long long *src, int total, int *cnt, int *low ) {
 	static long long tmp[AP_DONE_N];
-	int n = aps.sdoneN < AP_DONE_N ? aps.sdoneN : AP_DONE_N, i;
-	long long last = 0;
+	int n = total < AP_DONE_N ? total : AP_DONE_N, i;
+	long long last = 0, prev = 0;
 	double minGap = com_frameWarpDenyMinGap->value * ap.T1;
 	qboolean first = qtrue;
 
 	Com_Memset( cnt, 0, AP_TL_N * sizeof( int ) );
-	Com_Memcpy( tmp, aps.sdone, n * sizeof( long long ) );
+	if ( low ) {
+		Com_Memset( low, 0, AP_TL_N * sizeof( int ) );
+	}
+	Com_Memcpy( tmp, src, n * sizeof( long long ) );
 	qsort( tmp, n, sizeof( long long ), Com_ApCmpLL );
 	for ( i = 0; i < n; i++ ) {
 		long long v = tmp[i] >> 1;
+		long long b = ( v - aps.tlT0 ) / AP_TL_US;
 
+		if ( low && i && (double)( v - prev ) < 0.5 * ap.T1 && v >= aps.tlT0 && b <= aps.tlCur && b > aps.tlCur - AP_TL_N ) {
+			low[b % AP_TL_N]++;
+		}
+		prev = v;
 		if ( first || (double)( v - last ) >= minGap ) {
-			long long b = ( v - aps.tlT0 ) / AP_TL_US;
-
 			first = qfalse;
 			last = v;
 			if ( v >= aps.tlT0 && b <= aps.tlCur && b > aps.tlCur - AP_TL_N ) {
@@ -4864,9 +5319,14 @@ static void Com_ApTlDistinct( int *cnt ) {
 	}
 }
 
+// distinct presents (the swap-return series) per timeline bucket
+static void Com_ApTlDistinct( int *cnt ) {
+	Com_ApTlDistinctSeries( aps.sdone, aps.sdoneN, cnt, NULL );
+}
+
 // the last `seconds` of the timeline (0 = all kept), one row per 250 ms bucket
 static void Com_ApTimelinePrint( fileHandle_t f, int seconds ) {
-	static int dist[AP_TL_N];
+	static int dist[AP_TL_N], gdist[AP_TL_N], glow[AP_TL_N];
 	int b, from, count = seconds > 0 ? seconds * 4 : AP_TL_N;
 
 	if ( !aps.tlT0 || aps.tlCur < 0 ) {
@@ -4878,7 +5338,8 @@ static void Com_ApTimelinePrint( fileHandle_t f, int seconds ) {
 		from = 0;
 	}
 	Com_ApTlDistinct( dist );
-	Com_ApOut( f, "# timeline 250 ms buckets (dist = distinct presents on the swap-return clock): t_s slot distinct warps reals decl(spacing/end/notready/toosoon/reserved/taken) busy_mean/max_us miss sleeps trial(0 none,1 measuring,2 denied)\n" );
+	Com_ApTlDistinctSeries( aps.done, aps.doneN, gdist, glow );
+	Com_ApOut( f, "# timeline 250 ms buckets (dist = distinct presents on the swap-return clock, gdist = on the GPU-completion clock, glow = GPU-clock intervals under half a slot): t_s slot distinct gdist glow warps reals decl(spacing/end/notready/toosoon/reserved/taken) busy_mean/max_us miss sleeps trial(0 none,1 measuring,2 denied)\n" );
 	for ( b = from; b <= aps.tlCur; b++ ) {
 		apTl_t t = aps.tl[b % AP_TL_N];
 
@@ -4888,8 +5349,8 @@ static void Com_ApTimelinePrint( fileHandle_t f, int seconds ) {
 		if ( b == aps.tlCur ) {
 			Com_ApTlClose( &t );
 		}
-		Com_ApOut( f, "%7.2f S=%.0f dist=%d warps=%d reals=%d decl=%d/%d/%d/%d/%d/%d busy=%.0f/%d miss=%d sleeps=%d trial=%d\n",
-				   b * 0.25, t.slot, dist[b % AP_TL_N], t.warps, t.reals, t.decl[0], t.decl[1], t.decl[2], t.decl[3], t.decl[4], t.decl[5],
+		Com_ApOut( f, "%7.2f S=%.0f dist=%d gdist=%d glow=%d warps=%d reals=%d decl=%d/%d/%d/%d/%d/%d busy=%.0f/%d miss=%d sleeps=%d trial=%d\n",
+				   b * 0.25, t.slot, dist[b % AP_TL_N], gdist[b % AP_TL_N], glow[b % AP_TL_N], t.warps, t.reals, t.decl[0], t.decl[1], t.decl[2], t.decl[3], t.decl[4], t.decl[5],
 				   t.busyN ? t.busySum / t.busyN : 0.0, t.busyMax, t.miss, t.sleeps, t.trial );
 	}
 }
@@ -5041,7 +5502,7 @@ void Com_ApStatsPrint( void ) {
 	Com_Printf( "codmod ap: running=%d k=%d slot=%.1f cap=%.2f state=%s smin=%.0f smax=%.0f downs=%d ups=%d real_fps=%.1f frames=%d span_s=%.2f presents_total=%d warps=%d cpu_warps=%d fails=%d done=%d "
 				"distinct_per_s=%.1f distinct_iv_p98=%d gpuclk_distinct_per_s=%.1f ll_est_fps=%.1f fe_p50=%d fe_p98=%d hold_mean=%.0f wcost_p50=%d wcost_p98=%d gap_p50=%d gap_p98=%d iv_p2=%d iv_p50=%d iv_p98=%d iv_gt1p5T%%=%.1f "
 				"s2g_p50=%d s2g_p98=%d swap_p98=%d sleeps=%d sleep_us_frame=%.0f mid_sleep_us_frame=%.0f cp_us_frame=%.0f misses=%d probes=%d reverts=%d decl=%d/%d/%d/%d/%d/%d "
-				"busy_us_per_real=%.0f busy_ema=%.0f baseline_us=%.0f baseline_n=%d denies_slower_ll=%d denies_gpu_hold=%d deny=%s\n",
+				"busy_us_per_real=%.0f busy_ema=%.0f baseline_us=%.0f baseline_n=%d denies_slower_ll=%d denies_gpu_hold=%d paced=%d paced_flips=%d paced_reals=%d r_est=%.0f trials=%d/%d/%d/%d deny=%s\n",
 				ap.running, ap.k, ap.slotRate, ap.realFps, ap.probing ? "probing" : "steady", ap.sMin, ap.sMax, ap.downs, ap.ups, fps, aps.realFrames, aps.lastFrameUs > aps.firstFrameUs ? ( aps.lastFrameUs - aps.firstFrameUs ) * 1e-6 : 0.0, aps.doneN, aps.warps, aps.cpWarps, aps.fails, n,
 				distinctPerS, distinctP98, gpuDistinctPerS, Com_ApLLEstimate( Sys_Microseconds() ), fe50, fe98, aps.holdN ? aps.holdSum / aps.holdN : 0.0,
 				Com_PacePct( aps.wcost, aps.wcostN, 0.5 ), Com_PacePct( aps.wcost, aps.wcostN, 0.98 ),
@@ -5049,7 +5510,8 @@ void Com_ApStatsPrint( void ) {
 				p2, p50, p98, ni ? 100.0 * over / ni : 0.0,
 				Com_PacePct( aps.s2g, aps.s2gN, 0.5 ), Com_PacePct( aps.s2g, aps.s2gN, 0.98 ),
 				Com_PacePct( aps.swap, aps.swapN, 0.98 ), aps.sleeps, aps.sleepUs / frames, aps.midSleepUs / frames, aps.cpUs / frames, ap.missTotal, ap.probes, ap.reverts, aps.decl[0], aps.decl[1], aps.decl[2], aps.decl[3], aps.decl[4], aps.decl[5],
-				aps.busyCount ? aps.busySum / aps.busyCount : 0.0, ap.busyEma, ap.baseN ? ap.baseIvEma : 0.0, ap.baseN, ap.denies[0], ap.denies[1], why );
+				aps.busyCount ? aps.busySum / aps.busyCount : 0.0, ap.busyEma, ap.baseN ? ap.baseIvEma : 0.0, ap.baseN, ap.denies[0], ap.denies[1],
+				ap.paced, ap.pacedFlips, ap.pacedReals, Com_ApREst(), ap.trials[0], ap.trials[1], ap.trials[2], ap.trials[3], why );
 	Com_ApDiagPrint();
 }
 
@@ -5069,6 +5531,10 @@ static void Com_ApStats_f( void ) {
 	}
 	if ( Cmd_Argc() > 1 && !Q_stricmp( Cmd_Argv( 1 ), "dump" ) ) {
 		Com_ApDump();
+		return;
+	}
+	if ( Cmd_Argc() > 1 && !Q_stricmp( Cmd_Argv( 1 ), "prof" ) ) {
+		Com_ApProfPrint();
 		return;
 	}
 	Com_Printf( "AP %s | slot rate %.0f (target %.0f, range %.0f-%.0f), real %.1f fps, k=%d, %s | deny: %s | misses %d, downs %d, probes %d, kept %d, reverts %d, present fails %d\n",
@@ -5520,13 +5986,13 @@ static void Com_FrameWaitTopFence( long long arrivedUs ) {
 	double T = pacer.periodUs, planned;
 	int lead = 0, q = Com_PaceQueue();
 	long long t0, now;
-	qboolean ll1;
+	qboolean ll1, paced = ap.running && ap.paced;
 
 	pacer.fence = qtrue;
 	Com_PaceHarvest();
 
 	ll1 = r_frameWarp->integer == 1 && com_latchSync && com_latchSync->integer != 0 && !pacer.gpuBound;
-	if ( pacer.mode == 2 ) {
+	if ( pacer.mode == 2 && !paced ) {
 		lead = Com_PaceLead() + 500;
 		if ( pacer.presentedFrame == 0 ) {
 			lead = (int)( T * 0.5 );
@@ -5555,7 +6021,9 @@ static void Com_FrameWaitTopFence( long long arrivedUs ) {
 
 	planned = pacer.mode == 0 ? pacer.deadlineUs : pacer.mode == 2 ? pacer.deadlineUs - lead : (double)arrivedUs;
 	t0 = Sys_Microseconds();
-	if ( pacer.mode == 0 ) {
+	if ( paced ) {
+		// GPU-paced: no deadline-lead wait, the fence gate below is the only gate
+	} else if ( pacer.mode == 0 ) {
 		Com_PaceWaitUntil( (long long)pacer.deadlineUs, AP_CP_WAIT );
 	} else if ( pacer.mode == 2 ) {
 		Com_PaceWaitUntil( (long long)pacer.deadlineUs - lead, AP_CP_WAIT );
@@ -5583,7 +6051,13 @@ static void Com_FrameWaitTopFence( long long arrivedUs ) {
 	now = Sys_Microseconds();
 	Com_PaceStatPush( ps.bl, &ps.blN, (int)( now - t0 ) );
 
-	if ( now > planned + 0.25 * T ) {
+	if ( paced ) {
+		// the display of this real frame is predicted from the newest real display, no re-anchor and no miss
+		pacer.deadlineUs = (double)Com_ApPacedDisplay( now );
+		pacer.late = qfalse;
+		pacer.lateWhy = 0;
+		ap.pacedReals++;
+	} else if ( now > planned + 0.25 * T ) {
 		pacer.deadlineUs = pacer.mode == 2 ? (double)now + lead : (double)now;
 		pacer.late = qtrue;
 		pacer.lateWhy = 1;
@@ -5691,14 +6165,20 @@ static void Com_FrameWaitTop( void ) {
 	}
 
 	pacer.active = qtrue;
-	pacer.periodUs = 1000000.0 / fps;
-	pacer.deadlineUs += pacer.periodUs;
 	pacer.late = qfalse;
 	pacer.lateWhy = 0;
-	if ( pacer.deadlineUs < now - pacer.periodUs * 0.5 || pacer.deadlineUs > now + 2 * pacer.periodUs ) {
-		pacer.deadlineUs = (double)now;     // first frame, hitch, or cap changed
-		pacer.late = qtrue;
-		pacer.lateWhy = 2;
+	if ( ap.running && ap.paced ) {
+		// GPU-paced: no slot clock; the deadline is the predicted display of this real frame (rebased after the fence wait)
+		pacer.periodUs = Com_ApREst();
+		pacer.deadlineUs = (double)Com_ApPacedDisplay( now );
+	} else {
+		pacer.periodUs = 1000000.0 / fps;
+		pacer.deadlineUs += pacer.periodUs;
+		if ( pacer.deadlineUs < now - pacer.periodUs * 0.5 || pacer.deadlineUs > now + 2 * pacer.periodUs ) {
+			pacer.deadlineUs = (double)now;     // first frame, hitch, or cap changed
+			pacer.late = qtrue;
+			pacer.lateWhy = 2;
+		}
 	}
 
 	if ( fence ) {
@@ -5826,6 +6306,18 @@ void Com_PresentWait( void ( *finish )( void ) ) {
 	}
 
 	if ( pacer.vblankLock || pacer.mode == 0 ) {
+		return;
+	}
+	if ( ap.running && ap.paced ) {
+		// GPU-paced: the real present is not held to a deadline, only behind a warp that landed late (Tmin)
+		t0 = Sys_Microseconds();
+		holdTo = Com_ApHoldTo( (double)t0 );
+		ap.holdToUs = (long long)holdTo;
+		if ( holdTo > (double)t0 ) {
+			Sys_WaitUntil( (long long)holdTo, com_maxfpsSpinUs->integer );
+		}
+		aps.holdSum += (double)( Sys_Microseconds() - t0 );
+		aps.holdN++;
 		return;
 	}
 	if ( ready > pacer.deadlineUs + pacer.periodUs * 0.5 ) {
@@ -6015,7 +6507,6 @@ void Com_PresentDone( void ( *finish )( void ) ) {
 	com_lastPresentUs = Sys_Microseconds();
 	if ( ap.running ) {
 		aps.sdone[aps.sdoneN++ % AP_DONE_N] = ( com_lastPresentUs << 1 ) | 1;
-		Com_ApWinSwap( com_lastPresentUs );
 		if ( ap.holdToUs && ap.prevSwapUs && com_lastPresentUs - ap.prevSwapUs < 100000 ) {
 			Com_PaceStatPush( aps.hOver, &aps.hOverN, (int)( com_lastPresentUs - ap.holdToUs ) );
 			Com_PaceStatPush( aps.hTgt, &aps.hTgtN, (int)( ap.holdToUs - ap.prevSwapUs ) );
@@ -6024,19 +6515,36 @@ void Com_PresentDone( void ( *finish )( void ) ) {
 		ap.holdToUs = 0;
 		ap.prevSwapUs = com_lastPresentUs;
 	}
-	if ( !ap.running && ap.trialEndUs && ap.trialN < AP_WINT_N ) {
-		ap.trialT[ap.trialN++] = com_lastPresentUs;
-	}
-	if ( ap.running ) {
+	{
 		paceRec_t *r = Com_PaceRecCur();
 
 		if ( r ) {
-			r->swapUs = com_lastPresentUs;
-			if ( r->doneIdx >= 0 ) {
-				Com_ApFixDone( r );
+			r->swapUs = com_lastPresentUs;      // also stamped during a late-latch trial: Com_PaceHarvest feeds its series
+		}
+		if ( !ap.running && ap.trialEndUs && ap.trialN < AP_WINT_N ) {
+			// late-latch trial: display clock, as AP's window. A record harvested before its swap is fed here, else at the harvest
+			if ( !r ) {
+				ap.trialT[ap.trialN++] = com_lastPresentUs;
+			} else if ( r->gDoneUs && !r->winFed ) {
+				ap.trialT[ap.trialN++] = com_lastPresentUs > r->gDoneUs ? com_lastPresentUs : r->gDoneUs;
+				r->winFed = qtrue;
 			}
 		}
-		Com_ApNoteRealPresent( com_lastPresentUs );
+		if ( ap.running ) {
+			if ( r ) {
+				if ( r->doneIdx >= 0 ) {
+					// harvested before its swap: the GPU time is known, feed the display time now
+					if ( !r->winFed ) {
+						Com_ApWinSwap( com_lastPresentUs > r->gDoneUs ? com_lastPresentUs : r->gDoneUs );
+						r->winFed = qtrue;
+					}
+					Com_ApFixDone( r );
+				}
+			} else {
+				Com_ApWinSwap( com_lastPresentUs );
+			}
+			Com_ApNoteRealPresent( com_lastPresentUs );
+		}
 	}
 	if ( ps.lastSwapUs && com_lastPresentUs - ps.lastSwapUs < 500000 ) {
 		Com_PaceStatPush( ps.siv, &ps.sivN, (int)( com_lastPresentUs - ps.lastSwapUs ) );
