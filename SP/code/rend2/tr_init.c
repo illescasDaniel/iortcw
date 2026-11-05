@@ -146,6 +146,10 @@ cvar_t  *r_smaa;
 cvar_t  *r_smaaDebug;
 cvar_t  *r_smaaTemporal;
 cvar_t  *r_smaaJitter;
+cvar_t  *r_renderScale;
+cvar_t  *r_renderScaleFilter;
+cvar_t  *r_renderScaleSharp;
+cvar_t  *r_dlsStrength;
 cvar_t  *r_frameWarp;
 cvar_t  *r_frameWarpMaxDeg;
 cvar_t  *r_frameWarpEdgeBlur;
@@ -214,6 +218,7 @@ cvar_t  *r_parallaxMapOffset;
 cvar_t  *r_parallaxMapShadows;
 cvar_t  *r_parallaxMinDepth;
 cvar_t  *r_parallaxMaxSteps;
+cvar_t  *r_parallaxOpt;
 cvar_t  *r_parallaxStepDensity;
 cvar_t  *r_parallaxMarchLod;
 cvar_t  *r_parallaxShadowFade;
@@ -252,6 +257,8 @@ cvar_t  *r_flashlightShadow;
 cvar_t  *r_dlightAlbedoLift;
 cvar_t  *r_flashlightShadowSize;
 cvar_t  *r_drawSunRays;
+cvar_t  *r_sunRaysOpt;
+cvar_t  *r_sunRaysTaps;
 cvar_t  *r_sunShadows;
 cvar_t  *r_shadowFilter;
 cvar_t  *r_shadowBlur;
@@ -296,6 +303,12 @@ cvar_t  *r_finish;
 cvar_t  *r_swapFinish;
 cvar_t  *r_flaresAsync;
 cvar_t  *r_mdsDepthTangents;
+cvar_t  *r_smaaT2xPingPong;
+cvar_t  *r_smaaT2xNoSceneCopy;
+cvar_t  *r_gradeNoCopy;
+cvar_t  *r_depthAttribTrim;
+cvar_t  *r_mdsSkinCache;
+cvar_t  *r_mdsShadowLod;
 cvar_t  *r_gpuProfile;
 cvar_t  *r_gpuLoad;
 cvar_t  *r_smaaStencil;
@@ -1455,6 +1468,53 @@ void R_ApplyAA( void ) {
 
 /*
 ==================
+R_ComputeRenderScale
+
+Decides tr.renderScale and the scene size once per renderer init (r_renderScale is latched).
+Inactive with MSAA, without HDR/FBOs and with stereo or anaglyph output.
+==================
+*/
+void R_ComputeRenderScale( void ) {
+	float value = r_renderScale->value;
+	const char *reason = NULL;
+
+	// the cvar range already clamps; this also covers NaN and keeps the scene at least a quarter of the window
+	if ( !( value >= 0.25f ) ) {
+		value = 0.25f;
+	} else if ( value > 1.0f ) {
+		value = 1.0f;
+	}
+
+	tr.renderScale.active = qfalse;
+	tr.renderScale.value = 1.0f;
+	tr.sceneWidth = glConfig.vidWidth;
+	tr.sceneHeight = glConfig.vidHeight;
+
+	if ( value >= 0.999f ) {
+		reason = "scale 1";
+	} else if ( !glRefConfig.framebufferObject || !r_hdr->integer ) {
+		reason = "no hdr/fbo";
+	} else if ( r_ext_framebuffer_multisample->integer >= 2 ) {
+		reason = "MSAA";
+	} else if ( glConfig.stereoEnabled || r_anaglyphMode->integer ) {
+		reason = "stereo";
+	}
+
+	if ( reason ) {
+		ri.Printf( PRINT_ALL, "render scale: inactive (%s)\n", reason );
+		return;
+	}
+
+	tr.renderScale.active = qtrue;
+	tr.renderScale.value = value;
+	tr.sceneWidth = MAX( 1, (int)( glConfig.vidWidth * value + 0.5f ) );
+	tr.sceneHeight = MAX( 1, (int)( glConfig.vidHeight * value + 0.5f ) );
+	ri.Printf( PRINT_ALL, "render scale: active %.2f -> %dx%d (window %dx%d)\n", value,
+		tr.sceneWidth, tr.sceneHeight, glConfig.vidWidth, glConfig.vidHeight );
+}
+
+/*
+==================
 R_ApplyAO
 
 r_ao is the single user-facing ambient occlusion setting:
@@ -1579,6 +1639,17 @@ void R_Register( void ) {
 	r_smaaJitter = ri.Cvar_Get( "r_smaaJitter", "0.25", 0 );	// jitter amplitude in pixels (0 = jitter off, debug)
 	ri.Cvar_CheckRange( r_smaaJitter, 0, 1, qfalse );
 
+	// internal render resolution: world views render at window * r_renderScale and are upscaled (tr.renderScale)
+	r_renderScale = ri.Cvar_Get( "r_renderScale", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_renderScale, 0.25f, 1.0f, qfalse );
+	r_renderScaleFilter = ri.Cvar_Get( "r_renderScaleFilter", "1", CVAR_ARCHIVE );	// 0 bilinear, 1 FSR1 (EASU + RCAS)
+	ri.Cvar_CheckRange( r_renderScaleFilter, 0, 1, qtrue );
+	// FSR1 RCAS: -1 auto (0.5 when upscaling, off at scale 1), 0 off (plain EASU), 0..1 explicit, 1 = max (0.875 = 0.25 stops)
+	r_renderScaleSharp = ri.Cvar_Get( "r_renderScaleSharp", "-1", CVAR_ARCHIVE );
+	ri.Cvar_CheckRange( r_renderScaleSharp, -1.0f, 1.0f, qfalse );
+	r_dlsStrength = ri.Cvar_Get( "r_dlsStrength", "0", CVAR_ARCHIVE );	// Denoised Luma Sharpening on the 3D image: 0 off, 1 max
+	ri.Cvar_CheckRange( r_dlsStrength, 0.0f, 1.0f, qfalse );
+
 	// frame warp (tr_warp.c): re-project a real frame to a slightly different view direction
 	r_frameWarp = ri.Cvar_Get( "r_frameWarp", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_frameWarp, 0, 3, qtrue );
@@ -1670,6 +1741,10 @@ void R_Register( void ) {
 	// r_parallaxMapShadows is a bitmask: 1 = baked-light/dlight shadow march (+ sun when r_sunlightMode 2), 2 = sun march also in sunlightMode 1
 	// r_parallaxMinDepth: normalheight images flatter than this (see image_t.heightMaxDepth) skip parallax
 	r_parallaxMinDepth = ri.Cvar_Get( "r_parallaxMinDepth", "0.15", CVAR_LATCH );
+	// codmod: pixel-identical parallax shader savings. 0 = off, 1 = all, else a bitmask: 2 = skip the baked/dlight
+	// self-shadow march when N.L <= 0 or lightColor is 0, 4 = same for the sun march, 8 = stop the shadow march once
+	// fully shadowed, 16 = shadow march returns 1 when the start depth is 0. Latched (shader defines).
+	r_parallaxOpt = ri.Cvar_Get( "r_parallaxOpt", "1", CVAR_LATCH );
 	r_parallaxMaxSteps = ri.Cvar_Get( "r_parallaxMaxSteps", "48", 0 );
 	r_parallaxStepDensity = ri.Cvar_Get( "r_parallaxStepDensity", "1", 0 );
 	r_parallaxMarchLod = ri.Cvar_Get( "r_parallaxMarchLod", "0", 0 );
@@ -1712,6 +1787,8 @@ void R_Register( void ) {
 	// The mod pins 31 (gamma ramp reset to 1.0 during cutscenes).
 	r_cutsceneFx = ri.Cvar_Get( "r_cutsceneFx", "63", 0 );
 	r_drawSunRays = ri.Cvar_Get( "r_drawSunRays", "0", CVAR_ARCHIVE | CVAR_LATCH );
+	r_sunRaysOpt = ri.Cvar_Get( "r_sunRaysOpt", "1", 0 );
+	r_sunRaysTaps = ri.Cvar_Get( "r_sunRaysTaps", "0", 0 );
 	r_sunlightMode = ri.Cvar_Get( "r_sunlightMode", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	// codmod: flashlight spot shadow map (needs r_depthPrepass); 0 disables
 	// codmod: exponent applied to surface albedo for dynamic light (<1 lifts near-black materials); 1 or 0 = off (default: little visible gain)
@@ -1775,6 +1852,17 @@ void R_Register( void ) {
 	r_flaresAsync = ri.Cvar_Get( "r_flaresAsync", "1", 0 );
 	// 0 = skip MDS runtime tangents in depth-fill passes (no depth program reads them); 1 = compute them there too (stock)
 	r_mdsDepthTangents = ri.Cvar_Get( "r_mdsDepthTangents", "0", 0 );
+	// 1 = SMAA T2x resolve writes straight into a second history image (no history copy); 0 = copy scratch into the history
+	r_smaaT2xPingPong = ri.Cvar_Get( "r_smaaT2xPingPong", "1", 0 );
+	// 1 = T2x leaves the resolved frame in its (RGBA8) resolve target and does not copy it back into the scene FBO
+	// when the grade/bloom pass reads it from there (r_gradeNoCopy); copied back otherwise
+	r_smaaT2xNoSceneCopy = ri.Cvar_Get( "r_smaaT2xNoSceneCopy", "1", 0 );
+	// 1 = grade/bloom reads the anti-aliased scene from where it already is and writes the scene FBO directly (no
+	// scratch + copy back); T2x and AA off. 2 = also SMAA 1x on unjittered views (via the SMAA edges image, not bit exact)
+	r_gradeNoCopy = ri.Cvar_Get( "r_gradeNoCopy", "1", 0 );
+	r_depthAttribTrim = ri.Cvar_Get( "r_depthAttribTrim", "1", 0 );
+	r_mdsSkinCache = ri.Cvar_Get( "r_mdsSkinCache", "1", 0 );
+	r_mdsShadowLod = ri.Cvar_Get( "r_mdsShadowLod", "1", 0 );
 	r_gpuProfile = ri.Cvar_Get( "r_gpuProfile", "0", 0 );
 	r_gpuLoad = ri.Cvar_Get( "r_gpuLoad", "0", 0 );	// dev only: synthetic GPU work per real frame in microseconds (tr_gpuprof.c), 0 = off
 	r_smaaStencil = ri.Cvar_Get( "r_smaaStencil", "1", 0 );

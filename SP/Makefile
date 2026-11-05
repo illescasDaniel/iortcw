@@ -1927,6 +1927,9 @@ Q3R2STRINGOBJ = \
   $(B)/rend2/glsl/texturecolor_vp.o \
   $(B)/rend2/glsl/tonemap_fp.o \
   $(B)/rend2/glsl/tonemap_vp.o \
+  $(B)/rend2/glsl/upscale_easu_fp.o \
+  $(B)/rend2/glsl/upscale_rcas_fp.o \
+  $(B)/rend2/glsl/dls_fp.o \
   $(B)/rend2/glsl/warp_fp.o \
   $(B)/rend2/glsl/warpcap_fp.o \
   $(B)/rend2/glsl/gpuload_fp.o \

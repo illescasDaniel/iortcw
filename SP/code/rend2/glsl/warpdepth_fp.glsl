@@ -70,7 +70,11 @@ void main()
 	vec2 motion = vec2(0.0);
 	if (u_WarpParams2.x > 0.5 && anySolid)
 	{
+#if defined(RENDER_SCALE)
+		vec2 vel = texelFetch(u_VelocityMap, ivec2(nearP * u_InvTexRes * vec2(textureSize(u_VelocityMap, 0))), 0).rg;
+#else
 		vec2 vel = texelFetch(u_VelocityMap, ivec2(nearP), 0).rg;
+#endif
 		if (vel.x != 0.0 || vel.y != 0.0)
 		{
 			vec2 ndc = nearP * u_InvTexRes * 2.0 - 1.0 - u_WarpParams2.zw;

@@ -301,14 +301,29 @@ void FBO_Init(void)
 		FBO_AttachImage(tr.renderFbo, tr.renderDepthImage, GL_DEPTH_ATTACHMENT, 0);
 		R_CheckFBO(tr.renderFbo);
 
+		// r_renderScale: world views render into a scene-sized target, upscaled into renderFbo at the end of RB_PostProcess
+		if (tr.renderScale.active)
+		{
+			tr.worldFbo = FBO_Create("_world", tr.worldDepthImage->width, tr.worldDepthImage->height);
+			FBO_AttachImage(tr.worldFbo, tr.worldImage, GL_COLOR_ATTACHMENT0, 0);
+			FBO_AttachImage(tr.worldFbo, tr.worldDepthImage, GL_DEPTH_ATTACHMENT, 0);
+			R_CheckFBO(tr.worldFbo);
+
+			tr.upscaleFbo = FBO_Create("_upscale", tr.upscaleImage->width, tr.upscaleImage->height);
+			FBO_AttachImage(tr.upscaleFbo, tr.upscaleImage, GL_COLOR_ATTACHMENT0, 0);
+			R_CheckFBO(tr.upscaleFbo);
+		}
+
 		// codmod: SMAA T2x motion vectors as a second colour target (only written with draw buffers set by the depth prepass)
 		if (tr.velocityImage)
 		{
-			FBO_AttachImage(tr.renderFbo, tr.velocityImage, GL_COLOR_ATTACHMENT1, 0);
-			if (!R_CheckFBO(tr.renderFbo))
+			FBO_t *velFbo = tr.renderScale.active ? tr.worldFbo : tr.renderFbo;
+
+			FBO_AttachImage(velFbo, tr.velocityImage, GL_COLOR_ATTACHMENT1, 0);
+			if (!R_CheckFBO(velFbo))
 			{
-				qglNamedFramebufferTexture2DEXT(tr.renderFbo->frameBuffer, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0);
-				tr.renderFbo->colorImage[1] = NULL;
+				qglNamedFramebufferTexture2DEXT(velFbo->frameBuffer, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0);
+				velFbo->colorImage[1] = NULL;
 				tr.velocityImage = NULL;
 				ri.Printf(PRINT_WARNING, "SMAA T2x velocity buffer unsupported, object motion disabled.\n");
 			}
@@ -322,12 +337,24 @@ void FBO_Init(void)
 		GL_BindFramebuffer(GL_FRAMEBUFFER, tr.renderFbo->frameBuffer);
 		qglClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
 	}
+	if (tr.worldFbo)
+	{
+		GL_BindFramebuffer(GL_FRAMEBUFFER, tr.worldFbo->frameBuffer);
+		qglClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+	}
+
+	if (tr.dlsImage)
+	{
+		tr.dlsFbo = FBO_Create("_dls", tr.dlsImage->width, tr.dlsImage->height);
+		FBO_AttachImage(tr.dlsFbo, tr.dlsImage, GL_COLOR_ATTACHMENT0, 0);
+		R_CheckFBO(tr.dlsFbo);
+	}
 
 	if (tr.screenScratchImage)
 	{
 		tr.screenScratchFbo = FBO_Create("screenScratch", tr.screenScratchImage->width, tr.screenScratchImage->height);
 		FBO_AttachImage(tr.screenScratchFbo, tr.screenScratchImage, GL_COLOR_ATTACHMENT0, 0);
-		FBO_AttachImage(tr.screenScratchFbo, tr.renderDepthImage, GL_DEPTH_ATTACHMENT, 0);
+		FBO_AttachImage(tr.screenScratchFbo, tr.worldDepthImage ? tr.worldDepthImage : tr.renderDepthImage, GL_DEPTH_ATTACHMENT, 0);
 		R_CheckFBO(tr.screenScratchFbo);
 	}
 
@@ -360,11 +387,20 @@ void FBO_Init(void)
 		R_CheckFBO(tr.smaaHistoryFbo);
 	}
 
+	if (tr.smaaHistoryImageB)
+	{
+		tr.smaaHistoryFboB = FBO_Create("smaaHistoryB", tr.smaaHistoryImageB->width, tr.smaaHistoryImageB->height);
+		FBO_AttachImage(tr.smaaHistoryFboB, tr.smaaHistoryImageB, GL_COLOR_ATTACHMENT0, 0);
+		R_CheckFBO(tr.smaaHistoryFboB);
+	}
+
 	if (tr.sunRaysImage)
 	{
-		tr.sunRaysFbo = FBO_Create("_sunRays", tr.renderDepthImage->width, tr.renderDepthImage->height);
+		image_t *raysDepth = tr.worldDepthImage ? tr.worldDepthImage : tr.renderDepthImage;
+
+		tr.sunRaysFbo = FBO_Create("_sunRays", raysDepth->width, raysDepth->height);
 		FBO_AttachImage(tr.sunRaysFbo, tr.sunRaysImage, GL_COLOR_ATTACHMENT0, 0);
-		FBO_AttachImage(tr.sunRaysFbo, tr.renderDepthImage, GL_DEPTH_ATTACHMENT, 0);
+		FBO_AttachImage(tr.sunRaysFbo, raysDepth, GL_DEPTH_ATTACHMENT, 0);
 		R_CheckFBO(tr.sunRaysFbo);
 	}
 
@@ -582,6 +618,21 @@ void R_FBOList_f(void)
 	ri.Printf(PRINT_ALL, " %i FBOs\n", tr.numFBOs);
 }
 
+static ivec4_t fboScissorOverride;
+static qboolean fboScissorOverrideOn;
+
+void FBO_SetScissorOverride(const int *box)
+{
+	if (box)
+	{
+		fboScissorOverride[0] = box[0];
+		fboScissorOverride[1] = box[1];
+		fboScissorOverride[2] = box[2];
+		fboScissorOverride[3] = box[3];
+	}
+	fboScissorOverrideOn = box != NULL;
+}
+
 void FBO_BlitFromTexture(struct image_s *src, vec4_t inSrcTexCorners, vec2_t inSrcTexScale, FBO_t *dst, ivec4_t inDstBox, struct shaderProgram_s *shaderProgram, vec4_t inColor, int blend)
 {
 	ivec4_t dstBox;
@@ -656,7 +707,10 @@ void FBO_BlitFromTexture(struct image_s *src, vec4_t inSrcTexCorners, vec2_t inS
 	FBO_Bind(dst);
 
 	qglViewport( 0, 0, width, height );
-	qglScissor( 0, 0, width, height );
+	if (fboScissorOverrideOn)
+		qglScissor( fboScissorOverride[0], fboScissorOverride[1], fboScissorOverride[2], fboScissorOverride[3] );
+	else
+		qglScissor( 0, 0, width, height );
 
 	Mat4Ortho(0, width, height, 0, 0, 1, projection);
 
@@ -763,6 +817,19 @@ void FBO_FastBlit(FBO_t *src, ivec4_t srcBox, FBO_t *dst, ivec4_t dstBox, int bu
 		{
 			scissorBox[1] += scissorBox[3];
 			scissorBox[3] = fabsf(scissorBox[3]);
+		}
+
+		if (fboScissorOverrideOn)
+		{
+			int x0 = scissorBox[0] > fboScissorOverride[0] ? scissorBox[0] : fboScissorOverride[0];
+			int y0 = scissorBox[1] > fboScissorOverride[1] ? scissorBox[1] : fboScissorOverride[1];
+			int x1 = scissorBox[0] + scissorBox[2] < fboScissorOverride[0] + fboScissorOverride[2] ? scissorBox[0] + scissorBox[2] : fboScissorOverride[0] + fboScissorOverride[2];
+			int y1 = scissorBox[1] + scissorBox[3] < fboScissorOverride[1] + fboScissorOverride[3] ? scissorBox[1] + scissorBox[3] : fboScissorOverride[1] + fboScissorOverride[3];
+
+			scissorBox[0] = x0;
+			scissorBox[1] = y0;
+			scissorBox[2] = x1 > x0 ? x1 - x0 : 0;
+			scissorBox[3] = y1 > y0 ? y1 - y0 : 0;
 		}
 
 		qglScissor(scissorBox[0], scissorBox[1], scissorBox[2], scissorBox[3]);

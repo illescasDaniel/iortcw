@@ -858,6 +858,14 @@ typedef enum
 	UNIFORM_WARPPROJ, // mesh warp: tanX, tanY, grid step in pixels (z), w unused
 	UNIFORM_WARPPARAMS2, // object motion: warpdepth (valid, teleport limit NDC, jitter NDC xy); warpmesh (alpha, max px)
 
+	UNIFORM_EASUCON0, // r_renderScale FSR1 EASU: input pixels per output pixel (xy), offset (zw)
+	UNIFORM_EASUCON1, // EASU: source clamp box in texels (x0, y0, x1, y1)
+	UNIFORM_EASUCON2, // EASU: output box origin in pixels (xy)
+	UNIFORM_RCASCON, // FSR1 RCAS: x = sharpness (linear), yzw unused
+	UNIFORM_RCASBOX, // RCAS: clamp box in texels (x0, y0, x1, y1)
+	UNIFORM_DLSCON, // r_dlsStrength: x = kernelSharpness, y = kernelDenoise
+	UNIFORM_DLSBOX, // r_dlsStrength: clamp box in texels (x0, y0, x1, y1)
+
 	UNIFORM_COUNT
 } uniform_t;
 
@@ -925,6 +933,12 @@ typedef struct {
 	struct pshadow_s *pshadows;
 
 	float       sunShadowMvp[4][16];
+
+	// codmod: main camera for MDS LOD in orthographic depth views (r_mdsShadowLod), set in RE_BeginScene
+	qboolean    mainCamValid;
+	vec3_t      mainCamOrigin;
+	vec3_t      mainCamAxis0;
+	float       mainCamProjY;	// 1 / tan( fov_y / 2 ), the projection matrix [5] term
 
 	// codmod: flashlight spot shadow (see R_RenderFlashlightShadowMap)
 	qboolean    flashShadow;
@@ -1008,6 +1022,8 @@ typedef struct {
 	int			frameCount;			// copied from tr.frameCount
 	cplane_t	portalPlane;		// clip anything behind this if mirroring
 	int			viewportX, viewportY, viewportWidth, viewportHeight;
+	int			nativeViewport[4];	// r_renderScale: the viewport in window pixels (equals the viewport when not scaled)
+	qboolean	worldTarget;		// r_renderScale: drawn into the scene-sized tr.worldFbo (only while tr.renderScale.active)
 	FBO_t		*targetFbo;
 	int         targetFboLayer;
 	int         targetFboCubemapIndex;
@@ -1828,6 +1844,10 @@ typedef struct {
 	image_t					*renderImage;
 	image_t					*sunRaysImage;
 	image_t					*renderDepthImage;
+	image_t					*worldImage;		// r_renderScale: scene-sized colour of world views (NULL when inactive)
+	image_t					*worldDepthImage;
+	image_t					*dlsImage;			// r_dlsStrength: window-sized ping-pong image
+	image_t					*upscaleImage;		// r_renderScale FSR1: EASU output, native size
 	image_t					*pshadowMaps[MAX_DRAWN_PSHADOWS];
 	image_t					*screenScratchImage;
 	image_t					*smaaEdgesImage;
@@ -1835,6 +1855,7 @@ typedef struct {
 	image_t					*smaaAreaImage;
 	image_t					*smaaSearchImage;
 	image_t					*smaaHistoryImage;	// SMAA T2x: previous resolved frame (RGBA8)
+	image_t					*smaaHistoryImageB;	// SMAA T2x: second history image for r_smaaT2xPingPong
 	image_t					*velocityImage;		// SMAA T2x: RG16F motion vectors written in the depth prepass (colour attachment 1 of renderFbo)
 	image_t					*textureScratchImage[2];
 	image_t                 *quarterImage[2];
@@ -1856,6 +1877,9 @@ typedef struct {
 	image_t					*textureDepthImage;
 
 	FBO_t					*renderFbo;
+	FBO_t					*worldFbo;			// r_renderScale: worldImage + worldDepthImage (+ velocity)
+	FBO_t					*upscaleFbo;
+	FBO_t					*dlsFbo;			// r_dlsStrength: window-sized ping-pong target
 	FBO_t					*msaaResolveFbo;
 	FBO_t					*sunRaysFbo;
 	FBO_t					*depthFbo;
@@ -1864,6 +1888,7 @@ typedef struct {
 	FBO_t					*smaaEdgesFbo;
 	FBO_t					*smaaBlendFbo;
 	FBO_t					*smaaHistoryFbo;
+	FBO_t					*smaaHistoryFboB;	// NULL = ping-pong unavailable
 	FBO_t					*textureScratchFbo[2];
 	FBO_t                   *quarterFbo[2];
 	FBO_t                   *bloomFbo[BLOOM_LEVELS];
@@ -1927,10 +1952,14 @@ typedef struct {
 	shaderProgram_t smaaBlendShader;
 	qboolean        smaaAvailable;       // shaders compiled and images/FBOs exist
 	shaderProgram_t smaaResolveShader;   // T2x temporal resolve
+	shaderProgram_t upscaleEasuShader;   // r_renderScale FSR1, only compiled while active
+	shaderProgram_t upscaleRcasShader;
+	shaderProgram_t dlsShader;           // r_dlsStrength: Denoised Luma Sharpening on the final 3D image
 	qboolean        smaaResolveAvailable;
 	qboolean        velocityShaders;     // USE_VELOCITY depth-fill variants compiled
 	qboolean        smaaHistoryValid;    // smaaHistoryImage holds the previous frame (cleared on map load, cvar change)
 	int             smaaHistoryFrame;    // tr.frameCount the history was written in
+	qboolean        smaaHistoryFlip;     // r_smaaT2xPingPong: qtrue = the history is in smaaHistory*B (else smaaHistory*)
 	int             smaaJitterIndex;     // alternates the jitter sign per rendered frame
 	float           smaaPrevViewProj[16];
 	float           smaaPrevViewProjRot[16];
@@ -2050,6 +2079,13 @@ typedef struct {
 	int					warpMeshIndexes;
 	int					warpGridW, warpGridH, warpGridStep;
 	warpState_t			warp;
+
+	// r_renderScale (latched): world views render at sceneWidth x sceneHeight and are upscaled into renderFbo
+	struct {
+		qboolean		active;
+		float			value;
+	} renderScale;
+	int					sceneWidth, sceneHeight;	// equal glConfig.vidWidth/vidHeight when inactive
 } trGlobals_t;
 
 extern backEndState_t	backEnd;
@@ -2174,6 +2210,12 @@ extern	cvar_t	*r_finish;
 extern	cvar_t	*r_swapFinish;
 extern	cvar_t	*r_flaresAsync;
 extern	cvar_t	*r_mdsDepthTangents;
+extern	cvar_t	*r_smaaT2xPingPong;
+extern	cvar_t	*r_smaaT2xNoSceneCopy;
+extern	cvar_t	*r_gradeNoCopy;
+extern	cvar_t	*r_depthAttribTrim;
+extern	cvar_t	*r_mdsSkinCache;
+extern	cvar_t	*r_mdsShadowLod;
 extern	cvar_t	*r_gpuProfile;
 extern	cvar_t	*r_gpuLoad;
 extern	cvar_t	*r_smaaStencil;
@@ -2304,6 +2346,7 @@ extern  cvar_t  *r_parallaxMapOffset;
 extern  cvar_t  *r_parallaxMapShadows;
 extern  cvar_t  *r_parallaxMinDepth;
 extern  cvar_t  *r_parallaxMaxSteps;
+extern  cvar_t  *r_parallaxOpt;
 extern  cvar_t  *r_parallaxStepDensity;
 extern  cvar_t  *r_parallaxMarchLod;
 extern  cvar_t  *r_parallaxShadowFade;
@@ -2341,6 +2384,27 @@ extern  cvar_t  *r_forceSunAmbientScale;
 extern  cvar_t  *r_cutsceneFx;
 extern  cvar_t  *r_sunlightMode;
 
+extern  cvar_t  *r_renderScale;
+extern  cvar_t  *r_renderScaleFilter;
+extern  cvar_t  *r_renderScaleSharp;
+extern  cvar_t  *r_dlsStrength;
+
+// r_renderScale: the scene target of a view (tr.renderFbo / tr.renderDepthImage unless scaled)
+static ID_INLINE FBO_t *R_SceneFbo( const viewParms_t *vp ) {
+	return (tr.renderScale.active && vp->worldTarget) ? tr.worldFbo : tr.renderFbo;
+}
+static ID_INLINE image_t *R_SceneDepth( const viewParms_t *vp ) {
+	return (tr.renderScale.active && vp->worldTarget) ? tr.worldDepthImage : tr.renderDepthImage;
+}
+// size that normalizes screen-space boxes of a view (the window size unless scaled)
+static ID_INLINE int R_SceneWidth( const viewParms_t *vp ) {
+	return (tr.renderScale.active && vp->worldTarget) ? tr.sceneWidth : glConfig.vidWidth;
+}
+static ID_INLINE int R_SceneHeight( const viewParms_t *vp ) {
+	return (tr.renderScale.active && vp->worldTarget) ? tr.sceneHeight : glConfig.vidHeight;
+}
+void R_ComputeRenderScale( void );
+
 // RDF_NOSUNLIGHT cutscene: true if this feature bit should stay off (r_cutsceneFx default 63 keeps all).
 static ID_INLINE qboolean R_CutsceneOff( int rdflags, int fxBit ) {
 	return (rdflags & RDF_NOSUNLIGHT) && !(r_cutsceneFx->integer & fxBit);
@@ -2349,6 +2413,8 @@ extern  cvar_t  *r_flashlightShadow;
 extern  cvar_t  *r_dlightAlbedoLift;
 extern  cvar_t  *r_flashlightShadowSize;
 extern  cvar_t  *r_drawSunRays;
+extern  cvar_t  *r_sunRaysOpt;		// codmod: 1 = pixel-identical savings (skip dead mask work, scissor passes to the ray region)
+extern  cvar_t  *r_sunRaysTaps;		// codmod: radial blur taps per pass, 0 = stock 5 (quality change, needs user acceptance)
 extern  cvar_t  *r_sunShadows;
 extern  cvar_t  *r_shadowFilter;
 extern  cvar_t  *r_shadowBlur;
@@ -2761,7 +2827,20 @@ void RB_GpuDeepEnd( int idx, unsigned long long t0 );
 #define PCNT_MDS_TRIS		4
 #define PCNT_MDS_TANVERTS	6
 #define PCNT_MDS_FULLLOD	8
+#define PCNT_SKC_HITS		30	// MDS skin cache: surfaces served entirely from the cache
+#define PCNT_SKC_EXTENDS	31	// cached entry found but a later view needed more LOD vertices
+#define PCNT_SKC_MISSES		32	// new entry
+#define PCNT_SKC_OVERFLOWS	33	// arena or entry table full, uncached path
+#define PCNT_SKC_MISMATCH	34	// verify mode (r_mdsSkinCache 2): cached data differs from the recomputed
 void R_ProfCount( int id, int n );
+// MDS LOD decision reasons for R_ProfMdsLod (order must match mdsLodReasonNames in tr_gpuprof.c)
+#define MDSLOD_PROJ_NONPOS		0	// RB_ProjectRadius returned 0 (behind the view origin plane), full LOD fallback
+#define MDSLOD_FLAG_FULL		1	// REFLAG_FULL_LOD on the entity
+#define MDSLOD_PROJ_CLAMPED		2	// projected radius >= 1.0 (clamped)
+#define MDSLOD_COMPUTED_FULL	3	// 0 < projected radius < 1 but the LOD value still reached 1.0
+#define MDSLOD_COMPUTED_REDUCED	4	// LOD value < 1.0
+void R_ProfMdsLod( const mdsHeader_t *header, const mdsSurface_t *surface, int reason, float proj, float lodScale,
+	int emittedVerts, int emittedTris );
 void R_ProfAssembleEnd( unsigned long long t0 );
 void R_ProfSunCascade( int level, int state, int reason );
 void RB_GpuMarkCascade( void );

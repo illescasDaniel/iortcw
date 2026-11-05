@@ -2886,6 +2886,7 @@ static void R_CreateSmaaImages( int width, int height ) {
 	tr.smaaBlendImage = R_CreateImage( "*smaaBlend", NULL, width, height, IMGTYPE_DELUXE, rtFlags, GL_RGBA8 );
 	// T2x history: the previous resolved (tone-mapped, LDR) frame
 	tr.smaaHistoryImage = R_CreateImage( "*smaaHistory", NULL, width, height, IMGTYPE_COLORALPHA, rtFlags, GL_RGBA8 );
+	tr.smaaHistoryImageB = R_CreateImage( "*smaaHistoryB", NULL, width, height, IMGTYPE_COLORALPHA, rtFlags, GL_RGBA8 );
 	// T2x motion vectors (NDC), colour attachment 1 of renderFbo; renderFbo only exists with HDR and, as a
 	// plain texture target, without MSAA. GLSL 1.30 is needed for the second shader output.
 	tr.velocityImage = NULL;
@@ -2959,12 +2960,15 @@ void R_CreateBuiltinImages( void ) {
 	R_CreateDlightImage();
 	R_CreateFogImage();
 
+	R_ComputeRenderScale();
+
 	if (glRefConfig.framebufferObject)
 	{
 		int width, height, hdrFormat, rgbFormat;
 
-		width = glConfig.vidWidth;
-		height = glConfig.vidHeight;
+		// scene-path targets use the scene size (the window size unless r_renderScale is active)
+		width = tr.sceneWidth;
+		height = tr.sceneHeight;
 
 		hdrFormat = GL_RGBA8;
 		if (r_hdr->integer && glRefConfig.textureFloat)
@@ -2972,7 +2976,16 @@ void R_CreateBuiltinImages( void ) {
 
 		rgbFormat = GL_RGBA8;
 
-		tr.renderImage = R_CreateImage("_render", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, hdrFormat);
+		tr.renderImage = R_CreateImage("_render", NULL, glConfig.vidWidth, glConfig.vidHeight, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, hdrFormat);
+
+		tr.worldImage = tr.worldDepthImage = tr.upscaleImage = NULL;
+		tr.dlsImage = R_CreateImage("*dls", NULL, glConfig.vidWidth, glConfig.vidHeight, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, hdrFormat);
+		if (tr.renderScale.active)
+		{
+			tr.worldImage = R_CreateImage("*world", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, hdrFormat);
+			tr.worldDepthImage = R_CreateImage("*worlddepth", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_DEPTH_COMPONENT24);
+			tr.upscaleImage = R_CreateImage("*upscale", NULL, glConfig.vidWidth, glConfig.vidHeight, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, hdrFormat);
+		}
 
 		if (r_shadowBlur->integer || r_hdr->integer)
 			tr.screenScratchImage = R_CreateImage("screenScratch", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, rgbFormat);
@@ -2987,7 +3000,7 @@ void R_CreateBuiltinImages( void ) {
 		if (r_drawSunRays->integer)
 			tr.sunRaysImage = R_CreateImage("*sunRays", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, rgbFormat);
 
-		tr.renderDepthImage  = R_CreateImage("*renderdepth",  NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_DEPTH_COMPONENT24);
+		tr.renderDepthImage  = R_CreateImage("*renderdepth",  NULL, glConfig.vidWidth, glConfig.vidHeight, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_DEPTH_COMPONENT24);
 		tr.textureDepthImage = R_CreateImage("*texturedepth", NULL, PSHADOW_MAP_SIZE, PSHADOW_MAP_SIZE, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_DEPTH_COMPONENT24);
 
 		{

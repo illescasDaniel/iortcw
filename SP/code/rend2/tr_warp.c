@@ -600,8 +600,17 @@ static void RB_WarpMeshCapture( const postProcessCommand_t *cmd ) {
 		GLSL_SetUniformMat4( &tr.warpDepthShader, UNIFORM_REPROJMATRIX, tr.warp.velReproj );
 		GL_BindToTMU( tr.velocityImage, TB_SPECULARMAP );
 	}
-	GL_BindToTMU( tr.renderDepthImage, TB_LIGHTMAP );
-	FBO_BlitFromTexture( tr.renderDepthImage, NULL, NULL, tr.warpDepthFbo, NULL, &tr.warpDepthShader, NULL, GLS_DEPTHTEST_DISABLE );
+	GL_BindToTMU( R_SceneDepth( vp ), TB_LIGHTMAP );
+	if ( tr.renderScale.active && vp->worldTarget ) {
+		// r_renderScale: the shader works in window pixels (u_InvTexRes = 1 / window size) over the scene-sized depth
+		vec2_t texScale;
+
+		texScale[0] = tr.worldDepthImage->width / (float)tr.renderDepthImage->width;
+		texScale[1] = tr.worldDepthImage->height / (float)tr.renderDepthImage->height;
+		FBO_BlitFromTexture( tr.worldDepthImage, NULL, texScale, tr.warpDepthFbo, NULL, &tr.warpDepthShader, NULL, GLS_DEPTHTEST_DISABLE );
+	} else {
+		FBO_BlitFromTexture( tr.renderDepthImage, NULL, NULL, tr.warpDepthFbo, NULL, &tr.warpDepthShader, NULL, GLS_DEPTHTEST_DISABLE );
+	}
 	RB_GpuMark( "warp_depth" );
 
 	VectorCopy( vp->or.origin, tr.warp.origin );
@@ -644,6 +653,7 @@ Called at the end of RB_PostProcess with the final 3D scene in srcFbo (the MSAA 
 */
 void RB_WarpCapture( const postProcessCommand_t *cmd, FBO_t *srcFbo ) {
 	const viewParms_t *vp;
+	int box[4];
 	vec4_t params;
 	static int reportCount;
 
@@ -652,6 +662,12 @@ void RB_WarpCapture( const postProcessCommand_t *cmd, FBO_t *srcFbo ) {
 	}
 
 	vp = &cmd->viewParms;
+	// r_renderScale: the warp works on the upscaled, window-sized image
+	if ( vp->worldTarget ) {
+		Vector4Copy( vp->nativeViewport, box );
+	} else {
+		VectorSet4( box, vp->viewportX, vp->viewportY, vp->viewportWidth, vp->viewportHeight );
+	}
 
 	if ( !srcFbo || !srcFbo->colorImage[0] || !tr.renderFbo ) {
 		tr.warp.valid = qfalse;
@@ -662,8 +678,8 @@ void RB_WarpCapture( const postProcessCommand_t *cmd, FBO_t *srcFbo ) {
 
 	// only the full-screen main view (same test as the SMAA T2x jitter in RE_RenderScene)
 	if ( ( cmd->refdef.rdflags & ( RDF_SKYBOXPORTAL | RDF_NOWORLDMODEL | RDF_HYPERSPACE ) ) || vp->isPortal ||
-		 vp->stereoFrame != STEREO_CENTER || vp->viewportX > 2 || vp->viewportY > 2 ||
-		 abs( vp->viewportWidth - tr.renderFbo->width ) > 2 || abs( vp->viewportHeight - tr.renderFbo->height ) > 2 ) {
+		 vp->stereoFrame != STEREO_CENTER || box[0] > 2 || box[1] > 2 ||
+		 abs( box[2] - tr.renderFbo->width ) > 2 || abs( box[3] - tr.renderFbo->height ) > 2 ) {
 		tr.warp.reasons[WARP_REASON_NOT_MAIN]++;
 		return;
 	}
@@ -676,7 +692,7 @@ void RB_WarpCapture( const postProcessCommand_t *cmd, FBO_t *srcFbo ) {
 	VectorSet4( params, r_frameWarpGunDepth->value, (float)r_frameWarpGunDilate->integer, 0.0f, 0.0f );
 	GLSL_BindProgram( &tr.warpCaptureShader );
 	GLSL_SetUniformVec4( &tr.warpCaptureShader, UNIFORM_WARPPARAMS, params );
-	GL_BindToTMU( tr.renderDepthImage, TB_LIGHTMAP );
+	GL_BindToTMU( R_SceneDepth( vp ), TB_LIGHTMAP );
 	FBO_BlitFromTexture( srcFbo->colorImage[0], NULL, NULL, tr.warpFbo, NULL, &tr.warpCaptureShader, NULL, GLS_DEPTHTEST_DISABLE );
 	RB_GpuMark( "warp_color" );
 
@@ -689,7 +705,7 @@ void RB_WarpCapture( const postProcessCommand_t *cmd, FBO_t *srcFbo ) {
 	VectorCopy( vp->or.axis[2], tr.warp.axis[2] );
 	tr.warp.fovX = vp->fovX;
 	tr.warp.fovY = vp->fovY;
-	VectorSet4( tr.warp.box, vp->viewportX, vp->viewportY, vp->viewportWidth, vp->viewportHeight );
+	VectorSet4( tr.warp.box, box[0], box[1], box[2], box[3] );
 	VectorSet4( tr.warp.color2D, backEnd.color2D[0] / 255.0f, backEnd.color2D[1] / 255.0f,
 				backEnd.color2D[2] / 255.0f, backEnd.color2D[3] / 255.0f );
 	tr.warp.frameCount = tr.frameCount;

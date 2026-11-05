@@ -70,6 +70,9 @@ extern const char *fallbackShader_smaa_resolve_vp;
 extern const char *fallbackShader_smaa_resolve_fp;
 extern const char *fallbackShader_tonemap_vp;
 extern const char *fallbackShader_tonemap_fp;
+extern const char *fallbackShader_upscale_easu_fp;
+extern const char *fallbackShader_upscale_rcas_fp;
+extern const char *fallbackShader_dls_fp;
 
 typedef struct uniformInfo_s
 {
@@ -204,6 +207,14 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_WarpMove", GLSL_VEC4 },
 	{ "u_WarpProj", GLSL_VEC4 },
 	{ "u_WarpParams2", GLSL_VEC4 },
+
+	{ "u_EasuCon0", GLSL_VEC4 },
+	{ "u_EasuCon1", GLSL_VEC4 },
+	{ "u_EasuCon2", GLSL_VEC4 },
+	{ "u_RcasCon", GLSL_VEC4 },
+	{ "u_RcasBox", GLSL_VEC4 },
+	{ "u_DlsCon", GLSL_VEC4 },
+	{ "u_DlsBox", GLSL_VEC4 },
 };
 
 typedef enum
@@ -402,8 +413,9 @@ static void GLSL_GetShaderHeader( GLenum shaderType, const GLchar *extra, char *
 								AGEN_PORTAL,
 								AGEN_NORMALZFADE));
 
-	fbufWidthScale = 1.0f / ((float)glConfig.vidWidth);
-	fbufHeightScale = 1.0f / ((float)glConfig.vidHeight);
+	// screen-space lookups of scene-sized images (tr.sceneWidth/Height equal the window size unless r_renderScale is active)
+	fbufWidthScale = 1.0f / ((float)tr.sceneWidth);
+	fbufHeightScale = 1.0f / ((float)tr.sceneHeight);
 	Q_strcat(dest, size,
 			 va("#ifndef r_FBufScale\n#define r_FBufScale vec2(%f, %f)\n#endif\n", fbufWidthScale, fbufHeightScale));
 
@@ -1267,6 +1279,21 @@ void GLSL_InitGPUShaders(void)
 					if ((r_parallaxMapShadows->integer & 2) || ((r_parallaxMapShadows->integer & 1) && r_sunlightMode->integer == 2))
 						Q_strcat(extradefines, 1024, "#define USE_PARALLAXMAP_SUNSHADOWS\n");
 
+					// codmod: pixel-identical parallax shader savings, individually switchable (see r_parallaxOpt)
+					{
+						int opt = r_parallaxOpt->integer;
+						if (opt == 1)
+							opt = 2 | 4 | 8 | 16;
+						if (opt & 2)
+							Q_strcat(extradefines, 1024, "#define POM_OPT_BAKEDSKIP\n");
+						if (opt & 4)
+							Q_strcat(extradefines, 1024, "#define POM_OPT_SUNSKIP\n");
+						if (opt & 8)
+							Q_strcat(extradefines, 1024, "#define POM_OPT_SHADOWBREAK\n");
+						if (opt & 16)
+							Q_strcat(extradefines, 1024, "#define POM_OPT_ZERODEPTH\n");
+					}
+
 					Q_strcat(extradefines, 1024, va("#define r_parallaxMapOffset %f\n", r_parallaxMapOffset->value));
 				}
 			}
@@ -1590,6 +1617,53 @@ void GLSL_InitGPUShaders(void)
 		}
 	}
 
+	// r_renderScale FSR1 upscaler (EASU + RCAS, texelFetch: GLSL 1.30); a failure leaves the bilinear upscale.
+	// RCAS is also the r_renderScaleSharp pass at native resolution, so both always compile.
+	if ((glRefConfig.glslMajorVersion > 1 || (glRefConfig.glslMajorVersion == 1 && glRefConfig.glslMinorVersion >= 30)))
+	{
+		if (GLSL_InitGPUShader(&tr.upscaleEasuShader, "upscale_easu", ATTR_POSITION | ATTR_TEXCOORD, qtrue, "", qtrue,
+				fallbackShader_texturecolor_vp, fallbackShader_upscale_easu_fp) &&
+			GLSL_InitGPUShader(&tr.upscaleRcasShader, "upscale_rcas", ATTR_POSITION | ATTR_TEXCOORD, qtrue, "", qtrue,
+				fallbackShader_texturecolor_vp, fallbackShader_upscale_rcas_fp))
+		{
+			GLSL_InitUniforms(&tr.upscaleEasuShader);
+			GLSL_SetUniformInt(&tr.upscaleEasuShader, UNIFORM_TEXTUREMAP, TB_COLORMAP);
+			GLSL_FinishGPUShader(&tr.upscaleEasuShader);
+			numEtcShaders++;
+
+			GLSL_InitUniforms(&tr.upscaleRcasShader);
+			GLSL_SetUniformInt(&tr.upscaleRcasShader, UNIFORM_TEXTUREMAP, TB_COLORMAP);
+			GLSL_FinishGPUShader(&tr.upscaleRcasShader);
+			numEtcShaders++;
+		}
+		else
+		{
+			GLSL_DeleteGPUShader(&tr.upscaleEasuShader);
+			GLSL_DeleteGPUShader(&tr.upscaleRcasShader);
+			Com_Memset(&tr.upscaleEasuShader, 0, sizeof(tr.upscaleEasuShader));
+			Com_Memset(&tr.upscaleRcasShader, 0, sizeof(tr.upscaleRcasShader));
+			ri.Printf(PRINT_WARNING, "FSR1 upscale shaders failed to compile, r_renderScaleFilter 1 uses bilinear, r_renderScaleSharp is inert.\n");
+		}
+	}
+
+	// r_dlsStrength Denoised Luma Sharpening (texelFetch: GLSL 1.30); a failure leaves r_dlsStrength inert
+	if (glRefConfig.glslMajorVersion > 1 || (glRefConfig.glslMajorVersion == 1 && glRefConfig.glslMinorVersion >= 30))
+	{
+		if (GLSL_InitGPUShader(&tr.dlsShader, "dls", ATTR_POSITION | ATTR_TEXCOORD, qtrue, "", qtrue,
+				fallbackShader_texturecolor_vp, fallbackShader_dls_fp))
+		{
+			GLSL_InitUniforms(&tr.dlsShader);
+			GLSL_SetUniformInt(&tr.dlsShader, UNIFORM_TEXTUREMAP, TB_COLORMAP);
+			GLSL_FinishGPUShader(&tr.dlsShader);
+			numEtcShaders++;
+		}
+		else
+		{
+			GLSL_DeleteGPUShader(&tr.dlsShader);
+			Com_Memset(&tr.dlsShader, 0, sizeof(tr.dlsShader));
+			ri.Printf(PRINT_WARNING, "r_dlsStrength shader failed to compile, r_dlsStrength disabled.\n");
+		}
+	}
 
 	for (i = 0; i < 2; i++)
 	{
@@ -1755,6 +1829,9 @@ void GLSL_InitGPUShaders(void)
 			if (r_hdr->integer && glRefConfig.textureFloat && r_ext_framebuffer_multisample->integer < 2 &&
 				(glRefConfig.glslMajorVersion > 1 || (glRefConfig.glslMajorVersion == 1 && glRefConfig.glslMinorVersion >= 30)))
 				Q_strcat(extradefines, 1024, "#define USE_VELOCITY\n");
+			// r_renderScale: the velocity buffer is scene-sized while the shader works in window pixels
+			if (tr.renderScale.active)
+				Q_strcat(extradefines, 1024, "#define RENDER_SCALE\n");
 
 			if (!GLSL_InitGPUShader(&tr.warpDepthShader, "warpdepth", attribs, qtrue, extradefines, qtrue, fallbackShader_texturecolor_vp, fallbackShader_warpdepth_fp))
 			{
@@ -1924,6 +2001,9 @@ void GLSL_ShutdownGPUShaders(void)
 	}
 	GLSL_DeleteGPUShader(&tr.smaaBlendShader);
 	GLSL_DeleteGPUShader(&tr.smaaResolveShader);
+	GLSL_DeleteGPUShader(&tr.upscaleEasuShader);
+	GLSL_DeleteGPUShader(&tr.upscaleRcasShader);
+	GLSL_DeleteGPUShader(&tr.dlsShader);
 
 	for ( i = 0; i < 2; i++)
 		GLSL_DeleteGPUShader(&tr.calclevels4xShader[i]);

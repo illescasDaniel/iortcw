@@ -233,6 +233,110 @@ static int R_CullModel( mdsHeader_t *header, trRefEntity_t *ent ) {
 	}
 }
 
+// codmod: r_gpuProfile diagnostics, why the last RB_CalcMDSLod call returned what it did (see R_ProfMdsLod)
+static int mdsLodDiagReason;
+static float mdsLodDiagProj;
+
+/*
+=================
+RB_ProjectRadiusMainCam
+
+Same result as RB_ProjectRadius for the main perspective view, from the camera saved in the refdef.
+The scene's shadow views are rendered before the main view, so backEnd.viewParms is not the main camera there.
+=================
+*/
+static float RB_ProjectRadiusMainCam( float r, vec3_t location ) {
+	float dist, pr;
+
+	dist = DotProduct( backEnd.refdef.mainCamAxis0, location ) - DotProduct( backEnd.refdef.mainCamAxis0, backEnd.refdef.mainCamOrigin );
+	if ( dist <= 0 ) {
+		return 0;
+	}
+	pr = fabs( r ) * backEnd.refdef.mainCamProjY / dist;
+	return pr > 1.0f ? 1.0f : pr;
+}
+
+
+/*
+codmod: per-frame MDS skin cache (r_mdsSkinCache). The skinned position, packed normal and texcoord of a surface depend only on
+the entity (bones) and the surface, not on the view or the LOD (MDS LOD is progressive: vertex j is independent of
+render_count), so the colour pass, depth prepass and sun cascades can share them. Entries hold the vertices for the largest
+render_count seen this frame and are extended when a later view needs more. Tangents are not cached (they depend on the
+emitted triangles). Filled right after skinning, before deforms. Entries are valid for one tr.frameCount.
+*/
+#define MDS_SKC_MAX_VERTS	65536
+#define MDS_SKC_MAX_ENTRIES	512
+#define MDS_SKC_HASH		1024	// power of two, twice the entries so probing stays short
+
+typedef struct {
+	float xyz[3];
+	int16_t normal[4];
+	float st[2];
+} mdsSkcVert_t;
+
+typedef struct {
+	int frameCount;					// valid when equal to tr.frameCount
+	const trRefEntity_t *ent;
+	const mdsSurface_t *surface;
+	refEntity_t e;
+	int count;						// vertices filled, from vertex 0
+	int offset;						// into mdsSkcVerts, numVerts reserved
+} mdsSkcEntry_t;
+
+static mdsSkcVert_t mdsSkcVerts[MDS_SKC_MAX_VERTS];
+static mdsSkcEntry_t mdsSkcEntries[MDS_SKC_MAX_ENTRIES];
+static short mdsSkcHash[MDS_SKC_HASH];	// entry index + 1, valid only while the entry's frameCount is current
+static int mdsSkcFrame = -1, mdsSkcUsedEntries, mdsSkcUsedVerts, mdsSkcPrints;
+
+/*
+Finds this frame's entry for (entity, surface, refEntity contents), creating it when absent. NULL = no room, use the
+uncached path. *isNew is set for a fresh entry (count 0).
+*/
+static mdsSkcEntry_t *R_MdsSkinCacheFind( const trRefEntity_t *ent, const mdsSurface_t *surface, qboolean *isNew ) {
+	unsigned int h = ( (unsigned int)( (size_t)ent >> 4 ) * 2654435761u ) ^ ( (unsigned int)( (size_t)surface >> 4 ) * 40503u );
+	int probe;
+
+	if ( mdsSkcFrame != tr.frameCount ) {
+		mdsSkcFrame = tr.frameCount;
+		mdsSkcUsedEntries = 0;
+		mdsSkcUsedVerts = 0;
+	}
+
+	*isNew = qfalse;
+	h &= MDS_SKC_HASH - 1;
+	for ( probe = 0; probe < MDS_SKC_HASH; probe++, h = ( h + 1 ) & ( MDS_SKC_HASH - 1 ) ) {
+		int slot = mdsSkcHash[h] - 1;
+		mdsSkcEntry_t *c = slot >= 0 ? &mdsSkcEntries[slot] : NULL;
+
+		if ( !c || c->frameCount != tr.frameCount ) {
+			// first free slot: nothing further along this chain belongs to the current frame
+			if ( mdsSkcUsedEntries >= MDS_SKC_MAX_ENTRIES || mdsSkcUsedVerts + surface->numVerts > MDS_SKC_MAX_VERTS ) {
+				return NULL;
+			}
+			c = &mdsSkcEntries[mdsSkcUsedEntries];
+			mdsSkcHash[h] = mdsSkcUsedEntries + 1;
+			mdsSkcUsedEntries++;
+			c->frameCount = tr.frameCount;
+			c->ent = ent;
+			c->surface = surface;
+			c->e = ent->e;
+			c->count = 0;
+			c->offset = mdsSkcUsedVerts;
+			mdsSkcUsedVerts += surface->numVerts;
+			*isNew = qtrue;
+			return c;
+		}
+		if ( c->ent == ent && c->surface == surface ) {
+			if ( !memcmp( &c->e, &ent->e, sizeof( refEntity_t ) ) ) {
+				return c;
+			}
+			// same entity slot, different contents (another scene or a modified entity): not shareable
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
 /*
 =================
 RB_CalcMDSLod
@@ -244,12 +348,20 @@ float RB_CalcMDSLod( refEntity_t *refent, vec3_t origin, float radius, float mod
 	float projectedRadius;
 
 	if ( refent->reFlags & REFLAG_FULL_LOD ) {
+		mdsLodDiagReason = MDSLOD_FLAG_FULL;
+		mdsLodDiagProj = -1.0f;
 		return 1.0f;
 	}
 
 	// compute projected bounding sphere and use that as a criteria for selecting LOD
 
-	projectedRadius = RB_ProjectRadius( radius, origin );
+	// sun cascades: use the main camera, so the shadow caster gets the LOD the colour pass uses
+	if ( r_mdsShadowLod->integer && ( backEnd.viewParms.flags & VPF_ORTHOGRAPHIC ) && backEnd.refdef.mainCamValid ) {
+		projectedRadius = RB_ProjectRadiusMainCam( radius, origin );
+	} else {
+		projectedRadius = RB_ProjectRadius( radius, origin );
+	}
+	mdsLodDiagProj = projectedRadius;
 	if ( projectedRadius != 0 ) {
 
 //		ri.Printf (PRINT_ALL, "projected radius: %f\n", projectedRadius);
@@ -271,6 +383,16 @@ float RB_CalcMDSLod( refEntity_t *refent, vec3_t origin, float radius, float mod
 	}
 
 	flod -= 0.25 * ( r_lodbias->value ) + modelBias;
+
+	if ( r_gpuProfile && r_gpuProfile->integer ) {
+		if ( projectedRadius == 0 ) {
+			mdsLodDiagReason = MDSLOD_PROJ_NONPOS;
+		} else if ( projectedRadius >= 1.0f ) {
+			mdsLodDiagReason = MDSLOD_PROJ_CLAMPED;
+		} else {
+			mdsLodDiagReason = flod >= 1.0f ? MDSLOD_COMPUTED_FULL : MDSLOD_COMPUTED_REDUCED;
+		}
+	}
 
 	if ( flod < 0.0 ) {
 		flod = 0.0;
@@ -1066,6 +1188,9 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 	refEntity_t *refent;
 	int             *boneList;
 	mdsHeader_t     *header;
+	mdsSkcEntry_t *skc = NULL;
+	int skcCount = 0, skcStart = 0;
+	qboolean skcNew = qfalse;
 
 #ifdef DBG_PROFILE_BONES
 	int di = 0, dt, ldt;
@@ -1196,7 +1321,37 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 	v = ( mdsVertex_t * )( (byte *)surface + surface->ofsVerts );
 	tempVert = ( float * )( tess.xyz + baseVertex );
 	tempNormal = ( int16_t * )( tess.normal + baseVertex );
-	for ( j = 0; j < render_count; j++, tempVert += 4, tempNormal += 4 ) {
+
+	// codmod: r_mdsSkinCache, reuse this frame's skinned vertices of the same entity + surface (bones above are still computed, they keep `frame` valid)
+	if ( r_mdsSkinCache->integer && backEnd.currentEntity != &tr.worldEntity ) {
+		skc = R_MdsSkinCacheFind( backEnd.currentEntity, surface, &skcNew );
+		if ( !skc ) {
+			R_ProfCount( PCNT_SKC_OVERFLOWS, 1 );
+		} else {
+			skcCount = skc->count;
+			if ( skcNew ) {
+				R_ProfCount( PCNT_SKC_MISSES, 1 );
+			} else if ( skcCount >= render_count ) {
+				R_ProfCount( PCNT_SKC_HITS, 1 );
+			} else {
+				R_ProfCount( PCNT_SKC_EXTENDS, 1 );
+			}
+			if ( r_mdsSkinCache->integer == 1 && skcCount > 0 ) {
+				const mdsSkcVert_t *cv = &mdsSkcVerts[skc->offset];
+
+				skcStart = skcCount < render_count ? skcCount : render_count;
+				for ( j = 0; j < skcStart; j++, tempVert += 4, tempNormal += 4, cv++ ) {
+					VectorCopy( cv->xyz, tempVert );
+					memcpy( tempNormal, cv->normal, sizeof( cv->normal ) );
+					tess.texCoords[baseVertex + j][0] = cv->st[0];
+					tess.texCoords[baseVertex + j][1] = cv->st[1];
+					v = (mdsVertex_t *)&v->weights[v->numWeights];
+				}
+			}
+		}
+	}
+
+	for ( j = skcStart; j < render_count; j++, tempVert += 4, tempNormal += 4 ) {
 		mdsWeight_t *w;
 		vec3_t newNormal;
 
@@ -1216,6 +1371,39 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 		tess.texCoords[baseVertex + j][1] = v->texCoords[1];
 
 		v = (mdsVertex_t *)&v->weights[v->numWeights];
+	}
+
+	if ( skc ) {
+		mdsSkcVert_t *cv = &mdsSkcVerts[skc->offset];
+
+		if ( r_mdsSkinCache->integer == 2 ) {
+			// verify: everything was recomputed above, the cached prefix must match bit for bit
+			int n = skcCount < render_count ? skcCount : render_count;
+
+			for ( j = 0; j < n; j++ ) {
+				if ( memcmp( cv[j].xyz, tess.xyz[baseVertex + j], sizeof( cv[j].xyz ) ) ||
+					 memcmp( cv[j].normal, tess.normal[baseVertex + j], sizeof( cv[j].normal ) ) ||
+					 memcmp( cv[j].st, tess.texCoords[baseVertex + j], sizeof( cv[j].st ) ) ) {
+					R_ProfCount( PCNT_SKC_MISMATCH, 1 );
+					if ( mdsSkcPrints < 16 ) {
+						mdsSkcPrints++;
+						ri.Printf( PRINT_WARNING, "r_mdsSkinCache: mismatch, surface %s vertex %d (cached %d, render_count %d)\n",
+							surface->name, j, skcCount, render_count );
+					}
+					break;
+				}
+			}
+		}
+		// store what the cache did not have yet (verify mode also refreshes nothing it already holds)
+		for ( j = skcCount; j < render_count; j++ ) {
+			VectorCopy( tess.xyz[baseVertex + j], cv[j].xyz );
+			memcpy( cv[j].normal, tess.normal[baseVertex + j], sizeof( cv[j].normal ) );
+			cv[j].st[0] = tess.texCoords[baseVertex + j][0];
+			cv[j].st[1] = tess.texCoords[baseVertex + j][1];
+		}
+		if ( render_count > skc->count ) {
+			skc->count = render_count;
+		}
 	}
 
 	DBG_SHOWTIME
@@ -1300,6 +1488,10 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 	R_ProfCount( PCNT_MDS_TRIS + profDepth, ( tess.numIndexes - oldIndexes ) / 3 );
 	if ( render_count == surface->numVerts ) {
 		R_ProfCount( PCNT_MDS_FULLLOD + profDepth, 1 );
+	}
+	if ( profT0 ) {
+		R_ProfMdsLod( header, surface, mdsLodDiagReason, mdsLodDiagProj, lodScale, render_count,
+			( tess.numIndexes - oldIndexes ) / 3 );
 	}
 
 #if 0 // FIXME: implement this

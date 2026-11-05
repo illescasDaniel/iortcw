@@ -26,11 +26,17 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_fbo.h"
 
 qboolean RB_SMAA(FBO_t *srcFbo, FBO_t *dstFbo, ivec4_t srcBox);
-void RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox);
+FBO_t *RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox, qboolean skipSceneCopy);
 void RB_ToneMap(FBO_t *hdrFbo, ivec4_t hdrBox, FBO_t *ldrFbo, ivec4_t ldrBox, int autoExposure);
 void RB_BokehBlur(FBO_t *src, ivec4_t srcBox, FBO_t *dst, ivec4_t dstBox, float blur);
 void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox);
-qboolean RB_PostFx(FBO_t *srcFbo, ivec4_t srcBox);
+qboolean RB_PostFxWillRun(FBO_t *srcFbo);
+qboolean RB_SunRaysMayDraw(void);
+qboolean RB_PostFx(FBO_t *srcFbo, FBO_t *sceneFbo, ivec4_t srcBox);
 void RB_GaussianBlur(FBO_t *srcFbo, FBO_t *dstFbo, float blur);
+qboolean RB_DLSActive(void);
+qboolean RB_RCASActive(void);
+void RB_SharpenBlit(FBO_t *src, ivec4_t srcBox, FBO_t *dst, ivec4_t dstBox);
+void RB_RenderScaleUpscale(FBO_t *src, ivec4_t srcBox, FBO_t *dst, ivec4_t dstBox, qboolean forceBilinear);
 
 #endif

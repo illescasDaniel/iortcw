@@ -1279,6 +1279,42 @@ static unsigned int RB_CalcShaderVertexAttribs( shaderCommands_t *input )
 	return vertexAttribs;
 }
 
+/*
+codmod: depth-fill draws (sun shadow cascades, depth prepass) only need position, the animation streams and, for alpha
+test / deformVertexes / tcgen, the texcoords, colour and normals. Normal, tangent, light direction and paint colour
+feed varyings the depth fragment shaders never read, so r_depthAttribTrim 1 does not upload them. The uploaded set is
+re-chosen by every draw (RB_UpdateTessVao orphans the buffer and re-enables/disables the arrays), so colour draws
+never see data left over from a trimmed upload.
+*/
+static unsigned int RB_TrimDepthAttribs( const shaderCommands_t *input, unsigned int vertexAttribs )
+{
+	unsigned int keep = ATTR_POSITION | ATTR_POSITION2 | ATTR_BONE_INDEXES | ATTR_BONE_WEIGHTS;
+	qboolean needsSurfaceAttribs = input->shader->numDeforms > 0;
+	int stage;
+
+	for ( stage = 0; stage < MAX_SHADER_STAGES && !needsSurfaceAttribs; stage++ )
+	{
+		const shaderStage_t *pStage = input->xstages[stage];
+
+		if ( !pStage )
+		{
+			break;
+		}
+
+		if ( pStage->stateBits & GLS_ATEST_BITS )
+		{
+			needsSurfaceAttribs = qtrue;
+		}
+	}
+
+	if ( needsSurfaceAttribs )
+	{
+		keep |= ATTR_TEXCOORD | ATTR_LIGHTCOORD | ATTR_COLOR | ATTR_NORMAL | ATTR_NORMAL2;
+	}
+
+	return vertexAttribs & keep;
+}
+
 static void RB_IterateStagesGeneric( shaderCommands_t *input )
 {
 	int stage;
@@ -1981,6 +2017,11 @@ void RB_StageIteratorGeneric( void )
 
 	if (tess.useInternalVao)
 	{
+		if (backEnd.depthFill && r_depthAttribTrim->integer)
+		{
+			vertexAttribs = RB_TrimDepthAttribs( input, vertexAttribs );
+		}
+
 		RB_UpdateTessVao(vertexAttribs);
 	}
 	else

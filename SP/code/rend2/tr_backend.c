@@ -350,7 +350,7 @@ void RB_BeginDrawingView (void) {
 		FBO_t *fbo = backEnd.viewParms.targetFbo;
 
 		if (fbo == NULL)
-			fbo = tr.renderFbo;
+			fbo = R_SceneFbo(&backEnd.viewParms);
 
 		if (tr.renderCubeFbo && fbo == tr.renderCubeFbo)
 		{
@@ -1557,7 +1557,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 		if (!isShadowView && backEnd.viewParms.smaaJitter)
 			backEnd.smaaVelocityDrawn = qfalse;
 		if (!isShadowView && backEnd.viewParms.smaaJitter && r_smaaVelocity->integer && tr.velocityShaders && tr.velocityImage &&
-			tr.renderFbo && oldFbo == tr.renderFbo && tr.renderFbo->colorImage[1] == tr.velocityImage &&
+			R_SceneFbo(&backEnd.viewParms) && oldFbo == R_SceneFbo(&backEnd.viewParms) && R_SceneFbo(&backEnd.viewParms)->colorImage[1] == tr.velocityImage &&
 			tr.smaaHistoryValid && tr.frameCount - tr.smaaHistoryFrame <= 1 && tr.frameCount >= tr.smaaHistoryFrame)
 		{
 			static const GLenum velBufs[2] = { GL_NONE, GL_COLOR_ATTACHMENT1 };
@@ -1623,7 +1623,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 				VectorSet4(srcTexCoords, 0.0f, 0.0f, 1.0f, 1.0f);
 
-				FBO_BlitFromTexture(tr.renderDepthImage, srcTexCoords, NULL, tr.hdrDepthFbo, NULL, NULL, NULL, 0);
+				FBO_BlitFromTexture(R_SceneDepth(&backEnd.viewParms), srcTexCoords, NULL, tr.hdrDepthFbo, NULL, NULL, NULL, 0);
 			}
 			RB_GpuMark( "depthcopy" );
 
@@ -1640,18 +1640,18 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 				FBO_Bind(tr.screenShadowFbo);
 
-				box[0] = backEnd.viewParms.viewportX      * tr.screenShadowFbo->width / (float)glConfig.vidWidth;
-				box[1] = backEnd.viewParms.viewportY      * tr.screenShadowFbo->height / (float)glConfig.vidHeight;
-				box[2] = backEnd.viewParms.viewportWidth  * tr.screenShadowFbo->width / (float)glConfig.vidWidth;
-				box[3] = backEnd.viewParms.viewportHeight * tr.screenShadowFbo->height / (float)glConfig.vidHeight;
+				box[0] = backEnd.viewParms.viewportX      * tr.screenShadowFbo->width / (float)R_SceneWidth(&backEnd.viewParms);
+				box[1] = backEnd.viewParms.viewportY      * tr.screenShadowFbo->height / (float)R_SceneHeight(&backEnd.viewParms);
+				box[2] = backEnd.viewParms.viewportWidth  * tr.screenShadowFbo->width / (float)R_SceneWidth(&backEnd.viewParms);
+				box[3] = backEnd.viewParms.viewportHeight * tr.screenShadowFbo->height / (float)R_SceneHeight(&backEnd.viewParms);
 
 				qglViewport(box[0], box[1], box[2], box[3]);
 				qglScissor(box[0], box[1], box[2], box[3]);
 
-				box[0] = backEnd.viewParms.viewportX / (float)glConfig.vidWidth;
-				box[1] = backEnd.viewParms.viewportY / (float)glConfig.vidHeight;
-				box[2] = box[0] + backEnd.viewParms.viewportWidth / (float)glConfig.vidWidth;
-				box[3] = box[1] + backEnd.viewParms.viewportHeight / (float)glConfig.vidHeight;
+				box[0] = backEnd.viewParms.viewportX / (float)R_SceneWidth(&backEnd.viewParms);
+				box[1] = backEnd.viewParms.viewportY / (float)R_SceneHeight(&backEnd.viewParms);
+				box[2] = box[0] + backEnd.viewParms.viewportWidth / (float)R_SceneWidth(&backEnd.viewParms);
+				box[3] = box[1] + backEnd.viewParms.viewportHeight / (float)R_SceneHeight(&backEnd.viewParms);
 
 				texCoords[0][0] = box[0]; texCoords[0][1] = box[3];
 				texCoords[1][0] = box[2]; texCoords[1][1] = box[3];
@@ -1672,7 +1672,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 				GLSL_BindProgram(&tr.shadowmaskShader);
 
-				GL_BindToTMU(tr.renderDepthImage, TB_COLORMAP);
+				GL_BindToTMU(R_SceneDepth(&backEnd.viewParms), TB_COLORMAP);
 
 				if (r_shadowCascadeZFar->integer != 0)
 				{
@@ -1752,18 +1752,18 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 				FBO_Bind(tr.flashShadowMaskFbo);
 
-				box[0] = backEnd.viewParms.viewportX      * tr.flashShadowMaskFbo->width / (float)glConfig.vidWidth;
-				box[1] = backEnd.viewParms.viewportY      * tr.flashShadowMaskFbo->height / (float)glConfig.vidHeight;
-				box[2] = backEnd.viewParms.viewportWidth  * tr.flashShadowMaskFbo->width / (float)glConfig.vidWidth;
-				box[3] = backEnd.viewParms.viewportHeight * tr.flashShadowMaskFbo->height / (float)glConfig.vidHeight;
+				box[0] = backEnd.viewParms.viewportX      * tr.flashShadowMaskFbo->width / (float)R_SceneWidth(&backEnd.viewParms);
+				box[1] = backEnd.viewParms.viewportY      * tr.flashShadowMaskFbo->height / (float)R_SceneHeight(&backEnd.viewParms);
+				box[2] = backEnd.viewParms.viewportWidth  * tr.flashShadowMaskFbo->width / (float)R_SceneWidth(&backEnd.viewParms);
+				box[3] = backEnd.viewParms.viewportHeight * tr.flashShadowMaskFbo->height / (float)R_SceneHeight(&backEnd.viewParms);
 
 				qglViewport(box[0], box[1], box[2], box[3]);
 				qglScissor(box[0], box[1], box[2], box[3]);
 
-				box[0] = backEnd.viewParms.viewportX / (float)glConfig.vidWidth;
-				box[1] = backEnd.viewParms.viewportY / (float)glConfig.vidHeight;
-				box[2] = box[0] + backEnd.viewParms.viewportWidth / (float)glConfig.vidWidth;
-				box[3] = box[1] + backEnd.viewParms.viewportHeight / (float)glConfig.vidHeight;
+				box[0] = backEnd.viewParms.viewportX / (float)R_SceneWidth(&backEnd.viewParms);
+				box[1] = backEnd.viewParms.viewportY / (float)R_SceneHeight(&backEnd.viewParms);
+				box[2] = box[0] + backEnd.viewParms.viewportWidth / (float)R_SceneWidth(&backEnd.viewParms);
+				box[3] = box[1] + backEnd.viewParms.viewportHeight / (float)R_SceneHeight(&backEnd.viewParms);
 
 				texCoords[0][0] = box[0]; texCoords[0][1] = box[3];
 				texCoords[1][0] = box[2]; texCoords[1][1] = box[3];
@@ -1779,7 +1779,7 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 				GLSL_BindProgram(&tr.flashShadowmaskShader);
 
-				GL_BindToTMU(tr.renderDepthImage, TB_COLORMAP);
+				GL_BindToTMU(R_SceneDepth(&backEnd.viewParms), TB_COLORMAP);
 				GL_BindToTMU(tr.flashShadowDepthImage, TB_SHADOWMAP);
 
 				GLSL_SetUniformMat4(&tr.flashShadowmaskShader, UNIFORM_SHADOWMVP, backEnd.refdef.flashShadowMvp);
@@ -2019,10 +2019,10 @@ const void	*RB_DrawSurfs( const void *data ) {
 			dstBox[2] = backEnd.viewParms.viewportWidth;
 			dstBox[3] = backEnd.viewParms.viewportHeight;
 
-			srcBox[0] = backEnd.viewParms.viewportX      * tr.screenSsaoImage->width  / (float)glConfig.vidWidth;
-			srcBox[1] = backEnd.viewParms.viewportY      * tr.screenSsaoImage->height / (float)glConfig.vidHeight;
-			srcBox[2] = backEnd.viewParms.viewportWidth  * tr.screenSsaoImage->width  / (float)glConfig.vidWidth;
-			srcBox[3] = backEnd.viewParms.viewportHeight * tr.screenSsaoImage->height / (float)glConfig.vidHeight;
+			srcBox[0] = backEnd.viewParms.viewportX      * tr.screenSsaoImage->width  / (float)R_SceneWidth(&backEnd.viewParms);
+			srcBox[1] = backEnd.viewParms.viewportY      * tr.screenSsaoImage->height / (float)R_SceneHeight(&backEnd.viewParms);
+			srcBox[2] = backEnd.viewParms.viewportWidth  * tr.screenSsaoImage->width  / (float)R_SceneWidth(&backEnd.viewParms);
+			srcBox[3] = backEnd.viewParms.viewportHeight * tr.screenSsaoImage->height / (float)R_SceneHeight(&backEnd.viewParms);
 
 			VectorSet4( viewInfo, backEnd.viewParms.zFar / r_znear->value, backEnd.viewParms.zFar, 0.0f, 0.0f );
 
@@ -2085,7 +2085,13 @@ const void	*RB_DrawSurfs( const void *data ) {
 			RB_DrawSun(0.2, tr.sunShader);
 		}
 
-		if (glRefConfig.framebufferObject && r_drawSunRays->integer)
+		// codmod r_sunRaysOpt: RB_SunRays returns before reading the mask when the sun is not in
+		// front of the view or the rays are cut, so clearing and drawing it is dead work there.
+		// (the visibility query ring then stops refreshing; see docs, <= 4 frames of lag on re-entry)
+		if (glRefConfig.framebufferObject && r_drawSunRays->integer
+			&& !( r_sunRaysOpt->integer > 0
+				  && ( DotProduct( tr.sunDirection, backEnd.viewParms.or.axis[0] ) < 0.25f
+					   || R_CutsceneOff( backEnd.refdef.rdflags, CUTSCENE_FX_RAYS ) ) ))
 		{
 			FBO_t *oldFbo = glState.currentFBO;
 			FBO_Bind(tr.sunRaysFbo);
@@ -2433,6 +2439,9 @@ const void *RB_PostProcess(const void *data)
 	ivec4_t srcBox, dstBox;
 	qboolean autoExposure;
 	qboolean tonemapped = qfalse;
+	FBO_t *sceneFbo = NULL;			// r_gradeNoCopy: where the anti-aliased scene is while srcFbo is stale (NULL = srcFbo)
+	qboolean directGrade = qfalse;	// r_gradeNoCopy: grade/bloom reads sceneFbo and writes srcFbo directly
+	qboolean upscale;
 
 	// finish any 2D drawing if needed
 	if(tess.numIndexes)
@@ -2440,7 +2449,15 @@ const void *RB_PostProcess(const void *data)
 
 	if (!glRefConfig.framebufferObject || !r_postProcess->integer)
 	{
-		// do nothing
+		// r_renderScale: the scene still has to reach the window-sized renderFbo
+		if (tr.renderScale.active && cmd && cmd->viewParms.worldTarget && !(cmd->refdef.rdflags & RDF_SKYBOXPORTAL))
+		{
+			const viewParms_t *vp = &cmd->viewParms;
+
+			VectorSet4(srcBox, vp->viewportX, vp->viewportY, vp->viewportWidth, vp->viewportHeight);
+			VectorSet4(dstBox, vp->nativeViewport[0], vp->nativeViewport[1], vp->nativeViewport[2], vp->nativeViewport[3]);
+			RB_RenderScaleUpscale(tr.worldFbo, srcBox, tr.renderFbo, dstBox, qtrue);
+		}
 		return (const void *)(cmd + 1);
 	}
 
@@ -2450,8 +2467,15 @@ const void *RB_PostProcess(const void *data)
 		backEnd.viewParms = cmd->viewParms;
 	}
 
-	srcFbo = tr.renderFbo;
-	dstFbo = tr.renderFbo;
+	srcFbo = R_SceneFbo(&backEnd.viewParms);
+	dstFbo = srcFbo;
+
+	// r_renderScale: the scene-sized result is upscaled into renderFbo as the last step (not for the skybox
+	// portal, which the main view draws over)
+	upscale = tr.renderScale.active && backEnd.viewParms.worldTarget && srcFbo != tr.renderFbo &&
+		!(backEnd.refdef.rdflags & RDF_SKYBOXPORTAL);
+	if (upscale)
+		dstFbo = tr.renderFbo;
 
 	if (tr.msaaResolveFbo)
 	{
@@ -2474,10 +2498,10 @@ const void *RB_PostProcess(const void *data)
 	{
 		vec4_t viewInfo;
 
-		srcBox[0] = backEnd.viewParms.viewportX      * tr.screenSsaoImage->width  / (float)glConfig.vidWidth;
-		srcBox[1] = backEnd.viewParms.viewportY      * tr.screenSsaoImage->height / (float)glConfig.vidHeight;
-		srcBox[2] = backEnd.viewParms.viewportWidth  * tr.screenSsaoImage->width  / (float)glConfig.vidWidth;
-		srcBox[3] = backEnd.viewParms.viewportHeight * tr.screenSsaoImage->height / (float)glConfig.vidHeight;
+		srcBox[0] = backEnd.viewParms.viewportX      * tr.screenSsaoImage->width  / (float)R_SceneWidth(&backEnd.viewParms);
+		srcBox[1] = backEnd.viewParms.viewportY      * tr.screenSsaoImage->height / (float)R_SceneHeight(&backEnd.viewParms);
+		srcBox[2] = backEnd.viewParms.viewportWidth  * tr.screenSsaoImage->width  / (float)R_SceneWidth(&backEnd.viewParms);
+		srcBox[3] = backEnd.viewParms.viewportHeight * tr.screenSsaoImage->height / (float)R_SceneHeight(&backEnd.viewParms);
 
 		VectorSet4(viewInfo, backEnd.viewParms.zFar / r_znear->value, backEnd.viewParms.zFar, 0.0f, 0.0f);
 
@@ -2495,6 +2519,15 @@ const void *RB_PostProcess(const void *data)
 	srcBox[2] = backEnd.viewParms.viewportWidth;
 	srcBox[3] = backEnd.viewParms.viewportHeight;
 
+	// r_gradeNoCopy: the AA result may stay in its own RGBA8 image until the grade pass, which then writes srcFbo.
+	// Only on a full-target view where grade/bloom will run, and when sun rays (additive, HDR) cannot draw in between.
+	if (r_gradeNoCopy->integer && srcFbo && tr.screenScratchFbo && RB_PostFxWillRun(srcFbo) &&
+		!(r_drawSunRays->integer && !R_CutsceneOff( backEnd.refdef.rdflags, CUTSCENE_FX_RAYS ) && RB_SunRaysMayDraw()) &&
+		srcBox[0] <= 2 && srcBox[1] <= 2 &&
+		abs(srcBox[2] - srcFbo->width) <= 2 && abs(srcBox[3] - srcFbo->height) <= 2 &&
+		srcFbo->width == tr.screenScratchFbo->width && srcFbo->height == tr.screenScratchFbo->height)
+		directGrade = qtrue;
+
 	if (srcFbo)
 	{
 		if (r_hdr->integer && (r_toneMap->integer || r_forceToneMap->integer))
@@ -2509,10 +2542,32 @@ const void *RB_PostProcess(const void *data)
 
 			// codmod: SMAA reads the tone-mapped scratch image and writes the anti-aliased
 			// result straight back, instead of copying scratch -> srcFbo before and after it
-			if (!(r_smaa->integer && RB_SMAA(tr.screenScratchFbo, srcFbo, srcBox)))
-				FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+			if (directGrade && r_gradeNoCopy->integer >= 2 && r_smaa->integer && !r_smaaDebug->integer &&
+				!backEnd.viewParms.smaaJitter && tr.smaaEdgesFbo &&
+				srcFbo->width == tr.smaaEdgesFbo->width && srcFbo->height == tr.smaaEdgesFbo->height)
+			{
+				// SMAA 1x on a view T2x does not touch: the blend goes into the (free) SMAA edges image, grade reads that
+				if (RB_SMAA(tr.screenScratchFbo, tr.smaaEdgesFbo, srcBox))
+				{
+					sceneFbo = tr.smaaEdgesFbo;
+					backEnd.smaaVelocityDrawn = qfalse;	// what RB_SMAATemporal does first for an unjittered view
+				}
+				else
+					FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+			}
+			else if (!(r_smaa->integer && RB_SMAA(tr.screenScratchFbo, srcFbo, srcBox)))
+			{
+				if (directGrade)
+					sceneFbo = tr.screenScratchFbo;	// AA off: the tone-mapped scratch image is the scene, no tonemap_copy
+				else
+					FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+			}
 			else
-				RB_SMAATemporal(srcFbo, srcBox);	// codmod: SMAA T2x, no-op unless this view was jittered
+			{
+				// codmod: SMAA T2x, no-op unless this view was jittered. A returned FBO holds the resolved frame
+				// (srcFbo too, unless the scene copy is skipped: only when the grade pass takes it from there)
+				sceneFbo = RB_SMAATemporal(srcFbo, srcBox, directGrade && r_smaaT2xNoSceneCopy->integer);
+			}
 			tonemapped = qtrue;
 		}
 		else if (r_cameraExposure->value != 0.0f)
@@ -2537,6 +2592,9 @@ const void *RB_PostProcess(const void *data)
 
 	RB_GpuMark( "tonemap_copy" );
 
+	if (!directGrade)
+		sceneFbo = NULL;	// RB_SMAATemporal only skips the scene copy when directGrade: srcFbo already holds the scene
+
 	// anti-alias the tone-mapped 3D scene; 2D is drawn after this and stays unfiltered
 	if (r_smaa->integer && srcFbo && !tonemapped)
 		RB_SMAA(srcFbo, srcFbo, srcBox);
@@ -2546,16 +2604,26 @@ const void *RB_PostProcess(const void *data)
 		RB_SunRays(srcFbo, srcBox, srcFbo, srcBox);
 	RB_GpuMark( "rays_add" );
 
-	RB_PostFx(srcFbo, srcBox);
+	if (!RB_PostFx(srcFbo, sceneFbo, srcBox) && sceneFbo)
+		FBO_FastBlit(sceneFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);	// cannot happen: RB_PostFxWillRun was true
 
 	if (1)
 		RB_BokehBlur(srcFbo, srcBox, srcFbo, srcBox, backEnd.refdef.blurFactor);
 	else
 		RB_GaussianBlur(srcFbo, srcFbo, backEnd.refdef.blurFactor);
 
-	if (srcFbo != dstFbo)
-		FBO_FastBlit(srcFbo, srcBox, dstFbo, dstBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-	RB_GpuMark( "blur+copy" );
+	if (upscale)
+	{
+		RB_GpuMark( "blur+copy" );
+		VectorSet4(dstBox, backEnd.viewParms.nativeViewport[0], backEnd.viewParms.nativeViewport[1],
+			backEnd.viewParms.nativeViewport[2], backEnd.viewParms.nativeViewport[3]);
+		RB_RenderScaleUpscale(srcFbo, srcBox, dstFbo, dstBox, qfalse);
+	}
+	else
+	{
+		RB_SharpenBlit(srcFbo, srcBox, dstFbo, dstBox);
+		RB_GpuMark( "blur+copy" );
+	}
 
 #if 0
 	if (0)
@@ -2687,7 +2755,7 @@ const void *RB_PostProcess(const void *data)
 #endif
 
 	if ( tr.warpFbo ) {
-		RB_WarpCapture( cmd, srcFbo );
+		RB_WarpCapture( cmd, upscale ? dstFbo : srcFbo );
 		RB_WarpLatch();
 	}
 

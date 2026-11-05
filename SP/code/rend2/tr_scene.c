@@ -462,6 +462,10 @@ void RE_BeginScene(const refdef_t *fd)
 	tr.refdef.height = fd->height;
 	tr.refdef.fov_x = fd->fov_x;
 	tr.refdef.fov_y = fd->fov_y;
+	tr.refdef.mainCamValid = ( !( fd->rdflags & RDF_NOWORLDMODEL ) && fd->fov_y > 1.0f && fd->fov_y < 179.0f ) ? qtrue : qfalse;
+	VectorCopy( fd->vieworg, tr.refdef.mainCamOrigin );
+	VectorCopy( fd->viewaxis[0], tr.refdef.mainCamAxis0 );
+	tr.refdef.mainCamProjY = tr.refdef.mainCamValid ? 1.0f / tan( fd->fov_y * M_PI / 360.0f ) : 0.0f;
 
 	VectorCopy( fd->vieworg, tr.refdef.vieworg );
 	VectorCopy( fd->viewaxis[0], tr.refdef.viewaxis[0] );
@@ -754,6 +758,27 @@ static void RE_RenderSceneInner( const refdef_t *fd ) {
 	parms.viewportHeight = tr.refdef.height;
 	parms.isPortal = qfalse;
 
+	parms.nativeViewport[0] = parms.viewportX;
+	parms.nativeViewport[1] = parms.viewportY;
+	parms.nativeViewport[2] = parms.viewportWidth;
+	parms.nativeViewport[3] = parms.viewportHeight;
+
+	// r_renderScale: world views draw into the scene-sized tr.worldFbo; edge rounding keeps adjacent views seamless
+	if ( tr.renderScale.active && !( fd->rdflags & RDF_NOWORLDMODEL ) ) {
+		float sx = tr.sceneWidth / (float)glConfig.vidWidth;
+		float sy = tr.sceneHeight / (float)glConfig.vidHeight;
+		int x0 = (int)( parms.nativeViewport[0] * sx + 0.5f );
+		int y0 = (int)( parms.nativeViewport[1] * sy + 0.5f );
+		int x1 = (int)( ( parms.nativeViewport[0] + parms.nativeViewport[2] ) * sx + 0.5f );
+		int y1 = (int)( ( parms.nativeViewport[1] + parms.nativeViewport[3] ) * sy + 0.5f );
+
+		parms.worldTarget = qtrue;
+		parms.viewportX = x0;
+		parms.viewportY = y0;
+		parms.viewportWidth = x1 - x0;
+		parms.viewportHeight = y1 - y0;
+	}
+
 	parms.fovX = tr.refdef.fov_x;
 	parms.fovY = tr.refdef.fov_y;
 
@@ -781,7 +806,7 @@ static void RE_RenderSceneInner( const refdef_t *fd ) {
 		tr.smaaHistoryFbo && tr.renderFbo && !tr.msaaResolveFbo && r_depthPrepass->integer && r_postProcess->integer &&
 		r_smaaJitter->value > 0.0f && !( fd->rdflags & ( RDF_NOWORLDMODEL | RDF_SKYBOXPORTAL ) ) && tr.refdef.stereoFrame == STEREO_CENTER &&
 		parms.viewportX <= 2 && parms.viewportY <= 2 &&
-		abs( parms.viewportWidth - tr.renderFbo->width ) <= 2 && abs( parms.viewportHeight - tr.renderFbo->height ) <= 2 ) {
+		abs( parms.viewportWidth - R_SceneFbo( &parms )->width ) <= 2 && abs( parms.viewportHeight - R_SceneFbo( &parms )->height ) <= 2 ) {
 		parms.smaaJitter = qtrue;
 	}
 
@@ -792,7 +817,7 @@ static void RE_RenderSceneInner( const refdef_t *fd ) {
 			r_smaaTemporal->integer, r_smaa->integer, tr.smaaAvailable, tr.smaaResolveAvailable, tr.smaaHistoryFbo != NULL,
 			tr.renderFbo != NULL, tr.msaaResolveFbo != NULL, r_depthPrepass->integer, r_postProcess->integer,
 			r_smaaJitter->value, fd->rdflags, tr.refdef.stereoFrame, parms.viewportX, parms.viewportY, parms.viewportWidth,
-			parms.viewportHeight, tr.renderFbo ? tr.renderFbo->width : 0, tr.renderFbo ? tr.renderFbo->height : 0 );
+			parms.viewportHeight, R_SceneFbo( &parms ) ? R_SceneFbo( &parms )->width : 0, R_SceneFbo( &parms ) ? R_SceneFbo( &parms )->height : 0 );
 	}
 
 	R_RenderView( &parms );

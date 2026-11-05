@@ -103,12 +103,52 @@ static const char *const cpuScopeNames[CPU_NUM] = {
 };
 
 // event counters (R_ProfCount), per frame
-#define CNT_NUM 10
+// ids 10.. : MDS LOD decisions in depth views (surfaces by view x reason, see R_ProfMdsLod), additive columns
+#define CNT_MDSLOD_BASE 10
+#define MDSLOD_REASONS 5
+#define MDSLOD_FRAME_VIEWS 4
+#define CNT_SKC_BASE ( CNT_MDSLOD_BASE + MDSLOD_FRAME_VIEWS * MDSLOD_REASONS )	// 5 MDS skin cache counters (PCNT_SKC_*)
+#define CNT_NUM ( CNT_SKC_BASE + 5 )
 static const char *const cntNames[CNT_NUM] = {
 	"mds_surfaces_color", "mds_surfaces_depth", "mds_verts_emitted_color", "mds_verts_emitted_depth",
 	"mds_tris_emitted_color", "mds_tris_emitted_depth", "mds_tangent_verts_color", "mds_tangent_verts_depth",
-	"mds_full_lod_surfaces_color", "mds_full_lod_surfaces_depth"
+	"mds_full_lod_surfaces_color", "mds_full_lod_surfaces_depth",
+	"mdslod_casc0_proj_nonpos", "mdslod_casc0_flag_full", "mdslod_casc0_proj_clamped", "mdslod_casc0_computed_full", "mdslod_casc0_computed_reduced",
+	"mdslod_casc1_proj_nonpos", "mdslod_casc1_flag_full", "mdslod_casc1_proj_clamped", "mdslod_casc1_computed_full", "mdslod_casc1_computed_reduced",
+	"mdslod_casc2_proj_nonpos", "mdslod_casc2_flag_full", "mdslod_casc2_proj_clamped", "mdslod_casc2_computed_full", "mdslod_casc2_computed_reduced",
+	"mdslod_prepass_proj_nonpos", "mdslod_prepass_flag_full", "mdslod_prepass_proj_clamped", "mdslod_prepass_computed_full", "mdslod_prepass_computed_reduced",
+	"skc_hits", "skc_extends", "skc_misses", "skc_overflows", "skc_verify_mismatches"
 };
+
+// MDS LOD diagnostics (mds_lod_summary.csv / mds_lod.csv). Views: sun cascades 0-3, other shadow views (flash/point),
+// main depth prepass, main color pass (reference only). Order must match MDSLOD_* in tr_local.h.
+static const char *const mdsLodReasonNames[MDSLOD_REASONS] = {
+	"proj_nonpos", "flag_full", "proj_clamped", "computed_full", "computed_reduced"
+};
+#define MDSV_CASC0 0
+#define MDSV_OTHERSHADOW 4
+#define MDSV_PREPASS 5
+#define MDSV_COLOR 6
+#define MDSV_NUM 7
+static const char *const mdsLodViewNames[MDSV_NUM] = {
+	"casc0", "casc1", "casc2", "casc3", "other_shadow", "prepass", "color"
+};
+#define MDSLOD_SAMPLE_EVERY 7		// prime, so a fixed surfaces-per-character count does not alias
+#define MDSLOD_MAX_SAMPLES 50000
+#define MDSLOD_REF_SIZE 2048
+
+typedef struct {
+	int		refTime, frame, entity, surf, view, reason, ortho;
+	int		emitVerts, maxVerts, emitTris, maxTris;
+	int		refVerts, refAge;
+	float	proj, lod, refLod;
+} mdsLodSample_t;
+
+typedef struct {
+	const void	*surf;
+	int			entity, frame, verts;
+	float		lod;
+} mdsLodRef_t;
 
 // sun cascade re-render reasons (R_ProfSunCascade); 0 = reused
 static const char *const cascadeReasons[] = {
@@ -241,6 +281,11 @@ static struct {
 	int							cntPending[CNT_NUM];
 	int							cascPendingState[4];
 	int							cascPendingReason[4];
+	// MDS LOD diagnostics, whole run
+	double						mdsLodCnt[MDSV_NUM][MDSLOD_REASONS][5];	// surfaces, emitted verts, max verts, emitted tris, max tris
+	mdsLodSample_t				*mdsSamples;
+	int							numMdsSamples, mdsSampleTick, mdsSamplesDropped;
+	mdsLodRef_t					mdsRef[MDSLOD_REF_SIZE];
 	// mode 2: per sun cascade totals over the batches drawn into it
 	struct {
 		double	gpuMs, mdsGpuMs;
@@ -300,6 +345,108 @@ void R_ProfSunCascade( int level, int state, int reason ) {
 	}
 }
 
+/*
+=============
+R_ProfMdsLod
+
+One MDS surface was just assembled (r_gpuProfile on only). Counts it by view and LOD decision reason, remembers the
+main color pass decision per (entity, surface) as a reference for the depth views, and keeps every
+MDSLOD_SAMPLE_EVERY-th depth-view surface as a sample record.
+=============
+*/
+void R_ProfMdsLod( const mdsHeader_t *header, const mdsSurface_t *surface, int reason, float proj, float lodScale,
+	int emittedVerts, int emittedTris ) {
+	int view, entity, h, k;
+	mdsLodRef_t *ref;
+
+	if ( !r_gpuProfile || !r_gpuProfile->integer || reason < 0 || reason >= MDSLOD_REASONS ) {
+		return;
+	}
+	if ( !backEnd.depthFill ) {
+		view = MDSV_COLOR;
+	} else if ( ( view = RB_GpuCascadeOfView() ) >= 0 ) {
+		view += MDSV_CASC0;
+	} else if ( backEnd.viewParms.flags & VPF_DEPTHSHADOW ) {
+		view = MDSV_OTHERSHADOW;
+	} else {
+		view = MDSV_PREPASS;
+	}
+	entity = (int)( backEnd.currentEntity - backEnd.refdef.entities );
+	if ( entity < 0 || entity >= MAX_REFENTITIES ) {
+		entity = -1;
+	}
+
+	{
+		double *c = gp.mdsLodCnt[view][reason];
+
+		c[0] += 1;
+		c[1] += emittedVerts;
+		c[2] += surface->numVerts;
+		c[3] += emittedTris;
+		c[4] += surface->numTriangles;
+	}
+	if ( view == MDSV_CASC0 || view == MDSV_CASC0 + 1 || view == MDSV_CASC0 + 2 ) {
+		gp.cntPending[CNT_MDSLOD_BASE + view * MDSLOD_REASONS + reason]++;
+	} else if ( view == MDSV_PREPASS ) {
+		gp.cntPending[CNT_MDSLOD_BASE + 3 * MDSLOD_REASONS + reason]++;
+	}
+
+	h = (int)( ( ( (size_t)surface >> 4 ) * 2654435761u + (unsigned)entity * 40503u ) % MDSLOD_REF_SIZE );
+	ref = &gp.mdsRef[h];
+	if ( view == MDSV_COLOR ) {
+		ref->surf = surface;
+		ref->entity = entity;
+		ref->frame = tr.frameCount;
+		ref->lod = lodScale;
+		ref->verts = emittedVerts;
+		return;
+	}
+
+	if ( ++gp.mdsSampleTick % MDSLOD_SAMPLE_EVERY ) {
+		return;
+	}
+	if ( gp.numMdsSamples >= MDSLOD_MAX_SAMPLES ) {
+		gp.mdsSamplesDropped++;
+		return;
+	}
+	if ( !gp.mdsSamples ) {
+		gp.mdsSamples = malloc( sizeof( mdsLodSample_t ) * MDSLOD_MAX_SAMPLES );
+		if ( !gp.mdsSamples ) {
+			return;
+		}
+	}
+	{
+		mdsLodSample_t *r = &gp.mdsSamples[gp.numMdsSamples++];
+		const mdsSurface_t *sf = (const mdsSurface_t *)( (const byte *)header + header->ofsSurfaces );
+
+		for ( k = 0; k < header->numSurfaces && sf != surface; k++ ) {
+			sf = (const mdsSurface_t *)( (const byte *)sf + sf->ofsEnd );
+		}
+		r->refTime = backEnd.refdef.time;
+		r->frame = tr.frameCount;
+		r->entity = entity;
+		r->surf = k < header->numSurfaces ? k : -1;
+		r->view = view;
+		r->reason = reason;
+		r->ortho = ( backEnd.viewParms.flags & VPF_ORTHOGRAPHIC ) ? 1 : 0;
+		r->emitVerts = emittedVerts;
+		r->maxVerts = surface->numVerts;
+		r->emitTris = emittedTris;
+		r->maxTris = surface->numTriangles;
+		r->proj = proj;
+		r->lod = lodScale;
+		if ( ref->surf == surface && ref->entity == entity ) {
+			r->refLod = ref->lod;
+			r->refVerts = ref->verts;
+			r->refAge = tr.frameCount - ref->frame;
+		} else {
+			r->refLod = -1.0f;
+			r->refVerts = -1;
+			r->refAge = -1;
+		}
+	}
+}
+
 static void R_GpuProfInit( void ) {
 	int i;
 
@@ -354,6 +501,10 @@ void R_GpuProfReset( void ) {
 	gp.statsOverflow = 0;
 	gp.benchOrdinal = 0;
 	Com_Memset( gp.cascDeep, 0, sizeof( gp.cascDeep ) );
+	Com_Memset( gp.mdsLodCnt, 0, sizeof( gp.mdsLodCnt ) );
+	gp.numMdsSamples = 0;
+	gp.mdsSampleTick = 0;
+	gp.mdsSamplesDropped = 0;
 	Com_Memset( gp.cpuTotal, 0, sizeof( gp.cpuTotal ) );
 	Com_Memset( gp.cpuCalls, 0, sizeof( gp.cpuCalls ) );
 	gp.deepFrames = 0;
@@ -1088,7 +1239,7 @@ void R_GpuProfDump( void ) {
 	// cvars.csv: the renderer/pacing settings this capture ran with (value strings as the engine holds them)
 	{
 		static const char *const names[] = {
-			"r_frameWarp", "r_aa", "r_ao", "r_smaa", "r_smaaTemporal", "r_smaaVelocity", "r_ext_framebuffer_multisample", "r_depthPrepass",
+			"r_frameWarp", "r_renderScale", "r_renderScaleFilter", "r_aa", "r_ao", "r_smaa", "r_smaaTemporal", "r_smaaVelocity", "r_ext_framebuffer_multisample", "r_depthPrepass",
 			"r_sunShadows", "r_sunShadowStable", "r_sunShadowCascadeUpdate", "r_shadowMapSize", "r_shadowFilter", "r_shadowBlur",
 			"r_shadowCascadeZNear", "r_shadowCascadeZFar", "r_shadowCascadeZBias", "r_flashlightShadow", "r_flashlightShadowSize",
 			"r_normalMapping", "r_specularMapping", "r_deluxeMapping", "r_parallaxMapping", "r_parallaxMapShadows", "r_parallaxMaxSteps",
@@ -1097,7 +1248,7 @@ void R_GpuProfDump( void ) {
 			"r_ssao", "r_ssaoMode", "r_ssaoSamples", "r_ssaoSlices", "r_ssaoSteps", "r_ssaoDepthMips", "r_lodscale", "r_lodbias",
 			"r_picmip", "r_textureMode", "r_ext_max_anisotropy", "r_mode", "r_customwidth", "r_customheight", "r_fullscreen",
 			"r_swapInterval", "r_vsync", "r_finish", "r_swapFinish", "r_flares", "r_dynamiclight", "r_mergeLightmaps",
-			"r_vaoCacheStats", "r_gpuProfile", "r_gpuLoad", "com_maxfps", "com_maxfpsMode", "com_maxfpsGpuSync", "cl_benchDemo",
+			"r_vaoCacheStats", "r_mdsSkinCache", "r_mdsDepthTangents", "r_depthAttribTrim", "r_gpuProfile", "r_gpuLoad", "com_maxfps", "com_maxfpsMode", "com_maxfpsGpuSync", "cl_benchDemo",
 			"cg_shadows", "cg_skybox"
 		};
 		int k;
@@ -1152,6 +1303,40 @@ void R_GpuProfDump( void ) {
 		Out_Printf( "\n" );
 	}
 	Out_Write( "frames.csv" );
+
+	// mds_lod_summary.csv / mds_lod.csv: MDS LOD decisions per view and reason (only when MDS surfaces were drawn)
+	{
+		int v, r, any = 0;
+
+		for ( v = 0; v < MDSV_NUM; v++ ) {
+			for ( r = 0; r < MDSLOD_REASONS; r++ ) {
+				any |= gp.mdsLodCnt[v][r][0] > 0;
+			}
+		}
+		if ( any ) {
+			Out_Printf( "view,reason,surfaces,emitted_verts,max_verts,emitted_tris,max_tris\n" );
+			for ( v = 0; v < MDSV_NUM; v++ ) {
+				for ( r = 0; r < MDSLOD_REASONS; r++ ) {
+					const double *c = gp.mdsLodCnt[v][r];
+
+					Out_Printf( "%s,%s,%.0f,%.0f,%.0f,%.0f,%.0f\n", mdsLodViewNames[v], mdsLodReasonNames[r], c[0], c[1], c[2], c[3], c[4] );
+				}
+			}
+			Out_Write( "mds_lod_summary.csv" );
+		}
+		if ( gp.numMdsSamples ) {
+			Out_Printf( "ref_time_ms,render_frame,entity,surface,view,reason,orthographic,proj_radius,lod,emitted_verts,max_verts,"
+				"emitted_tris,max_tris,main_lod,main_verts,main_age_frames\n" );
+			for ( v = 0; v < gp.numMdsSamples; v++ ) {
+				const mdsLodSample_t *s = &gp.mdsSamples[v];
+
+				Out_Printf( "%d,%d,%d,%d,%s,%s,%d,%.5f,%.4f,%d,%d,%d,%d,%.4f,%d,%d\n", s->refTime, s->frame, s->entity, s->surf,
+					mdsLodViewNames[s->view], mdsLodReasonNames[s->reason], s->ortho, s->proj, s->lod, s->emitVerts, s->maxVerts,
+					s->emitTris, s->maxTris, s->refLod, s->refVerts, s->refAge );
+			}
+			Out_Write( "mds_lod.csv" );
+		}
+	}
 
 	// shaders.csv (mode 2)
 	if ( gp.deepFrames && gp.shaders ) {
@@ -1233,6 +1418,10 @@ void R_ShutdownGpuProf( void ) {
 				free( gp.frames[i].deepRec );
 			}
 		}
+	}
+	if ( gp.mdsSamples ) {
+		free( gp.mdsSamples );
+		gp.mdsSamples = NULL;
 	}
 	if ( gp.shaders ) {
 		free( gp.shaders );

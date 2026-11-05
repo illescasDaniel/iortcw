@@ -625,8 +625,12 @@ void RB_RenderFlare( flare_t *f ) {
 	else
 		distance = -f->eyeZ;
 
-	// calculate the flare size..
-	size = backEnd.viewParms.viewportWidth * ( r_flareSize->value/640.0f + 8 / distance );
+	// calculate the flare size.. (r_renderScale: in window pixels, so the intensity does not change with the scale)
+	if ( backEnd.viewParms.worldTarget ) {
+		size = backEnd.viewParms.nativeViewport[2] * ( r_flareSize->value/640.0f + 8 / distance );
+	} else {
+		size = backEnd.viewParms.viewportWidth * ( r_flareSize->value/640.0f + 8 / distance );
+	}
 
 /*
  * This is an alternative to intensity scaling. It changes the size of the flare on screen instead
@@ -654,6 +658,11 @@ void RB_RenderFlare( flare_t *f ) {
 	intensity = flareCoeff * size * size / (factor * factor);
 
 	VectorScale(f->color, f->drawIntensity * intensity, color);
+
+	// r_renderScale: drawn in scene pixels
+	if ( backEnd.viewParms.worldTarget && backEnd.viewParms.nativeViewport[2] != backEnd.viewParms.viewportWidth ) {
+		size *= backEnd.viewParms.viewportWidth / (float)backEnd.viewParms.nativeViewport[2];
+	}
 
 	// Calculations for fogging
 	if(tr.world && f->fogNum > 0 && f->fogNum < tr.world->numfogs)

@@ -1,6 +1,6 @@
 uniform sampler2D u_DiffuseMap; // scene (tone-mapped)
 uniform sampler2D u_LightMap;   // blurred bloom (half resolution), only read when u_Color.x > 0
-uniform vec4      u_Color;      // x = bloom intensity, y = brightness (gamma lift, 1 = none), zw unused
+uniform vec4      u_Color;      // x = bloom intensity, y = brightness (gamma lift, 1 = none), z > 0.5 = round to 8 bit (target is not RGBA8), w unused
 uniform vec4      u_ViewInfo;   // x = contrast, y = saturation, z = warm/cool tint (-1..1), w = vignette
 
 varying vec2      var_Tex1;
@@ -39,5 +39,9 @@ void main()
 	vec2 d = var_Tex1 - 0.5;
 	c *= 1.0 - u_ViewInfo.w * smoothstep(0.25, 0.85, dot(d, d) * 2.0);
 
-	gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+	c = clamp(c, 0.0, 1.0);
+	// r_gradeNoCopy: writing a 16F target directly; round like the RGBA8 scratch + copy it replaces
+	if (u_Color.z > 0.5)
+		c = floor(c * 255.0 + 0.5) / 255.0;
+	gl_FragColor = vec4(c, 1.0);
 }

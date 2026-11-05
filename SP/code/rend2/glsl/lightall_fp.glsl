@@ -224,6 +224,12 @@ float ParallaxSoftShadow(vec2 uv, vec3 lightTS, float scale, int numSteps, float
 {
 	if (lightTS.z <= 0.05)
 		return 1.0;
+  #if defined(POM_OPT_ZERODEPTH)
+	// startDepth == 0: size = height = 0, every occ = -sample <= 0 (or 0 * 6 / 0, which clamp() resolves to 0),
+	// so every term is 1.0 and the result is 1.0
+	if (startDepth <= 0.0)
+		return 1.0;
+  #endif
 
 	vec2 ds = lightTS.xy * scale / max(lightTS.z, 0.25);
 	float size = 1.0 / float(numSteps);
@@ -252,6 +258,11 @@ float ParallaxSoftShadow(vec2 uv, vec3 lightTS, float scale, int numSteps, float
 		// positive when the surface at this point is above the ray
 		float occ = (startDepth - height) - SampleDepthMarch(uv + ds * height);
 		shadow = min(shadow, 1.0 - clamp(occ * 6.0 / height, 0.0, 1.0));
+	  #if defined(POM_OPT_SHADOWBREAK)
+		// shadow is a running min of values >= 0: once 0 it can not change
+		if (shadow <= 0.0)
+			break;
+	  #endif
 	}
 
 	return shadow;
@@ -553,7 +564,13 @@ void main()
 	  #else
 		float pomShadowW = lightDirectional * pomShadowFade;
 	  #endif
+	  #if defined(POM_OPT_BAKEDSKIP)
+		// the march only scales attenuation, which only multiplies NL * lightColor in the output: skip it when
+		// that product is already 0 (surface facing away from the light, or no light colour)
+		if (pomShadowW > 0.05 && dot(N, L) > 0.0 && any(notEqual(lightColor, vec3(0.0))))
+	  #else
 		if (pomShadowW > 0.05)
+	  #endif
 		{
 			int shadowSteps = int(clamp(u_ParallaxParams.x * 0.4 * pomStepFactor, 8.0, 24.0));
 			if (pomStartDepth < 0.0)
@@ -731,7 +748,12 @@ void main()
 	//lightColor *= CalcLightAttenuation(float(u_PrimaryLightDir.w > 0.0), u_PrimaryLightDir.w / sqrLightDist);
 
   #if defined(USE_PARALLAXMAP) && defined(USE_PARALLAXMAP_SHADOWS) && defined(USE_PARALLAXMAP_SUNSHADOWS)
+	  #if defined(POM_OPT_SUNSKIP)
+	// the march only scales lightColor, which only multiplies NL2 * reflectance in the output
+	if (pomScale > 0.0005 && pomShadowFade > 0.0 && NL2 > 0.0 && any(notEqual(lightColor, vec3(0.0))))
+	  #else
 	if (pomScale > 0.0005 && pomShadowFade > 0.0)
+	  #endif
 	{
 		if (pomStartDepth < 0.0)
 			pomStartDepth = SampleDepth(texCoords);

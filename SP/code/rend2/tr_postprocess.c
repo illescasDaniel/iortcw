@@ -463,8 +463,9 @@ Runs on the tone-mapped LDR image in srcFbo (= tr.renderImage), result goes back
 History is dropped on: a missed frame (map load, pause, no-world frames), r_aa change, camera cut, big FOV change.
 =============
 */
-void RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox)
+FBO_t *RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox, qboolean skipSceneCopy)
 {
+	FBO_t *result = NULL;	// the resolved frame when it is not in srcFbo (see skipSceneCopy)
 	const viewParms_t *vp = &backEnd.viewParms;
 	vec4_t metrics, params;
 	float reproj[16], reprojRot[16];
@@ -473,17 +474,22 @@ void RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox)
 	float ratio0, ratio5;
 	qboolean debug = (r_smaaDebug->integer == 3 || r_smaaDebug->integer == 4);
 	qboolean velocity = backEnd.smaaVelocityDrawn && tr.velocityImage;
+	// r_smaaT2xPingPong: histCur holds the previous frame, histNext receives the resolve (flipped after it)
+	qboolean pingPong = r_smaaT2xPingPong->integer && tr.smaaHistoryFboB && tr.smaaHistoryImageB && !debug;
+	image_t *histImage = tr.smaaHistoryFlip ? tr.smaaHistoryImageB : tr.smaaHistoryImage;
+	FBO_t *histFbo = tr.smaaHistoryFlip ? tr.smaaHistoryFboB : tr.smaaHistoryFbo;
+	FBO_t *histNextFbo = tr.smaaHistoryFlip ? tr.smaaHistoryFbo : tr.smaaHistoryFboB;
 
 	backEnd.smaaVelocityDrawn = qfalse;
 
 	// non-jittered views (sky portal, etc.) neither use nor invalidate the main view's history
 	if (!vp->smaaJitter)
-		return;
+		return NULL;
 
 	tr.warp.velValid = qfalse;	// frame warp object motion: re-armed below when this frame's velocity buffer is valid
 
 	if (!tr.smaaResolveAvailable || !tr.smaaHistoryFbo || !tr.screenScratchFbo || !tr.hdrDepthImage ||
-		srcFbo != tr.renderFbo || !r_smaaTemporal->integer || (r_smaaDebug->integer && !debug) ||
+		srcFbo != R_SceneFbo(vp) || !r_smaaTemporal->integer || (r_smaaDebug->integer && !debug) ||
 		srcFbo->width != tr.smaaHistoryFbo->width || srcFbo->height != tr.smaaHistoryFbo->height ||
 		srcBox[0] > 2 || srcBox[1] > 2 || abs(srcBox[2] - srcFbo->width) > 2 || abs(srcBox[3] - srcFbo->height) > 2)
 	{
@@ -491,8 +497,8 @@ void RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox)
 		if (debug && !(tr.frameCount & 127))
 			ri.Printf(PRINT_ALL, "T2x resolve skipped: avail %d hist %d scratch %d depth %d srcIsRender %d temporal %d box %d,%d %dx%d fbo %dx%d\n",
 				tr.smaaResolveAvailable, tr.smaaHistoryFbo != NULL, tr.screenScratchFbo != NULL, tr.hdrDepthImage != NULL,
-				srcFbo == tr.renderFbo, r_smaaTemporal->integer, srcBox[0], srcBox[1], srcBox[2], srcBox[3], srcFbo->width, srcFbo->height);
-		return;
+				srcFbo == R_SceneFbo(vp), r_smaaTemporal->integer, srcBox[0], srcBox[1], srcBox[2], srcBox[3], srcFbo->width, srcFbo->height);
+		return NULL;
 	}
 
 	valid = tr.smaaHistoryValid && (tr.frameCount - tr.smaaHistoryFrame) <= 1 && tr.frameCount >= tr.smaaHistoryFrame;
@@ -547,14 +553,15 @@ void RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox)
 	if (!valid)
 	{
 		// first frame of a history: nothing to blend, just seed it with the current image
-		FBO_FastBlit(srcFbo, srcBox, tr.smaaHistoryFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		// (into the current history image, no flip: the next resolve reads it and writes the other one)
+		FBO_FastBlit(srcFbo, srcBox, histFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		tr.smaaHistoryValid = qtrue;
 		tr.smaaHistoryFrame = tr.frameCount;
 		RB_GpuMark("smaa_t2x_reset");
-		return;
+		return NULL;
 	}
 
-	GL_BindToTMU(tr.smaaHistoryImage, TB_LEVELSMAP);
+	GL_BindToTMU(histImage, TB_LEVELSMAP);
 	GL_BindToTMU(tr.hdrDepthImage, TB_NORMALMAP);
 	if (velocity)
 		GL_BindToTMU(tr.velocityImage, TB_SPECULARMAP);
@@ -564,24 +571,36 @@ void RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox)
 	GLSL_SetUniformVec4(&tr.smaaResolveShader, UNIFORM_TEMPORALPARAMS, params);
 	GLSL_SetUniformMat4(&tr.smaaResolveShader, UNIFORM_REPROJMATRIX, reproj);
 	GLSL_SetUniformMat4(&tr.smaaResolveShader, UNIFORM_REPROJROTMATRIX, reprojRot);
-	FBO_Blit(srcFbo, srcBox, NULL, tr.screenScratchFbo, srcBox, &tr.smaaResolveShader, NULL, 0);
+	FBO_Blit(srcFbo, srcBox, NULL, pingPong ? histNextFbo : tr.screenScratchFbo, srcBox, &tr.smaaResolveShader, NULL, 0);
 	RB_GpuMark("smaa_t2x_resolve");
 
-	if (debug)
+	if (pingPong)
+	{
+		// the resolve already is the next history: only the scene copy remains, then swap roles
+		if (!skipSceneCopy)
+			FBO_FastBlit(histNextFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		RB_GpuMark("smaa_t2x_copy_scene");
+		result = histNextFbo;	// = the history of the next frame, read-only for the caller
+		tr.smaaHistoryFlip = !tr.smaaHistoryFlip;
+	}
+	else if (debug)
 	{
 		// the debug image must not feed back: the history keeps the plain (unresolved) frame
-		FBO_FastBlit(srcFbo, srcBox, tr.smaaHistoryFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		FBO_FastBlit(srcFbo, srcBox, histFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	}
 	else
 	{
-		FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		if (!skipSceneCopy)
+			FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		RB_GpuMark("smaa_t2x_copy_scene");
-		FBO_FastBlit(tr.screenScratchFbo, srcBox, tr.smaaHistoryFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		FBO_FastBlit(tr.screenScratchFbo, srcBox, histFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		result = tr.screenScratchFbo;
 	}
 	tr.smaaHistoryValid = qtrue;
 	tr.smaaHistoryFrame = tr.frameCount;
-	RB_GpuMark("smaa_t2x_copy_history");
+	RB_GpuMark("smaa_t2x_copy_history");	// ~0 with r_smaaT2xPingPong (kept so the profile columns stay)
+	return result;
 }
 
 void RB_ToneMap(FBO_t *hdrFbo, ivec4_t hdrBox, FBO_t *ldrFbo, ivec4_t ldrBox, int autoExposure)
@@ -876,6 +895,118 @@ static qboolean RB_UpdateSunFlareVis(void)
 	return visible;
 }
 
+/*
+codmod r_sunRaysOpt 1: bound where the sun-ray result can be non-zero so the passes can be scissored.
+
+The mask (sun flare quad drawn into the black sun-ray buffer) is zero outside the projected quad.
+Every radial-blur tap samples c + (p - c) / scale, scale >= 1, so a pixel only receives energy
+from texels on the segment between it and the sun centre c. The result is therefore zero outside
+the quad's bounding box (plus c) scaled about c by the product of the largest scale of each blur
+pass. The box contains c, so it is convex around c: all taps of an in-box pixel stay in the box.
+Fails (qfalse, caller runs the full-screen passes) if the sun centre is off-screen (edge clamping
+would smear edge texels), a corner is behind the eye, or the old flare quads (r_drawSun > 1) draw
+into the mask. y is the union of the box and its mirror because the quarter buffers are stored
+flipped; the result is only ever a superset.
+Returns box in view-relative uv: x0, x1, y0, y1.
+*/
+static qboolean RB_SunRaysRegion(const mat4_t mvp, float cx, float cy, float maxScale, int qW, int qH, float box[4])
+{
+	float dist, size;
+	vec3_t dir, vec1, vec2, org;
+	float x0, x1, y0, y1, mx, my;
+	int i;
+
+	if (r_drawSun->integer > 1)
+		return qfalse;
+	if (cx < 0.f || cx > 1.f || cy < 0.f || cy > 1.f)
+		return qfalse;
+
+	dist = backEnd.viewParms.zFar / 1.75;
+	size = dist * 0.3f;		// RB_DrawSun(0.3, tr.sunFlareShader)
+	VectorCopy(tr.sunDirection, dir);
+	VectorScale(dir, dist, org);
+	PerpendicularVector(vec1, dir);
+	CrossProduct(dir, vec1, vec2);
+	VectorScale(vec1, size, vec1);
+	VectorScale(vec2, size, vec2);
+
+	x0 = x1 = cx;
+	y0 = y1 = cy;
+
+	for (i = 0; i < 4; i++)
+	{
+		vec4_t p, h;
+		float sx = (i == 0 || i == 3) ? 1.f : -1.f;
+		float sy = (i < 2) ? 1.f : -1.f;
+		float u, v;
+
+		p[0] = org[0] + sx * vec1[0] + sy * vec2[0];
+		p[1] = org[1] + sx * vec1[1] + sy * vec2[1];
+		p[2] = org[2] + sx * vec1[2] + sy * vec2[2];
+		p[3] = 1.f;
+		Mat4Transform(mvp, p, h);
+
+		if (h[3] < 1.f)
+			return qfalse;
+
+		u = 0.5f + 0.5f * h[0] / h[3];
+		v = 0.5f + 0.5f * h[1] / h[3];
+
+		if (u < x0) x0 = u;
+		if (u > x1) x1 = u;
+		if (v < y0) y0 = v;
+		if (v > y1) y1 = v;
+	}
+
+	// clip to the view first (nothing is drawn outside it), then scale about c
+	if (x0 < 0.f) x0 = 0.f;
+	if (y0 < 0.f) y0 = 0.f;
+	if (x1 > 1.f) x1 = 1.f;
+	if (y1 > 1.f) y1 = 1.f;
+
+	x0 = cx + (x0 - cx) * maxScale;
+	x1 = cx + (x1 - cx) * maxScale;
+	y0 = cy + (y0 - cy) * maxScale;
+	y1 = cy + (y1 - cy) * maxScale;
+
+	// mirror union for y
+	{
+		float fy0 = 1.f - y1, fy1 = 1.f - y0;
+		if (fy0 < y0) y0 = fy0;
+		if (fy1 > y1) y1 = fy1;
+	}
+
+	// 8 quarter-res texels: bilinear spread, integer srcBox truncation in RB_RadialBlur
+	mx = 8.f / qW;
+	my = 8.f / qH;
+	x0 -= mx; x1 += mx; y0 -= my; y1 += my;
+
+	box[0] = x0 < 0.f ? 0.f : x0;
+	box[1] = x1 > 1.f ? 1.f : x1;
+	box[2] = y0 < 0.f ? 0.f : y0;
+	box[3] = y1 > 1.f ? 1.f : y1;
+	return qtrue;
+}
+
+// view-relative uv box -> pixel rect (x, y, w, h) of a w x h buffer, grown by grow texels
+static void RB_SunRaysRect(const float box[4], int ox, int oy, int w, int h, int grow, int out[4])
+{
+	int x0 = ox + (int)floorf(box[0] * w) - grow;
+	int x1 = ox + (int)ceilf(box[1] * w) + grow;
+	int y0 = oy + (int)floorf(box[2] * h) - grow;
+	int y1 = oy + (int)ceilf(box[3] * h) + grow;
+
+	if (x0 < ox) x0 = ox;
+	if (y0 < oy) y0 = oy;
+	if (x1 > ox + w) x1 = ox + w;
+	if (y1 > oy + h) y1 = oy + h;
+
+	out[0] = x0;
+	out[1] = y0;
+	out[2] = x1 - x0;
+	out[3] = y1 - y0;
+}
+
 void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox)
 {
 	vec4_t color;
@@ -886,6 +1017,11 @@ void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox)
 //	float w, h, w2, h2;
 	mat4_t mvp;
 	vec4_t pos, hpos;
+	qboolean scissored = qfalse;
+	int blurPasses = 5;
+	float maxScale = 1.f;
+	float region[4];
+	int rectDown[4], rectBlur0[4], rectBlur1[4], rectAdd[4];
 
 	dot = DotProduct(tr.sunDirection, backEnd.viewParms.or.axis[0]);
 	if (dot < cutoff)
@@ -918,6 +1054,35 @@ void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox)
 	pos[0] = 0.5f + hpos[0] * hpos[3];
 	pos[1] = 0.5f + hpos[1] * hpos[3];
 
+	if (r_sunRaysTaps->integer > 0)
+		blurPasses = r_sunRaysTaps->integer > 16 ? 16 : r_sunRaysTaps->integer;	// quality change, default off
+
+	if (r_sunRaysOpt->integer > 0)
+	{
+		const float stretch_add = 2.f/3.f;
+		float stretch = 1.f + stretch_add;
+		int i;
+
+		// largest sample scale of each blur pass is stretch^((passes-1)/passes)
+		for (i = 0; i < 2; ++i)
+		{
+			maxScale *= powf(stretch, (float)(blurPasses - 1) / blurPasses);
+			stretch += stretch_add;
+		}
+
+		if (RB_SunRaysRegion(mvp, pos[0], pos[1], maxScale, tr.quarterFbo[0]->width, tr.quarterFbo[0]->height, region))
+		{
+			int qW = tr.quarterFbo[0]->width, qH = tr.quarterFbo[0]->height;
+
+			// each pass must only read texels the previous pass wrote: grow the earlier ones
+			RB_SunRaysRect(region, 0, 0, qW, qH, 2, rectBlur1);
+			RB_SunRaysRect(region, 0, 0, qW, qH, 4, rectBlur0);
+			RB_SunRaysRect(region, 0, 0, qW, qH, 6, rectDown);
+			RB_SunRaysRect(region, srcBox[0], srcBox[1], srcBox[2], srcBox[3], 0, rectAdd);
+			scissored = qtrue;
+		}
+	}
+
 	// initialize quarter buffers
 	{
 		float mul = 1.f;
@@ -937,6 +1102,9 @@ void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox)
 		quarterBox[2] = tr.quarterFbo[0]->width;
 		quarterBox[3] = -tr.quarterFbo[0]->height;
 
+		if (scissored)
+			FBO_SetScissorOverride(rectDown);
+
 		// first, downsample the framebuffer
 		if (colorize)
 		{
@@ -949,6 +1117,8 @@ void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox)
 		}
 	}
 
+	FBO_SetScissorOverride(NULL);
+
 	RB_GpuMark( "rays_down" );
 
 	// radial blur passes, ping-ponging between the two quarter-size buffers
@@ -958,11 +1128,15 @@ void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox)
 		int i;
 		for (i=0; i<2; ++i)
 		{
-			RB_RadialBlur(tr.quarterFbo[i&1], tr.quarterFbo[(~i) & 1], 5, stretch, 0.f, 0.f, tr.quarterFbo[0]->width, tr.quarterFbo[0]->height, pos[0], pos[1], 1.125f);
+			if (scissored)
+				FBO_SetScissorOverride(i == 0 ? rectBlur0 : rectBlur1);
+			RB_RadialBlur(tr.quarterFbo[i&1], tr.quarterFbo[(~i) & 1], blurPasses, stretch, 0.f, 0.f, tr.quarterFbo[0]->width, tr.quarterFbo[0]->height, pos[0], pos[1], 1.125f);
 			stretch += stretch_add;
 		}
 	}
 	
+	FBO_SetScissorOverride(NULL);
+
 	RB_GpuMark( "rays_blur" );
 
 	// add result back on top of the main buffer
@@ -971,7 +1145,10 @@ void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox)
 
 		VectorSet4(color, mul, mul, mul, 1);
 
+		if (scissored)
+			FBO_SetScissorOverride(rectAdd);
 		FBO_Blit(tr.quarterFbo[0], NULL, NULL, dstFbo, dstBox, NULL, color, GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE);
+		FBO_SetScissorOverride(NULL);
 	}
 }
 
@@ -1082,17 +1259,51 @@ Returns qfalse when nothing was done.
 */
 #define BLOOM_UP_WEIGHT 0.8f
 
-qboolean RB_PostFx(FBO_t *srcFbo, ivec4_t srcBox)
+static qboolean RB_PostFxState(FBO_t *srcFbo, float *bloomMulOut, qboolean *bloomOut, qboolean *gradeOut)
 {
 	static const float bloomLevel[4] = { 0.0f, 1.0f, 1.6f, 2.4f };
 	float bloomMul = bloomLevel[r_bloom->integer < 0 ? 0 : (r_bloom->integer > 3 ? 3 : r_bloom->integer)];
 	qboolean bloom = bloomMul > 0.0f && r_bloomIntensity->value > 0.0f && tr.bloomFbo[BLOOM_LEVELS - 1];
 	qboolean grade = r_grade->integer != 0;
+
+	*bloomMulOut = bloomMul;
+	*bloomOut = bloom;
+	*gradeOut = grade;
+	return srcFbo && tr.screenScratchFbo && (bloom || grade);
+}
+
+// the early-out test of RB_PostFx, so RB_PostProcess can route the scene around the grade copy
+qboolean RB_PostFxWillRun(FBO_t *srcFbo)
+{
+	float bloomMul;
+	qboolean bloom, grade;
+
+	return RB_PostFxState(srcFbo, &bloomMul, &bloom, &grade);
+}
+
+// conservative: the cheap early-out of RB_SunRays (sun not in front of the camera), without consuming the visibility query
+qboolean RB_SunRaysMayDraw(void)
+{
+	return DotProduct(tr.sunDirection, backEnd.viewParms.or.axis[0]) >= 0.25f;
+}
+
+/*
+sceneFbo: where the anti-aliased scene is (RGBA8, same size as srcFbo), when it is not in srcFbo (r_gradeNoCopy).
+The grade pass then reads it and writes srcFbo directly. NULL (or srcFbo) = the scene is in srcFbo: grade
+goes through screenScratch and is copied back.
+*/
+qboolean RB_PostFx(FBO_t *srcFbo, FBO_t *sceneFbo, ivec4_t srcBox)
+{
+	float bloomMul;
+	qboolean bloom, grade;
 	vec4_t color, viewInfo;
 	float norm = 0.0f;
+	qboolean direct = sceneFbo && sceneFbo != srcFbo;
 
-	if (!srcFbo || !tr.screenScratchFbo || (!bloom && !grade))
+	if (!RB_PostFxState(srcFbo, &bloomMul, &bloom, &grade))
 		return qfalse;
+	if (!direct)
+		sceneFbo = srcFbo;
 
 	if (bloom)
 	{
@@ -1105,7 +1316,7 @@ qboolean RB_PostFx(FBO_t *srcFbo, ivec4_t srcBox)
 		// paired with a NULL destination box, which put every glow upside down (torches lit the floor).
 		// The grade pass samples the bloom with the scene's texcoords, so the full-texture mapping lines up.
 		VectorSet4(color, threshold, 0.15f, 0.0f, 1.0f);
-		FBO_Blit(srcFbo, NULL, NULL, tr.bloomFbo[0], NULL, &tr.bloomBrightShader, color, 0);
+		FBO_Blit(sceneFbo, NULL, NULL, tr.bloomFbo[0], NULL, &tr.bloomBrightShader, color, 0);
 		RB_GpuMark( "bloom_bright" );
 
 		for (i = 1; i < BLOOM_LEVELS; i++)
@@ -1128,7 +1339,7 @@ qboolean RB_PostFx(FBO_t *srcFbo, ivec4_t srcBox)
 		GL_BindToTMU(tr.bloomImage[0], TB_LIGHTMAP);
 	}
 
-	VectorSet4(color, bloom ? r_bloomIntensity->value * bloomMul / norm : 0.0f, grade ? Com_Clamp(0.5f, 2.5f, r_gradeBrightness->value) : 1.0f, 0.0f, 1.0f);
+	VectorSet4(color, bloom ? r_bloomIntensity->value * bloomMul / norm : 0.0f, grade ? Com_Clamp(0.5f, 2.5f, r_gradeBrightness->value) : 1.0f, direct ? 1.0f : 0.0f, 1.0f);
 	if (grade)
 	{
 		VectorSet4(viewInfo, r_gradeContrast->value, r_gradeSaturation->value, Com_Clamp(-1.0f, 1.0f, r_gradeTint->value), r_gradeVignette->value);
@@ -1140,10 +1351,209 @@ qboolean RB_PostFx(FBO_t *srcFbo, ivec4_t srcBox)
 
 	GLSL_BindProgram(&tr.gradeShader);
 	GLSL_SetUniformVec4(&tr.gradeShader, UNIFORM_VIEWINFO, viewInfo);
-	FBO_Blit(srcFbo, srcBox, NULL, tr.screenScratchFbo, srcBox, &tr.gradeShader, color, 0);
-	RB_GpuMark( "grade" );
-	FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-	RB_GpuMark( "grade_copy" );
+	if (direct)
+	{
+		FBO_Blit(sceneFbo, srcBox, NULL, srcFbo, srcBox, &tr.gradeShader, color, 0);
+		RB_GpuMark( "grade" );
+	}
+	else
+	{
+		FBO_Blit(srcFbo, srcBox, NULL, tr.screenScratchFbo, srcBox, &tr.gradeShader, color, 0);
+		RB_GpuMark( "grade" );
+		FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	}
+	RB_GpuMark( "grade_copy" );	// ~0 with r_gradeNoCopy (kept so the profile columns stay)
 
 	return qtrue;
+}
+
+/*
+=============
+RB_SharpenViewOK
+
+Views that get the 3D sharpeners (r_renderScaleSharp RCAS, r_dlsStrength DLS): not the skybox portal (drawn over by the
+main view) nor model-only views.
+=============
+*/
+static qboolean RB_SharpenViewOK(void)
+{
+	return !(backEnd.refdef.rdflags & (RDF_SKYBOXPORTAL | RDF_NOWORLDMODEL));
+}
+
+qboolean RB_DLSActive(void)
+{
+	return r_dlsStrength->value > 0.0f && tr.dlsShader.program && tr.dlsFbo && RB_SharpenViewOK();
+}
+
+/*
+=============
+RB_RCASSharpness
+
+Effective r_renderScaleSharp, 0..1 (0 = RCAS off). Negative = auto: 0.5 when the scene is upscaled (tr.renderScale
+active, value < 1), off at native scale, so the native extra pass and copy are skipped by default.
+=============
+*/
+static float RB_RCASSharpness(void)
+{
+	float v = r_renderScaleSharp->value;
+
+	if (v < 0.0f)
+		return tr.renderScale.value < 1.0f ? 0.5f : 0.0f;
+	return Com_Clamp(0.0f, 1.0f, v);
+}
+
+// RCAS as its own pass (native resolution or bilinear upscale); inside the FSR1 chain it is part of RB_RenderScaleUpscale
+qboolean RB_RCASActive(void)
+{
+	return RB_RCASSharpness() > 0.0f && tr.upscaleRcasShader.program && tr.dlsFbo && RB_SharpenViewOK();
+}
+
+/*
+=============
+RB_RCAS
+
+FSR1 RCAS, box of src into the same box of dst (different FBOs, both window-sized).
+stops = 2 * (1 - sharpness): 1 = 0 stops (sharpest), 0.5 = 1 stop, 0.875 = 0.25 stops (sharpness: RB_RCASSharpness).
+=============
+*/
+static void RB_RCAS(FBO_t *src, FBO_t *dst, ivec4_t box)
+{
+	vec4_t con;
+
+	GLSL_BindProgram(&tr.upscaleRcasShader);
+	VectorSet4(con, powf(2.0f, -2.0f * (1.0f - RB_RCASSharpness())), 0.0f, 0.0f, 0.0f);
+	GLSL_SetUniformVec4(&tr.upscaleRcasShader, UNIFORM_RCASCON, con);
+	VectorSet4(con, box[0], box[1], box[0] + box[2] - 1, box[1] + box[3] - 1);
+	GLSL_SetUniformVec4(&tr.upscaleRcasShader, UNIFORM_RCASBOX, con);
+	FBO_Blit(src, box, NULL, dst, box, &tr.upscaleRcasShader, NULL, 0);
+	RB_GpuMark( "upscale_rcas" );
+}
+
+/*
+=============
+RB_DLS
+
+NVIDIA image sharpening (Denoised Luma Sharpening, vkBasalt dls.frag.glsl, BSD-3), box of src into the same box of
+dst (different FBOs, both window-sized). r_dlsStrength 0..1: sharpen = strength, denoise follows the old
+low/medium/high presets (0.35/0.20, 0.55/0.17, 0.80/0.12) piecewise-linearly.
+=============
+*/
+static void RB_DLS(FBO_t *src, FBO_t *dst, ivec4_t box)
+{
+	// denoise by strength: piecewise-linear through the low/medium/high presets
+	static const float knot[5][2] = { { 0.0f, 0.22f }, { 0.35f, 0.20f }, { 0.55f, 0.17f }, { 0.80f, 0.12f }, { 1.0f, 0.12f } };
+	const float kSharpnessMin = -1.0f / 14.0f, kSharpnessMax = -1.0f / 6.5f;
+	const float kDenoiseMin = 0.001f, kDenoiseMax = -0.1f;	// as in the vkBasalt shader
+	float sharpen = Com_Clamp(0.0f, 1.0f, r_dlsStrength->value), denoise = knot[4][1];
+	vec4_t con;
+	int i;
+
+	for (i = 1; i < 5; i++)
+	{
+		if (sharpen <= knot[i][0])
+		{
+			denoise = knot[i - 1][1] + (knot[i][1] - knot[i - 1][1]) * (sharpen - knot[i - 1][0]) / (knot[i][0] - knot[i - 1][0]);
+			break;
+		}
+	}
+
+	GLSL_BindProgram(&tr.dlsShader);
+	VectorSet4(con, kSharpnessMin + (kSharpnessMax - kSharpnessMin) * sharpen,
+		1.0f / (kDenoiseMin + (kDenoiseMax - kDenoiseMin) * denoise), 0.0f, 0.0f);
+	GLSL_SetUniformVec4(&tr.dlsShader, UNIFORM_DLSCON, con);
+	VectorSet4(con, box[0], box[1], box[0] + box[2] - 1, box[1] + box[3] - 1);
+	GLSL_SetUniformVec4(&tr.dlsShader, UNIFORM_DLSBOX, con);
+	FBO_Blit(src, box, NULL, dst, box, &tr.dlsShader, NULL, 0);
+	RB_GpuMark( "dls" );
+}
+
+/*
+=============
+RB_SharpenBlit
+
+Last step of the 3D post chain at display resolution: copies src to dst (the same FBO is allowed) with RCAS and/or DLS
+applied when on, ping-ponging through tr.dlsFbo. Plain blit when both are off.
+=============
+*/
+void RB_SharpenBlit(FBO_t *src, ivec4_t srcBox, FBO_t *dst, ivec4_t dstBox)
+{
+	qboolean rcas = RB_RCASActive(), dls = RB_DLSActive();
+
+	if (!rcas && !dls)
+	{
+		if (src != dst)
+			FBO_FastBlit(src, srcBox, dst, dstBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		return;
+	}
+
+	if (rcas && dls)
+	{
+		RB_RCAS(src, tr.dlsFbo, srcBox);
+		RB_DLS(tr.dlsFbo, dst, srcBox);
+	}
+	else if (src != dst)
+	{
+		if (rcas)
+			RB_RCAS(src, dst, srcBox);
+		else
+			RB_DLS(src, dst, srcBox);
+	}
+	else
+	{
+		if (rcas)
+			RB_RCAS(src, tr.dlsFbo, srcBox);
+		else
+			RB_DLS(src, tr.dlsFbo, srcBox);
+		FBO_FastBlit(tr.dlsFbo, srcBox, dst, dstBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		RB_GpuMark( "sharpen_copy" );
+	}
+}
+
+/*
+=============
+RB_RenderScaleUpscale
+
+r_renderScale: scales the scene viewport srcBox of src into dstBox of the window-sized dst (both boxes GL
+bottom-up). r_renderScaleFilter 0 or forceBilinear: one linear blit. 1: AMD FidelityFX FSR1 (MIT), EASU into
+tr.upscaleFbo, then RCAS into dst; falls back to the blit when its shaders are missing.
+=============
+*/
+void RB_RenderScaleUpscale(FBO_t *src, ivec4_t srcBox, FBO_t *dst, ivec4_t dstBox, qboolean forceBilinear)
+{
+	vec4_t con;
+	FBO_t *easuOut;
+	qboolean rcas, dls;
+
+	if (forceBilinear || r_renderScaleFilter->integer != 1 || !tr.upscaleFbo ||
+		!tr.upscaleEasuShader.program || !tr.upscaleRcasShader.program)
+	{
+		FBO_FastBlit(src, srcBox, dst, dstBox, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		RB_GpuMark( "upscale" );
+		if (!forceBilinear)
+			RB_SharpenBlit(dst, dstBox, dst, dstBox);
+		return;
+	}
+
+	// EASU: output pixel p (relative to dstBox) samples input position p * scale + offset (relative to srcBox)
+	GLSL_BindProgram(&tr.upscaleEasuShader);
+	VectorSet4(con, srcBox[2] / (float)dstBox[2], srcBox[3] / (float)dstBox[3],
+		0.5f * srcBox[2] / (float)dstBox[2] - 0.5f, 0.5f * srcBox[3] / (float)dstBox[3] - 0.5f);
+	GLSL_SetUniformVec4(&tr.upscaleEasuShader, UNIFORM_EASUCON0, con);
+	VectorSet4(con, srcBox[0], srcBox[1], srcBox[0] + srcBox[2] - 1, srcBox[1] + srcBox[3] - 1);
+	GLSL_SetUniformVec4(&tr.upscaleEasuShader, UNIFORM_EASUCON1, con);
+	VectorSet4(con, dstBox[0], dstBox[1], 0.0f, 0.0f);
+	GLSL_SetUniformVec4(&tr.upscaleEasuShader, UNIFORM_EASUCON2, con);
+
+	// chain: EASU [-> RCAS when r_renderScaleSharp > 0] [-> DLS when r_dlsStrength > 0] -> dst, ping-ponging
+	// between upscaleFbo and dlsFbo so no pass needs a copy
+	rcas = RB_RCASActive();
+	dls = !forceBilinear && RB_DLSActive();
+	easuOut = rcas ? tr.upscaleFbo : (dls ? tr.dlsFbo : dst);
+	FBO_Blit(src, srcBox, NULL, easuOut, dstBox, &tr.upscaleEasuShader, NULL, 0);
+	RB_GpuMark( "upscale_easu" );
+
+	if (rcas)
+		RB_RCAS(tr.upscaleFbo, dls ? tr.dlsFbo : dst, dstBox);
+	if (dls)
+		RB_DLS(tr.dlsFbo, dst, dstBox);
 }
