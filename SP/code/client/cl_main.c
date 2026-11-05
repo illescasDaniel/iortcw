@@ -3276,6 +3276,40 @@ void CL_CheckUserinfo( void ) {
 	}
 }
 
+#if defined( __GLIBC__ )
+#include <malloc.h>
+#endif
+
+/*
+==================
+CL_TrimHeapAfterLoad
+
+Once per level load, on the first CA_ACTIVE frame: hand freed glibc heap (image/sound decode scratch from the load)
+back to the OS. Measured ~110 MB of RSS on the bench map for ~3 ms. com_mallocTrim 0 disables it.
+==================
+*/
+static void CL_TrimHeapAfterLoad( void ) {
+#if defined( __GLIBC__ )
+	static cvar_t *com_mallocTrim;
+	static qboolean wasActive;
+
+	if ( !com_mallocTrim ) {
+		com_mallocTrim = Cvar_Get( "com_mallocTrim", "1", 0 );
+	}
+	if ( clc.state != CA_ACTIVE ) {
+		wasActive = qfalse;
+		return;
+	}
+	if ( wasActive ) {
+		return;
+	}
+	wasActive = qtrue;
+	if ( com_mallocTrim->integer ) {
+		malloc_trim( 0 );
+	}
+#endif
+}
+
 /*
 ==================
 CL_Frame
@@ -3423,6 +3457,7 @@ void CL_Frame( int msec ) {
 	Com_ApCpuCheckpoint( AP_CP_BEFORE_SCR );
 	SCR_UpdateScreen();
 	if ( clc.state == CA_ACTIVE ) { Com_LoadProfileEnd(); }
+	CL_TrimHeapAfterLoad();
 
 	// update audio
 	S_Update();
