@@ -602,6 +602,15 @@ RAM dump now, then the renderer's VRAM census.
 static void CL_MemProf_f( void ) {
 	const char *why = Cmd_Argc() > 1 ? Cmd_Argv( 1 ) : "memprof";
 
+	if ( !Q_stricmp( why, "trim" ) ) {
+		// how much freed glibc heap can be handed back to the OS: sample, malloc_trim(0), sample
+		MP_SampleRow( "trim_before" );
+		malloc_trim( 0 );
+		MP_SampleRow( "trim_after" );
+		Com_Printf( "memprof: malloc_trim(0) done; see the trim_before / trim_after rows in mem_ram_timeline.csv (memprof to write)\n" );
+		return;
+	}
+
 	CL_MemProfDump( why );
 	Cbuf_ExecuteText( EXEC_NOW, va( "vramprof dump %s\n", why ) );
 }

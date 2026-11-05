@@ -245,6 +245,21 @@ void FBO_Bind(FBO_t * fbo)
 
 /*
 ============
+FBO_SetDepthOnly
+
+Depth-only FBO: no colour attachment, so draw and read buffers must be GL_NONE to be complete.
+============
+*/
+static void FBO_SetDepthOnly(FBO_t *fbo)
+{
+	FBO_Bind(fbo);
+	qglDrawBuffer(GL_NONE);
+	if (qglReadBuffer)
+		qglReadBuffer(GL_NONE);
+}
+
+/*
+============
 FBO_Init
 ============
 */
@@ -409,9 +424,9 @@ void FBO_Init(void)
 		for( i = 0; i < MAX_DRAWN_PSHADOWS; i++)
 		{
 			tr.pshadowFbos[i] = FBO_Create(va("_shadowmap%d", i), tr.pshadowMaps[i]->width, tr.pshadowMaps[i]->height);
-			// FIXME: this next line wastes 16mb with 16x512x512 sun shadow maps, skip if OpenGL 4.3+ or ARB_framebuffer_no_attachments
-			FBO_CreateBuffer(tr.pshadowFbos[i], GL_RGBA8, 0, 0);
+			// depth-only (no dummy colour renderbuffer: saved 32 MB, see docs/memory-profiler-plan.md)
 			FBO_AttachImage(tr.pshadowFbos[i], tr.pshadowMaps[i], GL_DEPTH_ATTACHMENT, 0);
+			FBO_SetDepthOnly(tr.pshadowFbos[i]);
 			R_CheckFBO(tr.pshadowFbos[i]);
 		}
 	}
@@ -421,10 +436,9 @@ void FBO_Init(void)
 		for (i = 0; i < 4; i++)
 		{
 			tr.sunShadowFbo[i] = FBO_Create("_sunshadowmap", tr.sunShadowDepthImage[i]->width, tr.sunShadowDepthImage[i]->height);
-			// FIXME: this next line wastes 16mb with 4x1024x1024 sun shadow maps, skip if OpenGL 4.3+ or ARB_framebuffer_no_attachments
-			// This at least gets sun shadows working on older GPUs (Intel)
-			FBO_CreateBuffer(tr.sunShadowFbo[i], GL_RGBA8, 0, 0);
+			// depth-only (no dummy colour renderbuffer: saved 64 MB at 2048^2)
 			FBO_AttachImage(tr.sunShadowFbo[i], tr.sunShadowDepthImage[i], GL_DEPTH_ATTACHMENT, 0);
+			FBO_SetDepthOnly(tr.sunShadowFbo[i]);
 			R_CheckFBO(tr.sunShadowFbo[i]);
 		}
 	}
@@ -432,8 +446,8 @@ void FBO_Init(void)
 	if (tr.flashShadowDepthImage)
 	{
 		tr.flashShadowFbo = FBO_Create("_flashshadowmap", tr.flashShadowDepthImage->width, tr.flashShadowDepthImage->height);
-		FBO_CreateBuffer(tr.flashShadowFbo, GL_RGBA8, 0, 0);
 		FBO_AttachImage(tr.flashShadowFbo, tr.flashShadowDepthImage, GL_DEPTH_ATTACHMENT, 0);
+		FBO_SetDepthOnly(tr.flashShadowFbo);
 		R_CheckFBO(tr.flashShadowFbo);
 	}
 
