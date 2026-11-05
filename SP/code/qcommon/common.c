@@ -145,6 +145,8 @@ long long com_frameClockUs;   // smooth frame clock (paced schedule, or real tim
 long long com_lastPresentUs;
 long long com_lastWarpPresentUs;     // r_frameWarp 2: time of the last compositor warp present (never feeds the pacer)
 static cvar_t	*com_loadProfile;
+cvar_t	*com_memProfile;            // RAM/VRAM memory profiler (client/cl_memprof.c, rend2/tr_memprof.c)
+cvar_t	*com_memProfileInterval;    // ms between periodic timeline rows
 #ifndef DEDICATED
 cvar_t  *con_autochat;
 #endif
@@ -1237,6 +1239,24 @@ void Com_InitHunkMemory( void ) {
 	Cmd_AddCommand( "hunklog", Hunk_Log );
 	Cmd_AddCommand( "hunksmalllog", Hunk_SmallLog );
 #endif
+}
+
+/*
+====================
+Hunk_GetMemStats
+
+Read-only snapshot for the memory profiler.
+====================
+*/
+void Hunk_GetMemStats( hunkMemStats_t *st ) {
+	st->total = s_hunkTotal;
+	st->base = s_hunkData;
+	st->lowPermanent = hunk_low.permanent;
+	st->lowTemp = hunk_low.temp;
+	st->lowTempHighwater = hunk_low.tempHighwater;
+	st->highPermanent = hunk_high.permanent;
+	st->highTemp = hunk_high.temp;
+	st->highTempHighwater = hunk_high.tempHighwater;
 }
 
 /*
@@ -2514,6 +2534,8 @@ void Com_Init( char *commandLine ) {
 	//
 	com_altivec = Cvar_Get ("com_altivec", "1", CVAR_ARCHIVE);
 	com_loadProfile = Cvar_Get( "com_loadProfile", "0", CVAR_TEMP );
+	com_memProfile = Cvar_Get( "com_memProfile", "0", CVAR_TEMP );
+	com_memProfileInterval = Cvar_Get( "com_memProfileInterval", "500", CVAR_TEMP );
 	com_maxfps = Cvar_Get( "com_maxfps", "76", CVAR_ARCHIVE );
 	com_blood = Cvar_Get( "com_blood", "1", CVAR_ARCHIVE );
 
@@ -6433,6 +6455,11 @@ void Com_LoadProfileMark( const char *stage ) {
 	if ( Com_OffloadIsWorker() ) {
 		return;     // the profiler state belongs to the main thread
 	}
+#ifndef DEDICATED
+	if ( com_memProfile && com_memProfile->integer ) {
+		CL_MemProfEvent( stage );
+	}
+#endif
 	if ( !com_loadProfile || !com_loadProfile->integer || !lp.active || lp.numMarks >= LP_MAXMARKS ) {
 		return;
 	}

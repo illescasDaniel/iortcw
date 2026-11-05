@@ -231,6 +231,8 @@ typedef struct {
 	qboolean (*WarpLatch)( void ( *gpuWait )( void ), float *pitch, float *yaw );
 	// 6-DoF mesh warp: seconds from the last real present to the predicted completion of the warp being drawn; -1 = unknown; may be NULL
 	float (*WarpMoveDt)( void );
+	// memory profiler: pak basename that provides qpath ("dir" = loose file, NULL = not found); must stay LAST
+	const char *(*FS_FileSourcePak)( const char *qpath );
 } refimport_t;
 
 

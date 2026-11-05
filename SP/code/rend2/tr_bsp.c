@@ -2967,6 +2967,7 @@ void RE_LoadWorldMap( const char *name ) {
 	} buffer;
 	byte		*startMarker;
 
+	R_MemProfEvent( "world_begin" );
 	skyboxportal = 0;
 	RB_SMAAResetMotion();
 	Com_Memset( tr.sunCascade, 0, sizeof( tr.sunCascade ) );	// codmod: cached far cascades are the previous map's
@@ -3336,4 +3337,5 @@ void RE_LoadWorldMap( const char *name ) {
 	}
 
     ri.FS_FreeFile( buffer.v );
+	R_MemProfEvent( "world_end" );
 }

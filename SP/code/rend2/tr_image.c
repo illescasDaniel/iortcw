@@ -2212,6 +2212,7 @@ image_t *R_CreateImageExt2( const char *name, byte *pic, int width, int height, 
 	image->type = type;
 	image->flags = flags;
 	image->heightMaxDepth = 1.0f;
+	image->memPak = 0;
 
 	// codmod: true depth range of a normalheight alpha channel (mip 0, before resample), used to drop flat height maps
 	if (type == IMGTYPE_NORMALHEIGHT && rgba8 && !cubemap && pic)
@@ -2385,6 +2386,10 @@ static imageExtToLoaderMap_t imageLoaders[ ] =
 
 static int numImageLoaders = ARRAY_LEN( imageLoaders );
 
+// codmod com_memProfile: the file R_LoadImage actually resolved (written on the offload worker while the
+// main thread waits; read by R_FindImageFileExt right after the load)
+static char loadImageSource[MAX_QPATH];
+
 /*
 =================
 R_LoadImage
@@ -2407,6 +2412,7 @@ void R_LoadImage( const char *name, byte **pic, int *width, int *height, GLenum 
 	*height = 0;
 	*picFormat = GL_RGBA8;
 	*numMips = 0;
+	loadImageSource[0] = '\0';
 
 	Q_strncpyz( localName, name, MAX_QPATH );
 
@@ -2424,7 +2430,10 @@ void R_LoadImage( const char *name, byte **pic, int *width, int *height, GLenum 
 
 		// If loaded, we're done.
 		if (*pic)
+		{
+			Q_strncpyz( loadImageSource, ddsName, sizeof( loadImageSource ) );
 			return;
+		}
 	}
 
 	if( *ext )
@@ -2454,6 +2463,7 @@ void R_LoadImage( const char *name, byte **pic, int *width, int *height, GLenum 
 			else
 			{
 				// Something loaded
+				Q_strncpyz( loadImageSource, localName, sizeof( loadImageSource ) );
 				return;
 			}
 		}
@@ -2473,6 +2483,7 @@ void R_LoadImage( const char *name, byte **pic, int *width, int *height, GLenum 
 
 		if( *pic )
 		{
+			Q_strncpyz( loadImageSource, altName, sizeof( loadImageSource ) );
 			if( orgNameFailed )
 			{
 				ri.Printf( PRINT_DEVELOPER, "WARNING: %s not present, using %s instead\n",
@@ -2540,6 +2551,7 @@ image_t	*R_FindImageFileExt( const char *name, imgType_t type, imgFlags_t flags,
 	int picNumMips;
 	long	hash;
 	imgFlags_t checkFlagsTrue, checkFlagsFalse;
+	int		memPak = 0;
 
 	if (!name) {
 		return NULL;
@@ -2574,6 +2586,12 @@ image_t	*R_FindImageFileExt( const char *name, imgType_t type, imgFlags_t flags,
 		return NULL;
 	}
 	R_LOADING_REPLAY();     // decode done, nothing else touched yet
+
+	// codmod com_memProfile: tag the image with the pak the resolved file came from. Before the nested
+	// normal map load below, which overwrites loadImageSource.
+	if ( R_MemProfOn() && loadImageSource[0] && ri.FS_FileSourcePak ) {
+		memPak = R_MemProfPakIndex( ri.FS_FileSourcePak( loadImageSource ) );
+	}
 
 	checkFlagsTrue = IMGFLAG_PICMIP | IMGFLAG_MIPMAP | IMGFLAG_GENNORMALMAP;
 	checkFlagsFalse = IMGFLAG_CUBEMAP;
@@ -2677,7 +2695,10 @@ image_t	*R_FindImageFileExt( const char *name, imgType_t type, imgFlags_t flags,
 #endif
 
 			R_LOADING_REPLAY();
-			R_CreateImage( normalName, normalPic, normalWidth, normalHeight, IMGTYPE_NORMAL, normalFlags, 0 );
+			normalImage = R_CreateImage( normalName, normalPic, normalWidth, normalHeight, IMGTYPE_NORMAL, normalFlags, 0 );
+			if ( normalImage && R_MemProfOn() ) {
+				normalImage->memPak = R_MemProfPakIndex( "(generated)" );
+			}
 			ri.Free( normalPic );	
 		}
 	}
@@ -2698,6 +2719,9 @@ image_t	*R_FindImageFileExt( const char *name, imgType_t type, imgFlags_t flags,
 
 	R_LOADING_REPLAY();
 	image = R_CreateImageExt2( ( char * ) name, pic, width, height, picFormat, picNumMips, type, flags, 0, characterMIP );
+	if ( image ) {
+		image->memPak = memPak;
+	}
 	ri.Free( pic );
 	return image;
 }

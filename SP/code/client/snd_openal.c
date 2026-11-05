@@ -2740,6 +2740,30 @@ static void S_AL_SoundInfo(void)
 
 /*
 =================
+S_AL_MemStats
+
+Memory profiler: number and total bytes of the sound buffers resident in OpenAL (zeros if not up).
+=================
+*/
+void S_AL_MemStats( int *count, long long *bytes )
+{
+	int i, n = 0;
+	long long total = 0;
+
+	if ( alBuffersInitialised ) {
+		for ( i = 0; i < MAX_SFX; i++ ) {
+			if ( knownSfx[i].filename[0] && knownSfx[i].inMemory && !knownSfx[i].isDefault ) {
+				n++;
+				total += knownSfx[i].info.size;
+			}
+		}
+	}
+	*count = n;
+	*bytes = total;
+}
+
+/*
+=================
 S_AL_Shutdown
 =================
 */

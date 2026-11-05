@@ -701,6 +701,9 @@ long		FS_FOpenFileRead( const char *qpath, fileHandle_t *file, qboolean uniqueFI
 int     FS_FileIsInPAK( const char *filename, int *pChecksum );
 // returns 1 if a file is in the PAK file, otherwise -1
 
+const char *FS_FileSourcePak( const char *qpath );
+// memory profiler: pak basename providing qpath, "dir" for a loose file, NULL if not found
+
 int     FS_Delete( char *filename );    // only works inside the 'save' directory (for deleting savegames/images)
 
 int     FS_Write( const void *buffer, int len, fileHandle_t f );
@@ -989,6 +992,23 @@ void Hunk_ClearTempMemory( void );
 void *Hunk_AllocateTempMemory( int size );
 void Hunk_FreeTempMemory( void *buf );
 int Hunk_MemoryRemaining( void );
+
+// memory profiler (cvar com_memProfile, client/cl_memprof.c); the sample is read-only
+typedef struct {
+	int total;                                          // reserved hunk bytes (com_hunkMegs)
+	const unsigned char *base;                          // start of the hunk data
+	int lowPermanent, lowTemp, lowTempHighwater;
+	int highPermanent, highTemp, highTempHighwater;
+} hunkMemStats_t;
+void Hunk_GetMemStats( hunkMemStats_t *st );
+extern cvar_t *com_memProfile;
+extern cvar_t *com_memProfileInterval;
+#ifndef DEDICATED
+void CL_MemProfEvent( const char *stage );              // sample + row at a load stage (main thread only)
+void CL_MemProfFrame( void );                           // per client frame while com_memProfile is set
+void CL_MemProfDump( const char *why );                 // writes profiling/mem_ram.csv + mem_ram_timeline.csv
+void CL_MemProfInit( void );                            // registers the memprof command
+#endif
 void Hunk_SmallLog( void );
 void Hunk_Log( void );
 

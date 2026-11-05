@@ -2067,6 +2067,48 @@ int FS_FileIsInPAK( const char *filename, int *pChecksum ) {
 
 /*
 ============
+FS_FileSourcePak
+
+Memory profiler: which source provides qpath. Returns the pak basename (no .pk3), "dir" for a loose file or
+NULL if not found. Same search order as FS_FileIsInPAK; does not open anything inside a pak.
+============
+*/
+const char *FS_FileSourcePak( const char *qpath ) {
+	searchpath_t    *search;
+	pack_t          *pak;
+	fileInPack_t    *pakFile;
+	long hash;
+
+	if ( !fs_searchpaths || !qpath || !qpath[0] ) {
+		return NULL;
+	}
+	if ( qpath[0] == '/' || qpath[0] == '\\' ) {
+		qpath++;
+	}
+	if ( strstr( qpath, ".." ) || strstr( qpath, "::" ) ) {
+		return NULL;
+	}
+
+	for ( search = fs_searchpaths ; search ; search = search->next ) {
+		if ( search->pack ) {
+			pak = search->pack;
+			hash = FS_HashFileName( qpath, pak->hashSize );
+			for ( pakFile = pak->hashTable[hash]; pakFile; pakFile = pakFile->next ) {
+				if ( !FS_FilenameCompare( pakFile->name, qpath ) ) {
+					return pak->pakBasename;
+				}
+			}
+		} else if ( search->dir ) {
+			if ( FS_FileInPathExists( FS_BuildOSPath( search->dir->path, search->dir->gamedir, qpath ) ) ) {
+				return "dir";
+			}
+		}
+	}
+	return NULL;
+}
+
+/*
+============
 FS_ReadFileDir
 
 Filename are relative to the quake search path

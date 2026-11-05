@@ -2129,6 +2129,7 @@ void RE_BeginRegistration( glconfig_t *glconfigOut ) {
 	RE_ClearScene();
 
 	tr.registered = qtrue;
+	R_MemProfEvent( "begin_registration" );
 }
 
 /*

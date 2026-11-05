@@ -1968,6 +1968,7 @@ void R_Register( void ) {
 	ri.Cmd_AddCommand( "minimize", GLimp_Minimize );
 	ri.Cmd_AddCommand( "gfxmeminfo", GfxMemInfo_f );
 	ri.Cmd_AddCommand( "gpuprof", R_GpuProf_f );
+	ri.Cmd_AddCommand( "vramprof", R_MemProf_f );
 	ri.Cmd_AddCommand( "normalcov", R_NormalCov_f );
 	ri.Cmd_AddCommand( "exportCubemaps", R_ExportCubemaps_f );
 	ri.Cmd_AddCommand( "taginfo", R_TagInfo_f );
@@ -2140,6 +2141,7 @@ void RE_Shutdown( qboolean destroyWindow ) {
 	ri.Cmd_RemoveCommand( "minimize" );
 	ri.Cmd_RemoveCommand( "gfxmeminfo" );
 	ri.Cmd_RemoveCommand( "gpuprof" );
+	ri.Cmd_RemoveCommand( "vramprof" );
 	ri.Cmd_RemoveCommand( "normalcov" );
 	ri.Cmd_RemoveCommand( "exportCubemaps" );
 	ri.Cmd_RemoveCommand( "taginfo" );
@@ -2157,6 +2159,7 @@ void RE_Shutdown( qboolean destroyWindow ) {
 		R_ShutDownQueries();
 		R_ShutdownFlareQueries();
 		R_ShutdownGpuProf();
+		R_ShutdownMemProf( destroyWindow );		// fallback dump while the FBOs and textures still exist
 		if (glRefConfig.framebufferObject)
 			FBO_Shutdown();
 		R_DeleteTextures();
@@ -2198,6 +2201,7 @@ void RE_EndRegistration( void ) {
 		RB_ShowImages();
 	}
 	R_LOADING_REPLAY();
+	R_MemProfEvent( "end_registration" );
 }
 
 

@@ -137,6 +137,8 @@ typedef struct image_s {
 
 	int hash;           // for fast building of the backupHash
 
+	int memPak;         // codmod com_memProfile: pak the file came from (R_MemProfPakIndex), 0 = none/unknown
+
 	struct image_s* next;
 } image_t;
 
@@ -2671,6 +2673,7 @@ qboolean GLimp_GetDrawableSize( int *w, int *h );
 void	R_LoadScreenCapture( void );
 void	R_LoadScreenShutdown( void );
 void	R_LoadScreenInvalidate( void );
+void	R_LoadScreenGetSize( int *w, int *h );	// codmod: size of the loading snapshot renderbuffer (0x0 = none)
 void	RE_LoadingSnapshot( qboolean enable );
 void	RE_PresentLoadingSnapshot( void );
 
@@ -2797,6 +2800,15 @@ void R_NormalCov_f( void );
 void R_NormalCovReport( drawSurf_t *drawSurfs, int numDrawSurfs );
 void R_ShutdownGpuProf( void );
 void R_GpuProfDump( void );
+
+// tr_memprof.c (com_memProfile VRAM census; docs/memory-profiler-plan.md)
+qboolean R_MemProfOn( void );
+void R_MemProfFrame( void );
+void R_MemProfEvent( const char *event );
+void R_MemProfDump( const char *why );
+void R_MemProf_f( void );
+void R_ShutdownMemProf( qboolean destroyWindow );
+int R_MemProfPakIndex( const char *pak );
 unsigned long long R_ProfNow( void );
 void R_ProfCpuEnd( int scope, unsigned long long t0 );
 int RB_GpuDeepBegin( void );

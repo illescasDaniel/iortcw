@@ -46,6 +46,22 @@ void R_LoadScreenInvalidate( void ) {
 
 /*
 ===============
+R_LoadScreenGetSize
+
+Read-only: size of the snapshot renderbuffer (RGBA8), 0x0 when there is none. For the VRAM census.
+===============
+*/
+void R_LoadScreenGetSize( int *w, int *h ) {
+	if ( ls.rb && ls.w > 0 && ls.h > 0 ) {
+		*w = ls.w;
+		*h = ls.h;
+	} else {
+		*w = *h = 0;
+	}
+}
+
+/*
+===============
 R_LoadScreenShutdown
 
 Real shutdown (window / context destroyed next): free the GL objects.

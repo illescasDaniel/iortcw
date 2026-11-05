@@ -1727,6 +1727,7 @@ Q3OBJ = \
   $(B)/client/cl_input.o \
   $(B)/client/cl_keys.o \
   $(B)/client/cl_main.o \
+  $(B)/client/cl_memprof.o \
   $(B)/client/cl_net_chan.o \
   $(B)/client/cl_parse.o \
   $(B)/client/cl_scrn.o \
@@ -1866,6 +1867,7 @@ Q3R2OBJ = \
   $(B)/rend2/tr_light.o \
   $(B)/rend2/tr_loadscreen.o \
   $(B)/rend2/tr_main.o \
+  $(B)/rend2/tr_memprof.o \
   $(B)/rend2/tr_marks.o \
   $(B)/rend2/tr_mesh.o \
   $(B)/rend2/tr_model.o \

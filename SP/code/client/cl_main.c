@@ -897,6 +897,11 @@ static void CL_ReportBenchDemo( void ) {
 	fileHandle_t f;
 
 	Cvar_Set( "cl_benchMeasuring", "0" );
+	if ( com_memProfile && com_memProfile->integer ) {
+		// RAM dump, then the renderer's VRAM census (both write into profiling/)
+		CL_MemProfDump( "bench_end" );
+		Cbuf_ExecuteText( EXEC_NOW, "vramprof dump bench_end\n" );
+	}
 	if ( n < 10 ) {
 		Com_Printf( "codmod bench: too few frames (%d), demo too short?\n", n );
 		Cvar_Set( "cl_benchSummary", "no result (demo too short)" );
@@ -3283,6 +3288,10 @@ void CL_Frame( int msec ) {
 		return;
 	}
 
+	if ( com_memProfile && com_memProfile->integer ) {
+		CL_MemProfFrame();
+	}
+
 #ifdef USE_CURL
 	if(clc.downloadCURLM) {
 		CL_cURL_PerformDownload();
@@ -3792,6 +3801,7 @@ void CL_InitRef( void ) {
 	ri.FS_FreeFileList = FS_FreeFileList;
 	ri.FS_ListFiles = FS_ListFiles;
 	ri.FS_FileIsInPAK = FS_FileIsInPAK;
+	ri.FS_FileSourcePak = FS_FileSourcePak;
 	ri.FS_FileExists = FS_FileExists;
 	ri.Cvar_Get = Cvar_Get;
 	ri.Cvar_Set = Cvar_Set;
@@ -4242,6 +4252,8 @@ void CL_Init( void ) {
 	Cmd_AddCommand( "map_restart", CL_MapRestart_f );
 
 	Cmd_AddCommand( "setRecommended", CL_SetRecommended_f );
+
+	CL_MemProfInit();
 
 	CL_InitRef();
 
