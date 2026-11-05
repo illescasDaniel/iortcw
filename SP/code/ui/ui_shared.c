@@ -2593,6 +2593,39 @@ static void Item_TextField_FixScroll( itemDef_t *item, int len ) {
 	}
 }
 
+// Cvars may clamp or replace incomplete input as soon as it is set. Keep the
+// editable spelling separately, and only send complete, valid values to them.
+static qboolean Item_TextField_Valid( itemDef_t *item, const char *text ) {
+	float value;
+	editFieldDef_t *edit = (editFieldDef_t *)item->typeData;
+	int len = strlen( text );
+	qboolean numeric = item->type == ITEM_TYPE_NUMERICFIELD ||
+		edit->maxVal > edit->minVal ||
+		!Q_stricmp( item->cvar, "r_renderScale" ) ||
+		!Q_stricmp( item->cvar, "r_renderScaleSharp" ) ||
+		!Q_stricmp( item->cvar, "sensitivity" ) ||
+		!Q_stricmp( item->cvar, "cod_padSensX" ) ||
+		!Q_stricmp( item->cvar, "cod_padSensY" ) ||
+		!Q_stricmp( item->cvar, "cod_padGyroSens" );
+
+	if ( !numeric ) return qtrue;
+	if ( !len || text[len - 1] == '.' || !Q_isanumber( text ) ) return qfalse;
+	value = (float)atof( text );
+	// Comparisons also reject NaN; the bounds reject infinities and overflow.
+	if ( !( value >= -3.402823e38f && value <= 3.402823e38f ) ) return qfalse;
+	if ( edit->maxVal > edit->minVal && ( value < edit->minVal || value > edit->maxVal ) ) return qfalse;
+	if ( !Q_stricmp( item->cvar, "r_renderScale" ) ) return value >= 0.25f && value <= 1.0f;
+	if ( !Q_stricmp( item->cvar, "r_renderScaleSharp" ) ) return value == -1.0f || ( value >= 0.0f && value <= 1.0f );
+	return qtrue;
+}
+
+static void Item_TextField_SetDraft( itemDef_t *item, const char *text ) {
+	editFieldDef_t *edit = (editFieldDef_t *)item->typeData;
+	Q_strncpyz( edit->draft, text, MAX_EDITFIELD );
+	edit->draftInvalid = !Item_TextField_Valid( item, text );
+	if ( !edit->draftInvalid ) DC->setCVar( item->cvar, text );
+}
+
 // codmod: enter edit mode with the cursor at the end of the value (or at the clicked glyph for mouse entry).
 static void Item_TextField_BeginEdit( itemDef_t *item, qboolean useMouse ) {
 	editFieldDef_t *editPtr = (editFieldDef_t*)item->typeData;
@@ -2603,6 +2636,17 @@ static void Item_TextField_BeginEdit( itemDef_t *item, qboolean useMouse ) {
 	if ( item->cvar ) {
 		DC->getCVarString( item->cvar, buff, sizeof( buff ) );
 	}
+	if ( !editPtr->draft ) {
+		editPtr->draft = UI_Alloc( MAX_EDITFIELD );
+		if ( !editPtr->draft ) {
+			g_editingField = qfalse;
+			g_editItem = NULL;
+			return;
+		}
+		editPtr->draftInvalid = qfalse;
+	}
+	if ( editPtr->draftInvalid ) Q_strncpyz( buff, editPtr->draft, sizeof( buff ) );
+	else Q_strncpyz( editPtr->draft, buff, MAX_EDITFIELD );
 	len = strlen( buff );
 	if ( editPtr->maxChars && len > editPtr->maxChars ) {
 		len = editPtr->maxChars;
@@ -2641,7 +2685,7 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 	if ( item->cvar ) {
 
 		memset( buff, 0, sizeof( buff ) );
-		DC->getCVarString( item->cvar, buff, sizeof( buff ) );
+		Q_strncpyz( buff, editPtr->draft, sizeof( buff ) );
 		len = strlen( buff );
 		if ( editPtr->maxChars && len > editPtr->maxChars ) {
 			len = editPtr->maxChars;
@@ -2662,7 +2706,7 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 						editPtr->paintOffset--;
 					}
 				}
-				DC->setCVar( item->cvar, buff );
+				Item_TextField_SetDraft( item, buff );
 				return qtrue;
 			}
 
@@ -2681,11 +2725,6 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 				return qtrue;
 			}
 
-			if ( item->type == ITEM_TYPE_NUMERICFIELD ) {
-				if ( !Q_isnumeric( key ) ) {
-					return qfalse;
-				}
-			}
 
 			if ( !DC->getOverstrikeMode() ) {
 				if ( ( len == MAX_EDITFIELD - 1 ) || ( editPtr->maxChars && len >= editPtr->maxChars ) ) {
@@ -2700,7 +2739,7 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 
 			buff[item->cursorPos] = key;
 
-			DC->setCVar( item->cvar, buff );
+			Item_TextField_SetDraft( item, buff );
 
 			if ( item->cursorPos < len + 1 ) {
 				item->cursorPos++;
@@ -2714,7 +2753,7 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 			if ( key == K_DEL || key == K_KP_DEL ) {
 				if ( item->cursorPos < len ) {
 					memmove( buff + item->cursorPos, buff + item->cursorPos + 1, len - item->cursorPos );
-					DC->setCVar( item->cvar, buff );
+					Item_TextField_SetDraft( item, buff );
 				}
 				return qtrue;
 			}
@@ -2741,7 +2780,7 @@ qboolean Item_TextField_HandleKey( itemDef_t *item, int key ) {
 				// Snap to hundredths so 0.05 steps stay clean.
 				hundredths = (int)( value * 100.0f + ( value >= 0.0f ? 0.5f : -0.5f ) );
 				value = (float)hundredths / 100.0f;
-				DC->setCVar( item->cvar, va( "%.2f", value ) );
+				Item_TextField_SetDraft( item, va( "%.2f", value ) );
 				item->cursorPos = 0;
 				editPtr->paintOffset = 0;
 				return qtrue;
@@ -3962,6 +4001,10 @@ void Item_TextField_Paint( itemDef_t *item ) {
 		DC->getCVarString( item->cvar, buff, sizeof( buff ) );
 	}
 
+	if ( editPtr->draft && ( editPtr->draftInvalid || ( g_editingField && g_editItem == item ) ) ) {
+		Q_strncpyz( buff, editPtr->draft, sizeof( buff ) );
+	}
+
 	if ( item->window.flags & WINDOW_HASFOCUS ) {
 		lowLight[0] = 0.8 * parent->focusColor[0];
 		lowLight[1] = 0.8 * parent->focusColor[1];
@@ -3970,6 +4013,10 @@ void Item_TextField_Paint( itemDef_t *item ) {
 		LerpColor( parent->focusColor,lowLight,newColor,0.5 + 0.5 * sin( DC->realTime / PULSE_DIVISOR ) );
 	} else {
 		memcpy( &newColor, &item->window.foreColor, sizeof( vec4_t ) );
+	}
+
+	if ( editPtr->draft && editPtr->draftInvalid ) {
+		newColor[0] = 1.0f; newColor[1] = 0.25f; newColor[2] = 0.25f;
 	}
 
 	offset = ( item->text && *item->text ) ? 8 : 0;

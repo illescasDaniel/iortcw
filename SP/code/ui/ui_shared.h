@@ -204,6 +204,8 @@ typedef struct editFieldDef_s {
 	int maxChars;                   // for edit fields
 	int maxPaintChars;              // for edit fields
 	int paintOffset;                //
+	char *draft;                    // text retained independently of cvar validation
+	qboolean draftInvalid;
 } editFieldDef_t;
 
 // Was 32 — r_mode list (30 modes + Automatic + Custom) filled it exactly and

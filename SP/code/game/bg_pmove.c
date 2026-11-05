@@ -4128,7 +4128,8 @@ static void PM_CodCheckProne( void ) {
 
 	wantExit = qfalse;
 	// Allow exit during cooldown (stance < 0) so taps aren't eaten after stand-up.
-	if ( isProne && stance <= 0 && ( pressed || jumpPressed || crouchPressed ) ) {
+	if ( isProne && stance <= 0 && ( pressed || jumpPressed || crouchPressed
+		 || ( ( pm->cmd.buttons & BUTTON_SPRINT ) && pm->cmd.forwardmove > 0 ) ) ) {
 		wantExit = qtrue;
 	}
 
