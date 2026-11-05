@@ -46,11 +46,17 @@ R_DrawElements
 
 void R_DrawElements( int numIndexes, int firstIndex )
 {
+	unsigned long long profT0 = R_ProfNow();
+
 	if ( tess.numMultiDraws > 1 && numIndexes == tess.numIndexes && firstIndex == tess.firstIndex ) {
 		VaoCache_MultiDraw();
+		R_ProfCpuEnd( PROF_BE_DRAWELEMENTS, profT0 );
 		return;
 	}
+	backEnd.pc.c_physDraws++;
+	backEnd.pc.c_physSubdraws++;
 	qglDrawElements(GL_TRIANGLES, numIndexes, GL_INDEX_TYPE, BUFFER_OFFSET(firstIndex * sizeof(glIndex_t)));
+	R_ProfCpuEnd( PROF_BE_DRAWELEMENTS, profT0 );
 }
 
 
@@ -2231,7 +2237,13 @@ void RB_EndSurface( void ) {
 	//
 	// call off to shader specific tess end function
 	//
-	tess.currentStageIteratorFunc();
+	{
+		unsigned long long profT0 = R_ProfNow();
+		int profDeep = RB_GpuDeepBegin();
+
+		tess.currentStageIteratorFunc();
+		RB_GpuDeepEnd( profDeep, profT0 );
+	}
 
 	//
 	// draw debugging stuff

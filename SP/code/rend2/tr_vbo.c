@@ -599,7 +599,17 @@ Adapted from Tess_UpdateVBOs from xreal
 Update the default VAO to replace the client side vertex arrays
 ==============
 */
+static void RB_UpdateTessVaoInner(unsigned int attribBits);
+
 void RB_UpdateTessVao(unsigned int attribBits)
+{
+	unsigned long long profT0 = R_ProfNow();
+
+	RB_UpdateTessVaoInner(attribBits);
+	R_ProfCpuEnd(PROF_BE_UPDATEVAO, profT0);
+}
+
+static void RB_UpdateTessVaoInner(unsigned int attribBits)
 {
 	GLimp_LogComment("--- RB_UpdateTessVao ---\n");
 
@@ -827,6 +837,8 @@ void VaoCache_Reset(void)
 // Draws the batch of the last VaoCache_Commit (more than one surface)
 void VaoCache_MultiDraw(void)
 {
+	backEnd.pc.c_physDraws++;
+	backEnd.pc.c_physSubdraws += mdNum;
 	qglMultiDrawElements(GL_TRIANGLES, mdCount, GL_INDEX_TYPE, mdOffset, mdNum);
 }
 

@@ -1074,11 +1074,16 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 	ldt = dt;
 #endif
 
+	int profDepth = backEnd.depthFill ? 1 : 0;
+	unsigned long long profT0 = R_ProfNow();
+
 	refent = &backEnd.currentEntity->e;
 	boneList = ( int * )( (byte *)surface + surface->ofsBoneReferences );
 	header = ( mdsHeader_t * )( (byte *)surface + surface->ofsHeader );
 
 	R_CalcBones( header, (const refEntity_t *)refent, boneList, surface->numBoneReferences );
+	R_ProfCpuEnd( PROF_MDS_BONES + profDepth, profT0 );
+	profT0 = R_ProfNow();
 
 	DBG_SHOWTIME
 
@@ -1185,6 +1190,8 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 	//
 	// deform the vertexes by the lerped bones
 	//
+	R_ProfCpuEnd( PROF_MDS_LOD + profDepth, profT0 );
+	profT0 = R_ProfNow();
 	numVerts = surface->numVerts;
 	v = ( mdsVertex_t * )( (byte *)surface + surface->ofsVerts );
 	tempVert = ( float * )( tess.xyz + baseVertex );
@@ -1213,6 +1220,9 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 
 	DBG_SHOWTIME
 
+	R_ProfCpuEnd( PROF_MDS_SKIN + profDepth, profT0 );
+	profT0 = R_ProfNow();
+
 	/*
 	codmod: runtime tangents for normal/parallax mapped MDS skins (MDC/MD3 get theirs at load, MDS is skinned per frame).
 	Per emitted triangle (positions p, texcoords w) the Lengyel solution gives the texture-space directions
@@ -1223,8 +1233,10 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 	(tess.indexes from oldIndexes, i.e. after LOD collapse); vertices with no valid triangle (unreferenced, or a
 	degenerate/zero-area UV mapping) fall back to a stable perpendicular of the normal with w = +1. One pass over the
 	triangles, static buffers, and nothing at all unless the shader wants ATTR_TANGENT and r_normalMapping is on.
+	Depth-fill passes (sun shadow cascades, depth prepass) never read the tangent; r_mdsDepthTangents 0 skips it there.
 	*/
-	if ( r_normalMapping->integer && ( tess.shader->vertexAttribs & ATTR_TANGENT ) ) {
+	if ( r_normalMapping->integer && ( tess.shader->vertexAttribs & ATTR_TANGENT ) &&
+		 !( backEnd.depthFill && !r_mdsDepthTangents->integer ) ) {
 		const glIndex_t *idx = &tess.indexes[oldIndexes];
 		const glIndex_t *idxEnd = &tess.indexes[tess.numIndexes];
 
@@ -1271,13 +1283,23 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 			VectorCopy( tan, out );
 			R_VaoPackTangent( tess.tangent[baseVertex + j], out );
 		}
+		R_ProfCount( PCNT_MDS_TANVERTS + profDepth, render_count );
 	}
+	R_ProfCpuEnd( PROF_MDS_TANGENT + profDepth, profT0 );
+	profT0 = R_ProfNow();
 
 	// codmod: SMAA T2x, last frame's skinned positions of this surface for the velocity prepass
 	if ( backEnd.depthFill && backEnd.smaaVelocity && !tess.shader->numDeforms &&
 		 backEnd.currentEntity != &tr.worldEntity && backEnd.currentEntity->e.reType == RT_MODEL ) {
 		RB_SmaaMdsPrevPositions( backEnd.currentEntity, surface, tess.xyz[baseVertex], render_count, tess.xyzPrev[baseVertex] );
 		tess.prevXyzValid = qtrue;
+		R_ProfCpuEnd( PROF_MDS_PREVPOS, profT0 );
+	}
+	R_ProfCount( PCNT_MDS_SURFS + profDepth, 1 );
+	R_ProfCount( PCNT_MDS_VERTS + profDepth, render_count );
+	R_ProfCount( PCNT_MDS_TRIS + profDepth, ( tess.numIndexes - oldIndexes ) / 3 );
+	if ( render_count == surface->numVerts ) {
+		R_ProfCount( PCNT_MDS_FULLLOD + profDepth, 1 );
 	}
 
 #if 0 // FIXME: implement this

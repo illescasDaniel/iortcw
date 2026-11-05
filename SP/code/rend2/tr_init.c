@@ -295,6 +295,7 @@ cvar_t  *r_shownormals;
 cvar_t  *r_finish;
 cvar_t  *r_swapFinish;
 cvar_t  *r_flaresAsync;
+cvar_t  *r_mdsDepthTangents;
 cvar_t  *r_gpuProfile;
 cvar_t  *r_gpuLoad;
 cvar_t  *r_smaaStencil;
@@ -1772,6 +1773,8 @@ void R_Register( void ) {
 	r_swapFinish = ri.Cvar_Get( "r_swapFinish", "0", 0 );
 	// 1 = flare visibility via occlusion queries; 0 = stock depth readback (stalls the GPU)
 	r_flaresAsync = ri.Cvar_Get( "r_flaresAsync", "1", 0 );
+	// 0 = skip MDS runtime tangents in depth-fill passes (no depth program reads them); 1 = compute them there too (stock)
+	r_mdsDepthTangents = ri.Cvar_Get( "r_mdsDepthTangents", "0", 0 );
 	r_gpuProfile = ri.Cvar_Get( "r_gpuProfile", "0", 0 );
 	r_gpuLoad = ri.Cvar_Get( "r_gpuLoad", "0", 0 );	// dev only: synthetic GPU work per real frame in microseconds (tr_gpuprof.c), 0 = off
 	r_smaaStencil = ri.Cvar_Get( "r_smaaStencil", "1", 0 );

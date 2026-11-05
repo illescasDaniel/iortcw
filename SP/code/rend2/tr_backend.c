@@ -851,7 +851,16 @@ void RB_ZombieFX( int part, drawSurf_t *drawSurf, int oldNumVerts, int oldNumInd
 RB_RenderDrawSurfList
 ==================
 */
+static void RB_RenderDrawSurfListInner( drawSurf_t *drawSurfs, int numDrawSurfs );
+
 void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
+	unsigned long long profT0 = R_ProfNow();
+
+	RB_RenderDrawSurfListInner( drawSurfs, numDrawSurfs );
+	R_ProfCpuEnd( PROF_BE_LIST, profT0 );
+}
+
+static void RB_RenderDrawSurfListInner( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	shader_t		*shader = NULL, *oldShader;
 	int				fogNum, oldFogNum;
 	int				entityNum, oldEntityNum;
@@ -903,7 +912,11 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			if ( dlighted && entityNum != REFENTITYNUM_WORLD ) {
 				tess.dlightBits |= backEnd.currentEntity->needDlights; // codmod: model dlights
 			}
-			rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+			{
+				unsigned long long profAsm = R_ProfNow();
+				rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+				R_ProfAssembleEnd( profAsm );
+			}
 
 			// RF, convert the newly created vertexes into dust particles, and overwrite
 			if (backEnd.currentEntity->e.reFlags & REFLAG_ZOMBIEFX) {
@@ -1050,7 +1063,11 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		if ( dlighted && entityNum != REFENTITYNUM_WORLD ) {
 			tess.dlightBits |= backEnd.currentEntity->needDlights; // codmod: model dlights
 		}
-		rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+		{
+			unsigned long long profAsm = R_ProfNow();
+			rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+			R_ProfAssembleEnd( profAsm );
+		}
 
 		// RF, convert the newly created vertexes into dust particles, and overwrite
 		if ( backEnd.currentEntity->e.reFlags & REFLAG_ZOMBIEFX ) {
@@ -1576,7 +1593,11 @@ const void	*RB_DrawSurfs( const void *data ) {
 		}
 
 		if (isShadowView)
+		{
 			RB_GpuMark( (backEnd.viewParms.flags & VPF_ORTHOGRAPHIC) ? "sunshadow" : (backEnd.viewParms.flags & VPF_NOPLAYER) ? "flashshadow" : "shadowmap" );
+			if (backEnd.viewParms.flags & VPF_ORTHOGRAPHIC)
+				RB_GpuMarkCascade();
+		}
 		else
 			RB_GpuMark( "prepass" );
 
@@ -2351,7 +2372,12 @@ const void	*RB_SwapBuffers( const void *data ) {
 
 	GLimp_LogComment( "***************** RB_SwapBuffers *****************\n\n\n" );
 
-	GLimp_EndFrame();
+	{
+		unsigned long long profT0 = R_ProfNow();
+
+		GLimp_EndFrame();
+		R_ProfCpuEnd( PROF_BE_SWAP, profT0 );
+	}
 
 	backEnd.projection2D = qfalse;
 
@@ -2744,6 +2770,7 @@ RB_ExecuteRenderCommands
 */
 void RB_ExecuteRenderCommands( const void *data ) {
 	int		t1, t2;
+	unsigned long long profT0 = R_ProfNow();
 
 	t1 = ri.Milliseconds ();
 
@@ -2770,7 +2797,12 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			data = RB_StretchPicGradient( data );
 			break;
 		case RC_DRAW_SURFS:
-			data = RB_DrawSurfs( data );
+			{
+				unsigned long long profDs = R_ProfNow();
+
+				data = RB_DrawSurfs( data );
+				R_ProfCpuEnd( PROF_BE_DRAWSURFS, profDs );
+			}
 			break;
 		case RC_DRAW_BUFFER:
 			data = RB_DrawBuffer( data );
@@ -2798,7 +2830,12 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			data = RB_CapShadowMap(data);
 			break;
 		case RC_POSTPROCESS:
-			data = RB_PostProcess(data);
+			{
+				unsigned long long profPp = R_ProfNow();
+
+				data = RB_PostProcess(data);
+				R_ProfCpuEnd( PROF_BE_POST, profPp );
+			}
 			if ( !tr.warp.presenting ) {
 				tr.warp.inTail = qtrue;
 			}
@@ -2815,6 +2852,7 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			// stop rendering
 			t2 = ri.Milliseconds ();
 			backEnd.pc.msec = t2 - t1;
+			R_ProfCpuEnd( PROF_BE_TOTAL, profT0 );
 			return;
 		}
 	}

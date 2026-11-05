@@ -1681,6 +1681,8 @@ typedef struct {
 	int     c_lightallDraws;
 	int     c_fogDraws;
 	int     c_dlightDraws;
+	int     c_physDraws;		// codmod profiler: real glDrawElements / glMultiDrawElements submissions
+	int     c_physSubdraws;		// ... counting each range of a multi-draw
 
 	int		msec;			// total msec for backend run
 } backEndCounters_t;
@@ -2171,6 +2173,7 @@ extern	cvar_t	*r_picmip;						// controls picmip values
 extern	cvar_t	*r_finish;
 extern	cvar_t	*r_swapFinish;
 extern	cvar_t	*r_flaresAsync;
+extern	cvar_t	*r_mdsDepthTangents;
 extern	cvar_t	*r_gpuProfile;
 extern	cvar_t	*r_gpuLoad;
 extern	cvar_t	*r_smaaStencil;
@@ -2727,6 +2730,41 @@ void R_GpuProf_f( void );
 void R_NormalCov_f( void );
 void R_NormalCovReport( drawSurf_t *drawSurfs, int numDrawSurfs );
 void R_ShutdownGpuProf( void );
+void R_GpuProfDump( void );
+unsigned long long R_ProfNow( void );
+void R_ProfCpuEnd( int scope, unsigned long long t0 );
+int RB_GpuDeepBegin( void );
+void RB_GpuDeepEnd( int idx, unsigned long long t0 );
+// R_ProfCpuEnd scope ids (order must match cpuScope_t in tr_gpuprof.c)
+#define PROF_FE_SCENE		0
+#define PROF_FE_VIEW		1
+#define PROF_FE_WORLD		2
+#define PROF_FE_POLYS		3
+#define PROF_FE_ENTS		4
+#define PROF_FE_SORT		5
+#define PROF_BE_TOTAL		6
+#define PROF_BE_DRAWSURFS	7
+#define PROF_BE_LIST		8
+#define PROF_BE_POST		10
+#define PROF_BE_SWAP		11
+// MDS surface assembly: add 1 for a depth-fill pass (prevpos only exists in depth passes)
+#define PROF_MDS_BONES		12
+#define PROF_MDS_LOD		14
+#define PROF_MDS_SKIN		16
+#define PROF_MDS_TANGENT	18
+#define PROF_MDS_PREVPOS	20
+#define PROF_BE_UPDATEVAO	21
+#define PROF_BE_DRAWELEMENTS	22
+// R_ProfCount ids; add 1 for a depth-fill pass (order must match cntNames in tr_gpuprof.c)
+#define PCNT_MDS_SURFS		0
+#define PCNT_MDS_VERTS		2
+#define PCNT_MDS_TRIS		4
+#define PCNT_MDS_TANVERTS	6
+#define PCNT_MDS_FULLLOD	8
+void R_ProfCount( int id, int n );
+void R_ProfAssembleEnd( unsigned long long t0 );
+void R_ProfSunCascade( int level, int state, int reason );
+void RB_GpuMarkCascade( void );
 
 // tr_pacegpu.c
 void R_PaceGpuInit( void );

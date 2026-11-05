@@ -642,7 +642,16 @@ Rendering a scene may require multiple views to be rendered
 to handle mirrors,
 @@@@@@@@@@@@@@@@@@@@@
 */
+static void RE_RenderSceneInner( const refdef_t *fd );
+
 void RE_RenderScene( const refdef_t *fd ) {
+	unsigned long long profT0 = R_ProfNow();
+
+	RE_RenderSceneInner( fd );
+	R_ProfCpuEnd( PROF_FE_SCENE, profT0 );
+}
+
+static void RE_RenderSceneInner( const refdef_t *fd ) {
 	viewParms_t		parms;
 	int				startTime;
 

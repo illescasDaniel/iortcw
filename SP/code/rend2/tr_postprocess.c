@@ -565,6 +565,7 @@ void RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox)
 	GLSL_SetUniformMat4(&tr.smaaResolveShader, UNIFORM_REPROJMATRIX, reproj);
 	GLSL_SetUniformMat4(&tr.smaaResolveShader, UNIFORM_REPROJROTMATRIX, reprojRot);
 	FBO_Blit(srcFbo, srcBox, NULL, tr.screenScratchFbo, srcBox, &tr.smaaResolveShader, NULL, 0);
+	RB_GpuMark("smaa_t2x_resolve");
 
 	if (debug)
 	{
@@ -575,11 +576,12 @@ void RB_SMAATemporal(FBO_t *srcFbo, ivec4_t srcBox)
 	else
 	{
 		FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		RB_GpuMark("smaa_t2x_copy_scene");
 		FBO_FastBlit(tr.screenScratchFbo, srcBox, tr.smaaHistoryFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	}
 	tr.smaaHistoryValid = qtrue;
 	tr.smaaHistoryFrame = tr.frameCount;
-	RB_GpuMark("smaa_t2x");
+	RB_GpuMark("smaa_t2x_copy_history");
 }
 
 void RB_ToneMap(FBO_t *hdrFbo, ivec4_t hdrBox, FBO_t *ldrFbo, ivec4_t ldrBox, int autoExposure)
@@ -1139,8 +1141,9 @@ qboolean RB_PostFx(FBO_t *srcFbo, ivec4_t srcBox)
 	GLSL_BindProgram(&tr.gradeShader);
 	GLSL_SetUniformVec4(&tr.gradeShader, UNIFORM_VIEWINFO, viewInfo);
 	FBO_Blit(srcFbo, srcBox, NULL, tr.screenScratchFbo, srcBox, &tr.gradeShader, color, 0);
-	FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	RB_GpuMark( "grade" );
+	FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	RB_GpuMark( "grade_copy" );
 
 	return qtrue;
 }

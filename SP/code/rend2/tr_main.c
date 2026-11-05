@@ -2019,9 +2019,14 @@ R_GenerateDrawSurfs
 ====================
 */
 void R_GenerateDrawSurfs( void ) {
-	R_AddWorldSurfaces();
+	unsigned long long profT0 = R_ProfNow();
 
+	R_AddWorldSurfaces();
+	R_ProfCpuEnd( PROF_FE_WORLD, profT0 );
+
+	profT0 = R_ProfNow();
 	R_AddPolygonSurfaces();
+	R_ProfCpuEnd( PROF_FE_POLYS, profT0 );
 
 	// set the projection matrix with the minimum zfar
 	// now that we have the world bounded
@@ -2038,7 +2043,9 @@ void R_GenerateDrawSurfs( void ) {
 	// we know the size of the clipping volume. Now set the rest of the projection matrix.
 	R_SetupProjectionZ (&tr.viewParms);
 
+	profT0 = R_ProfNow();
 	R_AddEntitySurfaces();
+	R_ProfCpuEnd( PROF_FE_ENTS, profT0 );
 }
 
 /*
@@ -2106,7 +2113,16 @@ A view may be either the actual camera view,
 or a mirror / remote location
 ================
 */
+static void R_RenderViewInner( viewParms_t *parms );
+
 void R_RenderView( viewParms_t *parms ) {
+	unsigned long long profT0 = R_ProfNow();
+
+	R_RenderViewInner( parms );
+	R_ProfCpuEnd( PROF_FE_VIEW, profT0 );
+}
+
+static void R_RenderViewInner( viewParms_t *parms ) {
 	int firstDrawSurf;
 	int numDrawSurfs;
 	float jitterX = 0.0f, jitterY = 0.0f;
@@ -2150,7 +2166,12 @@ void R_RenderView( viewParms_t *parms ) {
 		numDrawSurfs = MAX_DRAWSURFS;
 	}
 
-	R_SortDrawSurfs( tr.refdef.drawSurfs + firstDrawSurf, numDrawSurfs - firstDrawSurf );
+	{
+		unsigned long long profT0 = R_ProfNow();
+
+		R_SortDrawSurfs( tr.refdef.drawSurfs + firstDrawSurf, numDrawSurfs - firstDrawSurf );
+		R_ProfCpuEnd( PROF_FE_SORT, profT0 );
+	}
 
 	if ( r_normalCovPending && !( tr.refdef.rdflags & ( RDF_NOWORLDMODEL | RDF_SKYBOXPORTAL ) ) ) {
 		R_NormalCovReport( tr.refdef.drawSurfs + firstDrawSurf, numDrawSurfs - firstDrawSurf );
@@ -2974,7 +2995,23 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 		if (reuse)
 		{
 			Mat4Copy(c->mvp, tr.refdef.sunShadowMvp[level]);
+			R_ProfSunCascade(level, 2, 0);
 			return;
+		}
+
+		if (r_gpuProfile->integer)
+		{
+			// why the cascade is re-rendered (codes: see cascadeReasons in tr_gpuprof.c)
+			int reason = 1;
+			if (!c->valid) reason = 1;
+			else if (c->size != tr.sunShadowFbo[level]->width) reason = 2;
+			else if ((tr.frameCount + level) % cascadeEvery == 0) reason = 3;
+			else if (tr.frameCount - c->frame >= cascadeEvery * 2) reason = 4;
+			else if (fabs(c->half - stableHalf) >= 0.01f) reason = 5;
+			else if (!VectorCompare(c->axis[0], lightViewAxis[0]) || !VectorCompare(c->axis[1], lightViewAxis[1])
+				|| !VectorCompare(c->axis[2], lightViewAxis[2])) reason = 6;
+			else reason = 7;	// light-space box moved past the margin
+			R_ProfSunCascade(level, 1, reason);
 		}
 
 		c->valid = qtrue;
@@ -2986,6 +3023,8 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 		VectorCopy(lightViewAxis[2], c->axis[2]);
 		VectorCopy(stableCenter, c->center);
 	}
+	else
+		R_ProfSunCascade(level, 1, 8);	// not a cached cascade: rendered every frame
 
 	{
 		int firstDrawSurf;

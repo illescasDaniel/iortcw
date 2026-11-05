@@ -896,6 +896,7 @@ static void CL_ReportBenchDemo( void ) {
 	char summary[256], line[512], head[512];
 	fileHandle_t f;
 
+	Cvar_Set( "cl_benchMeasuring", "0" );
 	if ( n < 10 ) {
 		Com_Printf( "codmod bench: too few frames (%d), demo too short?\n", n );
 		Cvar_Set( "cl_benchSummary", "no result (demo too short)" );
