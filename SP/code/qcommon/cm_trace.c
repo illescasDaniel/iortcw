@@ -469,6 +469,13 @@ CM_TraceThroughPatch
 ================
 */
 
+// codmod: shader name of the brush side / patch the last trace hit (cod_whatsthis)
+static const char *cm_lastTraceShader;
+
+const char *CM_LastTraceShader( void ) {
+	return cm_lastTraceShader;
+}
+
 void CM_TraceThroughPatch( traceWork_t *tw, cPatch_t *patch ) {
 	float oldFrac;
 
@@ -480,6 +487,7 @@ void CM_TraceThroughPatch( traceWork_t *tw, cPatch_t *patch ) {
 
 	if ( tw->trace.fraction < oldFrac ) {
 		tw->trace.surfaceFlags = patch->surfaceFlags;
+		cm_lastTraceShader = cm.shaders[patch->shaderNum].shader;
 		tw->trace.contents = patch->contents;
 	}
 }
@@ -662,6 +670,7 @@ void CM_TraceThroughBrush( traceWork_t *tw, cbrush_t *brush ) {
 			}
 			if (leadside != NULL) {
 				tw->trace.surfaceFlags = leadside->surfaceFlags;
+				cm_lastTraceShader = cm.shaders[leadside->shaderNum].shader;
 			}
 			tw->trace.contents = brush->contents;
 		}
@@ -1159,6 +1168,8 @@ void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end,
 	cmod = CM_ClipHandleToModel( model );
 
 	cm.checkcount++;        // for multi-check avoidance
+
+	cm_lastTraceShader = NULL;
 
 	c_traces++;             // for statistics, may be zeroed
 

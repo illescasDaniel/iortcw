@@ -1063,6 +1063,67 @@ void CG_CodDump_f( void ) {
 
 /*
 ================
+CG_CodWhatsThis_f
+
+codmod: "cod_whatsthis" console command. Traces from the view along the crosshair and prints the
+world/brush-model shader (the texture name from the BSP) and, when an entity was hit, its type
+and model. Collision-based, so non-solid decals/glass without clip are skipped.
+================
+*/
+void CG_CodWhatsThis_f( void ) {
+	trace_t tr, wtr;
+	vec3_t start, end;
+	char shader[MAX_QPATH];
+	centity_t *cent;
+	entityState_t *es;
+
+	if ( !cg.snap ) {
+		return;
+	}
+
+	VectorCopy( cg.refdef.vieworg, start );
+	VectorMA( start, 8192, cg.refdef.viewaxis[0], end );
+
+	CG_Trace( &tr, start, NULL, NULL, end, cg.snap->ps.clientNum, MASK_SHOT );
+
+	// world only, to read the BSP shader (CG_Trace's entity traces would overwrite it)
+	trap_CM_BoxTrace( &wtr, start, end, vec3_origin, vec3_origin, 0, MASK_SHOT );
+	trap_CM_LastTraceShader( shader, sizeof( shader ) );
+
+	if ( tr.fraction >= 1.0f ) {
+		CG_Printf( "cod_whatsthis: nothing hit\n" );
+		return;
+	}
+
+	CG_Printf( "cod_whatsthis: dist %.0f at (%.0f %.0f %.0f)\n", tr.fraction * 8192, tr.endpos[0], tr.endpos[1], tr.endpos[2] );
+
+	if ( tr.entityNum < ENTITYNUM_MAX_NORMAL ) {
+		cent = &cg_entities[tr.entityNum];
+		es = &cent->currentState;
+		CG_Printf( "  entity %d eType %d modelindex %d", tr.entityNum, es->eType, es->modelindex );
+		if ( es->solid == SOLID_BMODEL ) {
+			vec3_t origin, angles;
+			clipHandle_t cmodel = trap_CM_InlineModel( es->modelindex );
+
+			BG_EvaluateTrajectory( &es->apos, cg.physicsTime, angles );
+			BG_EvaluateTrajectory( &es->pos, cg.physicsTime, origin );
+			trap_CM_TransformedBoxTrace( &wtr, start, end, vec3_origin, vec3_origin, cmodel, MASK_SHOT, origin, angles );
+			trap_CM_LastTraceShader( shader, sizeof( shader ) );
+			CG_Printf( " (brush model *%d)\n", es->modelindex );
+		} else {
+			const char *model = es->modelindex > 0 ? CG_ConfigString( CS_MODELS + es->modelindex ) : "";
+
+			CG_Printf( " model \"%s\"\n", model );
+			shader[0] = '\0';
+		}
+	}
+	if ( shader[0] ) {
+		CG_Printf( "  shader: %s\n", shader );
+	}
+}
+
+/*
+================
 CG_ToggleAds_f
 
 codmod: sticky ADS toggle (phase 3.1). ioRTCW SP has no console `alias`/`vstr` toggle

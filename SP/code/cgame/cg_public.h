@@ -226,7 +226,9 @@ typedef enum {
 	CG_KEY_GETBINDINGBUF = 902,
 	CG_KEY_SETBINDING = 903,
 	// codmod: key name for on-screen tips
-	CG_KEY_KEYNUMTOSTRING = 904
+	CG_KEY_KEYNUMTOSTRING = 904,
+	// codmod: shader name of the last CM trace hit
+	CG_CM_LASTTRACESHADER = 905
 
 } cgameImport_t;
 

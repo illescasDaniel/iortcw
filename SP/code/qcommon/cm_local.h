@@ -82,6 +82,7 @@ typedef struct {
 	int checkcount;                     // to avoid repeated testings
 	int surfaceFlags;
 	int contents;
+	int shaderNum;                      // codmod: for CM_LastTraceShader
 	struct patchCollide_s   *pc;
 } cPatch_t;
 

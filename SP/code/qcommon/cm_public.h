@@ -44,6 +44,7 @@ int         CM_NumInlineModels( void );
 char        *CM_EntityString( void );
 
 // returns an ORed contents mask
+const char  *CM_LastTraceShader( void );    // codmod: shader of the last trace hit, NULL if none
 int         CM_PointContents( const vec3_t p, clipHandle_t model );
 int         CM_TransformedPointContents( const vec3_t p, clipHandle_t model, const vec3_t origin, const vec3_t angles );
 

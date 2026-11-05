@@ -2282,6 +2282,7 @@ void CG_DrawTourneyScoreboard( void );
 //
 void CG_CodDrawDebugHud( void );
 void CG_CodDump_f( void );
+void CG_CodWhatsThis_f( void );
 void CG_CodDrawDebugMenu( void );   // codmod: sectioned tune menu (cg_cod_menu.c)
 void CG_CodMenu_f( void );
 void CG_CodMenuDump_f( void );
@@ -2555,6 +2556,7 @@ int         trap_Key_GetCatcher( void );
 void        trap_Key_SetCatcher( int catcher );
 int         trap_Key_GetKey( const char *binding );
 void        trap_Key_GetBindingBuf( int keynum, char *buf, int buflen ); // codmod
+void        trap_CM_LastTraceShader( char *buf, int buflen ); // codmod: shader of last CM trace hit
 void        trap_Key_KeynumToStringBuf( int keynum, char *buf, int buflen ); // codmod
 void        trap_Key_SetBinding( int keynum, const char *binding );      // codmod
 

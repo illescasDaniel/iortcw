@@ -457,6 +457,10 @@ void trap_Key_KeynumToStringBuf( int keynum, char *buf, int buflen ) {
 	syscall( CG_KEY_KEYNUMTOSTRING, keynum, buf, buflen );
 }
 
+void trap_CM_LastTraceShader( char *buf, int buflen ) {
+	syscall( CG_CM_LASTTRACESHADER, buf, buflen );
+}
+
 void trap_Key_SetBinding( int keynum, const char *binding ) {
 	syscall( CG_KEY_SETBINDING, keynum, binding );
 }

@@ -497,6 +497,12 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return CM_InlineModel( args[1] );
 	case CG_CM_TEMPBOXMODEL:
 		return CM_TempBoxModel( VMA( 1 ), VMA( 2 ), qfalse );
+	case CG_CM_LASTTRACESHADER:
+		{
+			const char *s = CM_LastTraceShader();
+			Q_strncpyz( VMA( 1 ), s ? s : "", args[2] );
+		}
+		return 0;
 	case CG_CM_TEMPCAPSULEMODEL:
 		return CM_TempBoxModel( VMA( 1 ), VMA( 2 ), qtrue );
 	case CG_CM_POINTCONTENTS:

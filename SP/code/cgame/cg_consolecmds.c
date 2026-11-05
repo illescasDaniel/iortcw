@@ -427,7 +427,8 @@ static consoleCommand_t commands[] = {
 	{ "LimboMessage", CG_LimboMessage_f },
 	// -NERVE - SMF
 
-	{ "cod_dump", CG_CodDump_f },   // codmod: phase 2.0, see cg_cod.c
+	{ "cod_dump", CG_CodDump_f },
+	{ "cod_whatsthis", CG_CodWhatsThis_f }, // codmod: shader/model under the crosshair   // codmod: phase 2.0, see cg_cod.c
 	{ "toggleads", CG_ToggleAds_f }, // codmod: phase 3.1 sticky ADS toggle
 	{ "togglecrouch", CG_ToggleCrouch_f }, // codmod: phase 5d sticky crouch (bind c)
 	{ "+crouchprone", CG_CrouchProneDown_f }, // codmod: pad Circle/B tap crouch / hold prone
