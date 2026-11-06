@@ -4123,7 +4123,7 @@ static void Com_ApPacedUpdate( void ) {
 			ap.pacedFlips++;
 			ap.pacedFlipUs = now;
 			ap.pacedFresh = 0;
-			Com_Printf( "frame warp AP: GPU-paced regime on (busy median %.0f us > %.0f)\n", v, com_frameWarpPacedEnter->value * twoT );
+			Com_DPrintf( "frame warp AP: GPU-paced regime on (busy median %.0f us > %.0f)\n", v, com_frameWarpPacedEnter->value * twoT );
 		}
 	} else {
 		v = Com_ApBusyLast( 32, 0.9 );
@@ -4132,7 +4132,7 @@ static void Com_ApPacedUpdate( void ) {
 			ap.pacedFlips++;
 			ap.pacedFlipUs = now;
 			ap.pacedFresh = 0;
-			Com_Printf( "frame warp AP: GPU-paced regime off (busy P90 %.0f us < %.0f)\n", v, com_frameWarpPacedLeave->value * twoT );
+			Com_DPrintf( "frame warp AP: GPU-paced regime off (busy P90 %.0f us < %.0f)\n", v, com_frameWarpPacedLeave->value * twoT );
 		}
 	}
 }
@@ -4152,7 +4152,7 @@ static void Com_ApPrintRate( long long now, const char *why ) {
 	if ( from == to || now - ap.lastPrintUs < 2000000 ) {
 		return;
 	}
-	Com_Printf( "frame warp AP: slot rate %d -> %d (real %.0f)%s%s\n", from, to, ap.sTarget / ap.k, why ? ", " : "", why ? why : "" );
+	Com_DPrintf( "frame warp AP: slot rate %d -> %d (real %.0f)%s%s\n", from, to, ap.sTarget / ap.k, why ? ", " : "", why ? why : "" );
 	ap.printedS = ap.sTarget;
 	ap.lastPrintUs = now;
 }
@@ -4339,7 +4339,7 @@ static qboolean Com_ApDenyCheck( long long now ) {
 	ap.trialApRate = delivered;
 	ap.trialN = 0;
 	ap.trials[0]++;
-	Com_Printf( "frame warp AP: AP %.0f/s vs estimate %.0f/s: late-latch trial for %d s\n", delivered, ll, AP_TRIAL_US / 1000000 );
+	Com_DPrintf( "frame warp AP: AP %.0f/s vs estimate %.0f/s: late-latch trial for %d s\n", delivered, ll, AP_TRIAL_US / 1000000 );
 	return qtrue;       // the next frames run late-latch
 }
 
@@ -4368,7 +4368,7 @@ static qboolean Com_ApTrialFinish( long long now ) {
 	if ( c < 30 || gain <= 0 ) {
 		ap.nextTrialUs = now + 10000000;
 		ap.trials[3]++;
-		Com_Printf( "frame warp AP: late-latch trial inconclusive (%d presents), AP kept\n", c );
+		Com_DPrintf( "frame warp AP: late-latch trial inconclusive (%d presents), AP kept\n", c );
 		return qfalse;
 	}
 	ll = c / dur;
@@ -4379,7 +4379,7 @@ static qboolean Com_ApTrialFinish( long long now ) {
 		}
 		ap.nextTrialUs = now + ap.trialKeepUs;
 		ap.trials[1]++;
-		Com_Printf( "frame warp AP: measured late-latch %.0f/s vs AP %.0f/s (needs AP >= %.2f x): AP kept, next trial in %d s\n",
+		Com_DPrintf( "frame warp AP: measured late-latch %.0f/s vs AP %.0f/s (needs AP >= %.2f x): AP kept, next trial in %d s\n",
 					ll, ap.trialApRate, gain, (int)( ap.trialKeepUs / 1000000 ) );
 		return qfalse;
 	}
@@ -4392,9 +4392,9 @@ static qboolean Com_ApTrialFinish( long long now ) {
 	}
 	ap.denyUntilUs = now + ap.denyDurUs;
 	ap.denyWhy = "AP slower than late-latch (measured trial)";
-	Com_Printf( "frame warp AP: measured late-latch %.0f/s vs AP %.0f/s (needs AP >= %.2f x): AP off for %d s\n",
+	Com_DPrintf( "frame warp AP: measured late-latch %.0f/s vs AP %.0f/s (needs AP >= %.2f x): AP off for %d s\n",
 				ll, ap.trialApRate, gain, (int)( ap.denyDurUs / 1000000 ) );
-	Com_Printf( "frame warp AP: late-latch estimate inputs: cap %.0f, refresh %.0f, busy %.0f us (src %d), cpu P90 %d us, baseline %.0f us, %d samples\n",
+	Com_DPrintf( "frame warp AP: late-latch estimate inputs: cap %.0f, refresh %.0f, busy %.0f us (src %d), cpu P90 %d us, baseline %.0f us, %d samples\n",
 				apLLIn.cap, apLLIn.refresh, apLLIn.busy, apLLIn.src, (int)apLLIn.cpu, apLLIn.base, ap.baseN );
 	return qtrue;
 }
@@ -4467,7 +4467,7 @@ static void Com_ApUpdate( void ) {
 			ap.failStreak = 0;      // a transition (camera, menu, pm_type...) starts the failure count afresh
 		}
 		if ( why != ap.reported ) {
-			Com_Printf( "frame warp AP: not running (%s), late-latch only\n", why );
+			Com_DPrintf( "frame warp AP: not running (%s), late-latch only\n", why );
 			ap.reported = why;
 		}
 		return;
@@ -4573,7 +4573,7 @@ static void Com_ApUpdate( void ) {
 			ap.missRun = ap.okRun = ap.ivN = ap.busyN = 0;
 			ap.slotRate = ap.sTarget = ap.sMin;
 			ap.printedS = ap.sTarget;
-			Com_Printf( "frame warp AP: GPU cannot hold %.0f real fps, late-latch only for %d s\n", ap.sMin / ap.k, AP_HOLD_US / 1000000 );
+			Com_DPrintf( "frame warp AP: GPU cannot hold %.0f real fps, late-latch only for %d s\n", ap.sMin / ap.k, AP_HOLD_US / 1000000 );
 		} else {
 			double t = com_frameWarpDownAim->value * ap.k * 1000000.0 / p90;
 
@@ -4664,7 +4664,7 @@ static void Com_ApUpdate( void ) {
 	ap.wasRunning = qtrue;
 	ap.deny = NULL;
 	if ( ap.reported != (const char *)&ap ) {
-		Com_Printf( "frame warp AP: running, slot rate %.0f, real frames at slot rate / %d (%.2f)\n", ap.slotRate, ap.k, ap.realFps );
+		Com_DPrintf( "frame warp AP: running, slot rate %.0f, real frames at slot rate / %d (%.2f)\n", ap.slotRate, ap.k, ap.realFps );
 		ap.reported = (const char *)&ap;
 		ap.printedS = ap.sTarget;
 	}

@@ -313,6 +313,10 @@ static void GLSL_GetShaderHeader( GLenum shaderType, const GLchar *extra, char *
 		else
 			Q_strcat(dest, size, "#version 130\n");
 
+		// Extensions must precede output declarations on strict GLSL compilers (Mesa).
+		if (shaderType == GL_FRAGMENT_SHADER)
+			Q_strcat(dest, size, "#if defined(GL_ARB_texture_gather)\n#extension GL_ARB_texture_gather : enable\n#endif\n");
+
 		if(shaderType == GL_VERTEX_SHADER)
 		{
 			Q_strcat(dest, size, "#define attribute in\n");
@@ -342,6 +346,8 @@ static void GLSL_GetShaderHeader( GLenum shaderType, const GLchar *extra, char *
 	else
 	{
 		Q_strcat(dest, size, "#version 120\n");
+		if (shaderType == GL_FRAGMENT_SHADER)
+			Q_strcat(dest, size, "#if defined(GL_ARB_texture_gather)\n#extension GL_ARB_texture_gather : enable\n#endif\n");
 		Q_strcat(dest, size, "#define shadow2D(a,b) shadow2D(a,b).r \n");
 	}
 

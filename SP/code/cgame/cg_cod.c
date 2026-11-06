@@ -1360,7 +1360,6 @@ codmod: client-local view flashlight (phase 5d). RTCW SP has no player lamp.
 void CG_ToggleFlashlight_f( void ) {
 	if ( !( bg_cod.enable && bg_cod.flashlightEnable ) ) {
 		cg.codFlashlightOn = qfalse;
-		CG_Printf( "Flashlight disabled (cod_flashlightEnable 0).\n" );
 		return;
 	}
 	cg.codFlashlightOn = !cg.codFlashlightOn;

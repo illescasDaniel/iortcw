@@ -1,5 +1,4 @@
 #if defined(GL_ARB_texture_gather)
-#extension GL_ARB_texture_gather : enable
 #define USE_GATHER
 #endif
 

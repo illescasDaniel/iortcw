@@ -336,14 +336,16 @@ ifneq ($(BUILD_CLIENT),0)
   endif
 endif
 
-# Add git version info
+# Add git version info unless the codmod release build supplies its own version.
 USE_GIT=
+ifneq ($(COD_RELEASE),1)
 ifeq ($(wildcard ../.git),../.git)
   GIT_REV=$(shell git show -s --pretty=format:%h-%ad --date=short)
   ifneq ($(GIT_REV),)
     VERSION:=$(VERSION)_GIT_$(GIT_REV)
     USE_GIT=1
   endif
+endif
 endif
 
 
@@ -2821,6 +2823,9 @@ $(B)/ded/win_resource.o: $(SYSDIR)/win_resource.rc $(SYSDIR)/win_manifest.xml
 
 $(B)/ded/%.o: $(NDIR)/%.c
 	$(DO_DED_CC)
+
+# Recompile version consumers when release version settings in this Makefile change.
+$(B)/client/cl_console.o $(B)/client/common.o $(B)/client/sys_main.o $(B)/client/cl_curl.o: Makefile $(COD_VERSION_FILE)
 
 # Extra dependencies to ensure the git version is incorporated
 ifeq ($(USE_GIT),1)
