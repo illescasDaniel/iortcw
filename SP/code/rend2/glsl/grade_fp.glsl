@@ -1,6 +1,6 @@
 uniform sampler2D u_DiffuseMap; // scene (tone-mapped)
 uniform sampler2D u_LightMap;   // blurred bloom (half resolution), only read when u_Color.x > 0
-uniform vec4      u_Color;      // x = bloom intensity, y = brightness (gamma lift, 1 = none), z > 0.5 = round to 8 bit (target is not RGBA8), w unused
+uniform vec4      u_Color;      // x = bloom intensity, y = brightness (gamma lift, 1 = none), z > 0.5 = round to 8 bit (target is not RGBA8), w = tan(horizontal FOV / 2), or zero when Panini is off
 uniform vec4      u_ViewInfo;   // x = contrast, y = saturation, z = warm/cool tint (-1..1), w = vignette
 
 varying vec2      var_Tex1;
@@ -10,11 +10,24 @@ const vec3 LUMA = vec3(0.2125, 0.7154, 0.0721);
 // codmod: CoD4 "filmTweak"-style grade + bloom composite in one pass.
 void main()
 {
-	vec3 c = texture2D(u_DiffuseMap, var_Tex1).rgb;
+	vec2 uv = var_Tex1;
+	if (u_Color.w > 0.0)
+	{
+		// Inverse standard Panini (d=1). Fit vertically so no samples fall outside the scene.
+		float t = u_Color.w;
+		float edgeCos = inversesqrt(1.0 + t * t);
+		float edgeP = t * edgeCos / (1.0 + edgeCos);
+		float p = (2.0 * uv.x - 1.0) * edgeP;
+		float x = 2.0 * p / (1.0 - p * p);
+		float cosTheta = inversesqrt(1.0 + x * x);
+		float vertical = ((1.0 + cosTheta) / cosTheta) * (edgeCos / (1.0 + edgeCos));
+		uv = vec2(0.5 + 0.5 * x / t, 0.5 + (uv.y - 0.5) * vertical);
+	}
+	vec3 c = texture2D(u_DiffuseMap, uv).rgb;
 
 	if (u_Color.x > 0.0)
 	{
-		vec3 b = texture2D(u_LightMap, var_Tex1).rgb;
+		vec3 b = texture2D(u_LightMap, uv).rgb;
 		// screen blend keeps the sum inside 0..1 so bright areas glow without clipping to flat white
 		c = c + b * u_Color.x * (1.0 - c);
 	}

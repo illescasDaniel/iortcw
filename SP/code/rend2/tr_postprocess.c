@@ -1259,6 +1259,17 @@ Returns qfalse when nothing was done.
 */
 #define BLOOM_UP_WEIGHT 0.8f
 
+// Full-frame views can be up to two pixels smaller than their FBO after viewport rounding.
+// Leave partial views, portals and model previews alone.
+static qboolean RB_PaniniActive(FBO_t *srcFbo)
+{
+	const viewParms_t *vp = &backEnd.viewParms;
+	return r_panini->integer && srcFbo && vp->fovX >= 70.0f && vp->fovX < 179.0f &&
+		!(backEnd.refdef.rdflags & (RDF_NOWORLDMODEL | RDF_SKYBOXPORTAL)) &&
+		vp->viewportX >= 0 && vp->viewportX <= 2 && vp->viewportY >= 0 && vp->viewportY <= 2 &&
+		abs(vp->viewportWidth - srcFbo->width) <= 2 && abs(vp->viewportHeight - srcFbo->height) <= 2;
+}
+
 static qboolean RB_PostFxState(FBO_t *srcFbo, float *bloomMulOut, qboolean *bloomOut, qboolean *gradeOut)
 {
 	static const float bloomLevel[4] = { 0.0f, 1.0f, 1.6f, 2.4f };
@@ -1269,7 +1280,7 @@ static qboolean RB_PostFxState(FBO_t *srcFbo, float *bloomMulOut, qboolean *bloo
 	*bloomMulOut = bloomMul;
 	*bloomOut = bloom;
 	*gradeOut = grade;
-	return srcFbo && tr.screenScratchFbo && (bloom || grade);
+	return srcFbo && tr.screenScratchFbo && (bloom || grade || RB_PaniniActive(srcFbo));
 }
 
 // the early-out test of RB_PostFx, so RB_PostProcess can route the scene around the grade copy
@@ -1339,7 +1350,7 @@ qboolean RB_PostFx(FBO_t *srcFbo, FBO_t *sceneFbo, ivec4_t srcBox)
 		GL_BindToTMU(tr.bloomImage[0], TB_LIGHTMAP);
 	}
 
-	VectorSet4(color, bloom ? r_bloomIntensity->value * bloomMul / norm : 0.0f, grade ? Com_Clamp(0.5f, 2.5f, r_gradeBrightness->value) : 1.0f, direct ? 1.0f : 0.0f, 1.0f);
+	VectorSet4(color, bloom ? r_bloomIntensity->value * bloomMul / norm : 0.0f, grade ? Com_Clamp(0.5f, 2.5f, r_gradeBrightness->value) : 1.0f, direct ? 1.0f : 0.0f, RB_PaniniActive(srcFbo) ? tan(DEG2RAD(backEnd.viewParms.fovX) * 0.5f) : 0.0f);
 	if (grade)
 	{
 		VectorSet4(viewInfo, r_gradeContrast->value, r_gradeSaturation->value, Com_Clamp(-1.0f, 1.0f, r_gradeTint->value), r_gradeVignette->value);

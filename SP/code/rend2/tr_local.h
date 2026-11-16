@@ -2326,6 +2326,7 @@ extern  cvar_t  *r_bloom;
 extern  cvar_t  *r_bloomIntensity;
 extern  cvar_t  *r_bloomThreshold;
 extern  cvar_t  *r_bloomRadius;
+extern  cvar_t  *r_panini;
 extern  cvar_t  *r_grade;
 extern  cvar_t  *r_gradeContrast;
 extern  cvar_t  *r_gradeBrightness;

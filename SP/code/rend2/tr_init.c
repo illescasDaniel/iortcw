@@ -197,6 +197,7 @@ cvar_t  *r_bloomIntensity;
 cvar_t  *r_bloomThreshold;
 cvar_t  *r_bloomRadius;
 cvar_t  *r_grade;
+cvar_t  *r_panini;
 cvar_t  *r_gradeContrast;
 cvar_t  *r_gradeBrightness;
 cvar_t  *r_gradeSaturation;
@@ -1711,6 +1712,7 @@ void R_Register( void ) {
 	r_bloomIntensity = ri.Cvar_Get( "r_bloomIntensity", "2.5", 0 );
 	r_bloomThreshold = ri.Cvar_Get( "r_bloomThreshold", "0.6", 0 ); // brightness (0..1, after tone mapping) where glow starts
 	r_bloomRadius = ri.Cvar_Get( "r_bloomRadius", "1.0", 0 );     // blur width multiplier
+	r_panini = ri.Cvar_Get( "r_panini", "0", CVAR_ARCHIVE );
 	r_grade = ri.Cvar_Get( "r_grade", "0", CVAR_ARCHIVE );                   // 0 off (default, stock look), 1 on (the mod sets 1)
 	r_gradeBrightness = ri.Cvar_Get( "r_gradeBrightness", "1.25", 0 );  // gamma lift, 1 = unchanged
 	r_gradeContrast = ri.Cvar_Get( "r_gradeContrast", "1.06", 0 );

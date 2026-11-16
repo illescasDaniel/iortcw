@@ -231,5 +231,14 @@
 =ui/options.menu 97 104
 =ui/credit.menu 414 417
 =ui/ingame_system.menu 53 54
++		name effects
+=ui/ingame_system.menu 94 96
++		text "Panini Correction:"
++		cvar "r_panini"
++		cvarFloatList { "Off" 0 "On" 1 }
++		rect 82 300 290 12
+=ui/options.menu 97 104
+=ui/credit.menu 414 418
+=ui/ingame_system.menu 53 54
 @@ 593 594
 +		rect 181 170 100 20

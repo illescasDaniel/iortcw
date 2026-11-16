@@ -230,4 +230,13 @@
 +		cvarFloatList { "Off" 0 "Low" 1 "Medium" 2 "High" 3 }
 +		rect 82 280 290 12
 =ui/options.menu 97 104
+=ui/credit.menu 414 417
+=ui/system.menu 93 94
++		name effects
+=ui/system.menu 283 285
++		text "Panini Correction:"
++		cvar "r_panini"
++		cvarFloatList { "Off" 0 "On" 1 }
++		rect 82 300 290 12
+=ui/options.menu 97 104
 =ui/quitcredit.menu 405 409
