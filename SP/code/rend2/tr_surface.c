@@ -903,7 +903,12 @@ static void RB_SurfaceMesh(mdvSurface_t *surface) {
 
 	RB_CHECKOVERFLOW( surface->numVerts, surface->numIndexes );
 
-	LerpMeshVertexes( surface, backlerp );
+	{
+		unsigned long long profT0 = R_ProfNow();
+		LerpMeshVertexes( surface, backlerp );
+		R_ProfCpuEnd( PROF_MDV_LERP + !!backEnd.depthFill, profT0 );
+		R_ProfCount( PCNT_MDV_LERP_VERTS + !!backEnd.depthFill, surface->numVerts );
+	}
 
 	Bob = tess.numIndexes;
 	Doug = tess.numVertexes;

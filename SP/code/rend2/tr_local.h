@@ -1510,6 +1510,7 @@ typedef struct model_s {
 #define	MAX_MOD_KNOWN	2048
 
 void		R_ModelInit (void);
+void		R_MdsAnimCachesReset( void );
 model_t		*R_GetModelByHandle( qhandle_t hModel );
 int			R_LerpTag( orientation_t *tag, const refEntity_t *refent, const char *tagName, int startIndex );
 void		R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs );
@@ -2218,6 +2219,8 @@ extern	cvar_t	*r_gradeNoCopy;
 extern	cvar_t	*r_depthAttribTrim;
 extern	cvar_t	*r_mdsSkinCache;
 extern	cvar_t	*r_mdsShadowLod;
+extern	cvar_t	*r_sunShadowNearReuse;
+extern	cvar_t	*r_mdsIndexCache;
 extern	cvar_t	*r_gpuProfile;
 extern	cvar_t	*r_gpuLoad;
 extern	cvar_t	*r_smaaStencil;
@@ -2350,6 +2353,8 @@ extern  cvar_t  *r_parallaxMapShadows;
 extern  cvar_t  *r_parallaxMinDepth;
 extern  cvar_t  *r_parallaxMaxSteps;
 extern  cvar_t  *r_parallaxOpt;
+extern  cvar_t  *r_parallaxRefinePar;
+extern  cvar_t  *r_parallaxNearHit;
 extern  cvar_t  *r_parallaxStepDensity;
 extern  cvar_t  *r_parallaxMarchLod;
 extern  cvar_t  *r_parallaxShadowFade;
@@ -2362,6 +2367,7 @@ extern  cvar_t  *r_deluxeSpecular;
 extern  cvar_t  *r_codSpecular;
 extern  cvar_t  *r_codShaderCollapse;
 extern  cvar_t  *r_specularAA;
+extern  cvar_t  *r_specularSkip;
 extern  cvar_t  *r_codSpecDirectional;
 extern  cvar_t  *r_cubemapSpecOnly;
 extern  cvar_t  *r_cubemapMergeDist;
@@ -2834,6 +2840,7 @@ void RB_GpuDeepEnd( int idx, unsigned long long t0 );
 #define PROF_MDS_PREVPOS	20
 #define PROF_BE_UPDATEVAO	21
 #define PROF_BE_DRAWELEMENTS	22
+#define PROF_MDV_LERP		23
 // R_ProfCount ids; add 1 for a depth-fill pass (order must match cntNames in tr_gpuprof.c)
 #define PCNT_MDS_SURFS		0
 #define PCNT_MDS_VERTS		2
@@ -2845,6 +2852,10 @@ void RB_GpuDeepEnd( int idx, unsigned long long t0 );
 #define PCNT_SKC_MISSES		32	// new entry
 #define PCNT_SKC_OVERFLOWS	33	// arena or entry table full, uncached path
 #define PCNT_SKC_MISMATCH	34	// verify mode (r_mdsSkinCache 2): cached data differs from the recomputed
+#define PCNT_UPLOAD_BYTES	35
+#define PCNT_UPLOAD_VERTS	37
+#define PCNT_MDV_LERP_VERTS	39
+#define PCNT_VAOCACHE_BYTES	41
 void R_ProfCount( int id, int n );
 // MDS LOD decision reasons for R_ProfMdsLod (order must match mdsLodReasonNames in tr_gpuprof.c)
 #define MDSLOD_PROJ_NONPOS		0	// RB_ProjectRadius returned 0 (behind the view origin plane), full LOD fallback

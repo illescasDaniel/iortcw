@@ -85,6 +85,8 @@ typedef enum {
 	CPU_MDS_PREVPOS_D,		// SMAA velocity previous positions (depth pass only)
 	CPU_BE_UPDATEVAO,		// RB_UpdateTessVao: dynamic vertex upload
 	CPU_BE_DRAWELEMENTS,	// R_DrawElements: submit incl. driver time
+	CPU_MDV_LERP,
+	CPU_MDV_LERP_D,
 	CPU_ASM_FIRST,			// surface assembly (rb_surfaceTable call) by kind x color/depth: CPU_ASM_FIRST + kind * 2 + depth
 	CPU_NUM = CPU_ASM_FIRST + 12
 } cpuScope_t;
@@ -97,6 +99,7 @@ static const char *const cpuScopeNames[CPU_NUM] = {
 	"be_RB_RenderDrawSurfList", "be_RB_EndSurface_stage_iterator", "be_RB_PostProcess", "be_GLimp_EndFrame",
 	"mds_bones_color", "mds_bones_depth", "mds_lod_index_color", "mds_lod_index_depth", "mds_skin_color", "mds_skin_depth",
 	"mds_tangent_color", "mds_tangent_depth", "mds_prevpos_depth", "be_RB_UpdateTessVao", "be_R_DrawElements",
+	"mdv_lerp_color", "mdv_lerp_depth",
 	"assemble_world_color", "assemble_world_depth", "assemble_ent_mdv_color", "assemble_ent_mdv_depth",
 	"assemble_ent_mds_color", "assemble_ent_mds_depth", "assemble_ent_mdc_color", "assemble_ent_mdc_depth",
 	"assemble_ent_brush_color", "assemble_ent_brush_depth", "assemble_ent_other_color", "assemble_ent_other_depth"
@@ -108,7 +111,7 @@ static const char *const cpuScopeNames[CPU_NUM] = {
 #define MDSLOD_REASONS 5
 #define MDSLOD_FRAME_VIEWS 4
 #define CNT_SKC_BASE ( CNT_MDSLOD_BASE + MDSLOD_FRAME_VIEWS * MDSLOD_REASONS )	// 5 MDS skin cache counters (PCNT_SKC_*)
-#define CNT_NUM ( CNT_SKC_BASE + 5 )
+#define CNT_NUM ( CNT_SKC_BASE + 13 )
 static const char *const cntNames[CNT_NUM] = {
 	"mds_surfaces_color", "mds_surfaces_depth", "mds_verts_emitted_color", "mds_verts_emitted_depth",
 	"mds_tris_emitted_color", "mds_tris_emitted_depth", "mds_tangent_verts_color", "mds_tangent_verts_depth",
@@ -117,7 +120,9 @@ static const char *const cntNames[CNT_NUM] = {
 	"mdslod_casc1_proj_nonpos", "mdslod_casc1_flag_full", "mdslod_casc1_proj_clamped", "mdslod_casc1_computed_full", "mdslod_casc1_computed_reduced",
 	"mdslod_casc2_proj_nonpos", "mdslod_casc2_flag_full", "mdslod_casc2_proj_clamped", "mdslod_casc2_computed_full", "mdslod_casc2_computed_reduced",
 	"mdslod_prepass_proj_nonpos", "mdslod_prepass_flag_full", "mdslod_prepass_proj_clamped", "mdslod_prepass_computed_full", "mdslod_prepass_computed_reduced",
-	"skc_hits", "skc_extends", "skc_misses", "skc_overflows", "skc_verify_mismatches"
+	"skc_hits", "skc_extends", "skc_misses", "skc_overflows", "skc_verify_mismatches",
+	"upload_bytes_color", "upload_bytes_depth", "upload_verts_color", "upload_verts_depth",
+	"mdv_lerp_verts_color", "mdv_lerp_verts_depth", "vaocache_upload_bytes_color", "vaocache_upload_bytes_depth"
 };
 
 // MDS LOD diagnostics (mds_lod_summary.csv / mds_lod.csv). Views: sun cascades 0-3, other shadow views (flash/point),
@@ -1248,7 +1253,8 @@ void R_GpuProfDump( void ) {
 			"r_ssao", "r_ssaoMode", "r_ssaoSamples", "r_ssaoSlices", "r_ssaoSteps", "r_ssaoDepthMips", "r_lodscale", "r_lodbias",
 			"r_picmip", "r_textureMode", "r_ext_max_anisotropy", "r_mode", "r_customwidth", "r_customheight", "r_fullscreen",
 			"r_swapInterval", "r_vsync", "r_finish", "r_swapFinish", "r_flares", "r_dynamiclight", "r_mergeLightmaps",
-			"r_vaoCacheStats", "r_mdsSkinCache", "r_mdsDepthTangents", "r_depthAttribTrim", "r_gpuProfile", "r_gpuLoad", "com_maxfps", "com_maxfpsMode", "com_maxfpsGpuSync", "cl_benchDemo",
+			"r_vaoCacheStats", "r_mdsSkinCache", "r_mdsDepthTangents", "r_mdsShadowLod", "r_parallaxRefinePar", "r_parallaxNearHit", "r_specularSkip", "r_sunShadowNearReuse", "r_mdsIndexCache", "r_depthAttribTrim", "r_parallaxOpt", "r_codSpecular", "r_ssaoStrength", "r_ssaoAmbient", "r_gradeNoCopy", "r_smaaT2xPingPong", "r_sunRaysOpt", "r_gpuProfile", "r_gpuLoad", "com_maxfps", "com_maxfpsMode", "com_maxfpsGpuSync", "cl_benchDemo",
+			"r_ssaoRadius", "r_parallaxMapOffset", "r_parallaxMinDepth", "r_parallaxMarchLod", "r_parallaxFloorScale", "r_parallaxCavity", "r_specularAA", "r_codSpecDirectional", "r_deluxeSpecular",
 			"cg_shadows", "cg_skybox"
 		};
 		int k;

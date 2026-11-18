@@ -220,6 +220,8 @@ cvar_t  *r_parallaxMapShadows;
 cvar_t  *r_parallaxMinDepth;
 cvar_t  *r_parallaxMaxSteps;
 cvar_t  *r_parallaxOpt;
+cvar_t  *r_parallaxRefinePar;
+cvar_t  *r_parallaxNearHit;
 cvar_t  *r_parallaxStepDensity;
 cvar_t  *r_parallaxMarchLod;
 cvar_t  *r_parallaxShadowFade;
@@ -232,6 +234,7 @@ cvar_t  *r_deluxeSpecular;
 cvar_t  *r_codSpecular;
 cvar_t  *r_codShaderCollapse;
 cvar_t  *r_specularAA;
+cvar_t  *r_specularSkip;
 cvar_t  *r_codSpecDirectional;
 cvar_t  *r_cubemapSpecOnly;
 cvar_t  *r_cubemapMergeDist;
@@ -310,6 +313,8 @@ cvar_t  *r_gradeNoCopy;
 cvar_t  *r_depthAttribTrim;
 cvar_t  *r_mdsSkinCache;
 cvar_t  *r_mdsShadowLod;
+cvar_t  *r_sunShadowNearReuse;
+cvar_t  *r_mdsIndexCache;
 cvar_t  *r_gpuProfile;
 cvar_t  *r_gpuLoad;
 cvar_t  *r_smaaStencil;
@@ -1747,6 +1752,13 @@ void R_Register( void ) {
 	// self-shadow march when N.L <= 0 or lightColor is 0, 4 = same for the sun march, 8 = stop the shadow march once
 	// fully shadowed, 16 = shadow march returns 1 when the start depth is 0. Latched (shader defines).
 	r_parallaxOpt = ri.Cvar_Get( "r_parallaxOpt", "1", CVAR_LATCH );
+	// codmod perf A/B (2026-11-18), all latched shader defines, 0 = today's shader text:
+	// r_parallaxRefinePar N (1-3): N rounds of 3 parallel fetches
+	// (bracket / 4 per round) replace the serial bisection (1 = 2 bisections' precision, 2 = 4 bisections');
+	// r_parallaxNearHit T: skip the march when the entry depth shifts the lookup by less than T march-LOD texels
+	// (uses the entry depth as the hit; not exact, T 0.5-1 keeps the error sub-texel)
+	r_parallaxRefinePar = ri.Cvar_Get( "r_parallaxRefinePar", "0", CVAR_LATCH );
+	r_parallaxNearHit = ri.Cvar_Get( "r_parallaxNearHit", "0", CVAR_LATCH );
 	r_parallaxMaxSteps = ri.Cvar_Get( "r_parallaxMaxSteps", "48", 0 );
 	r_parallaxStepDensity = ri.Cvar_Get( "r_parallaxStepDensity", "1", 0 );
 	r_parallaxMarchLod = ri.Cvar_Get( "r_parallaxMarchLod", "0", 0 );
@@ -1762,6 +1774,9 @@ void R_Register( void ) {
 	r_codShaderCollapse = ri.Cvar_Get( "r_codShaderCollapse", "0", CVAR_LATCH );
 	// codmod: geometric specular AA strength (widens roughness where the normal varies fast across a pixel); 0 = vanilla, live
 	r_specularAA = ri.Cvar_Get( "r_specularAA", "0", 0 );
+	// codmod perf A/B (2026-11-18): 1 = lightall skips specular/BRDF ALU whose result is multiplied by 0 (sun term in
+	// sun shadow or facing away, baked/dlight term with attenuation * N.L == 0); latched shader define, 0 = today's shader
+	r_specularSkip = ri.Cvar_Get( "r_specularSkip", "0", CVAR_LATCH );
 	// codmod: baked/grid specular weighted by light directionality (read at map load); 0 = old behaviour
 	r_codSpecDirectional = ri.Cvar_Get( "r_codSpecDirectional", "1", 0 );
 	r_cubemapSpecOnly = ri.Cvar_Get( "r_cubemapSpecOnly", "1", 0 );
@@ -1865,6 +1880,8 @@ void R_Register( void ) {
 	r_depthAttribTrim = ri.Cvar_Get( "r_depthAttribTrim", "1", 0 );
 	r_mdsSkinCache = ri.Cvar_Get( "r_mdsSkinCache", "1", 0 );
 	r_mdsShadowLod = ri.Cvar_Get( "r_mdsShadowLod", "1", 0 );
+	r_sunShadowNearReuse = ri.Cvar_Get( "r_sunShadowNearReuse", "0", 0 );
+	r_mdsIndexCache = ri.Cvar_Get( "r_mdsIndexCache", "0", 0 );
 	r_gpuProfile = ri.Cvar_Get( "r_gpuProfile", "0", 0 );
 	r_gpuLoad = ri.Cvar_Get( "r_gpuLoad", "0", 0 );	// dev only: synthetic GPU work per real frame in microseconds (tr_gpuprof.c), 0 = off
 	r_smaaStencil = ri.Cvar_Get( "r_smaaStencil", "1", 0 );

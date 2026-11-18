@@ -158,6 +158,13 @@ float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF, float span)
 	if (prevS <= 1.0 / 255.0)
 		return 0.0;
 
+  #if defined(POM_NEARHIT) && __VERSION__ >= 130
+	// r_parallaxNearHit: reaching the entry depth moves the lookup by less than POM_NEARHIT march-LOD texels, so
+	// the height field is ~constant along that stretch and the hit is the entry depth (one fetch, no march)
+	if (prevS * length(ds * pomTexSize) * exp2(-pomStepLod) < POM_NEARHIT)
+		return min(prevS, span);
+  #endif
+
 	// the search only spans [0, span] of the depth range (span = the texture's own max depth); d keeps its units
 	int numSteps = int(stepsF);
 	float size = span / float(numSteps);
@@ -194,6 +201,44 @@ float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF, float span)
 	float loS = prevS;
 	float hiS = hitS;
 
+  #if defined(POM_REFINE_PAR)
+	// r_parallaxRefinePar: POM_REFINE_PAR rounds of 3 independent fetches at the bracket quarters; keep the first
+	// quarter that crosses (bracket / 4 per round, so 1 round = 2 bisections, 2 rounds = 4 bisections)
+	for (int i = 0; i < POM_REFINE_PAR; ++i)
+	{
+		float q = 0.25 * (hi - lo);
+		float m1 = lo + q;
+		float m2 = lo + 2.0 * q;
+		float m3 = lo + 3.0 * q;
+		float s1 = SampleDepthMarch(uv0 + ds * m1);
+		float s2 = SampleDepthMarch(uv0 + ds * m2);
+		float s3 = SampleDepthMarch(uv0 + ds * m3);
+		if (m1 >= s1)
+		{
+			hi = m1;
+			hiS = s1;
+		}
+		else if (m2 >= s2)
+		{
+			lo = m1;
+			loS = s1;
+			hi = m2;
+			hiS = s2;
+		}
+		else if (m3 >= s3)
+		{
+			lo = m2;
+			loS = s2;
+			hi = m3;
+			hiS = s3;
+		}
+		else
+		{
+			lo = m3;
+			loS = s3;
+		}
+	}
+  #else
 	for (int i = 0; i < refineSteps; ++i)
 	{
 		float mid = 0.5 * (lo + hi);
@@ -209,6 +254,7 @@ float ParallaxMarch(vec2 uv0, vec2 ds, float stepsF, float span)
 			loS = midS;
 		}
 	}
+  #endif
 
 	// secant on the narrowed bracket
 	float a = lo - loS;
@@ -661,6 +707,29 @@ void main()
 		specRoughness = sqrt(sqrt(alpha2));
 	}
 
+  #if defined(SPEC_SKIP)
+	// r_specularSkip: reflectance is only used multiplied by attenuation * NL below, so skip the BRDF (and the
+	// dlight albedo-lift pow) where that is 0; ALU only, no fetches or derivatives in here
+	reflectance = vec3(0.0);
+	if (attenuation * NL > 0.0)
+	{
+    #if defined(USE_LIGHT_VECTOR)
+		if (u_AoParams.z > 0.0)
+			reflectance  = CalcDiffuse(pow(max(diffuse.rgb, vec3(0.001)), vec3(u_AoParams.z)), NH, EH, roughness);
+		else
+    #endif
+		reflectance  = CalcDiffuse(diffuse.rgb, NH, EH, roughness);
+
+    #if defined(r_deluxeSpecular)
+      #if defined(USE_LIGHT_VECTOR)
+		reflectance += CalcSpecular(specular.rgb, NH, EH, specRoughness) * r_deluxeSpecular;
+      #else
+		if (lightDirectional > 0.0)
+			reflectance += CalcSpecular(specular.rgb, NH, EH, pow(specRoughness, r_deluxeSpecular)) * lightDirectional;
+      #endif
+    #endif
+	}
+  #else
   #if defined(USE_LIGHT_VECTOR)
 	// codmod: near-black albedo barely reflects the flashlight; lift it for dynamic light only
 	if (u_AoParams.z > 0.0)
@@ -676,6 +745,7 @@ void main()
 	// codmod: only where a real directional light exists, never from the N~L~E degenerate case
 	reflectance += CalcSpecular(specular.rgb, NH, EH, pow(specRoughness, r_deluxeSpecular)) * lightDirectional;
     #endif
+  #endif
   #endif
 
 	gl_FragColor.rgb  = lightColor   * reflectance * (attenuation * NL);
@@ -727,6 +797,11 @@ void main()
 	//L2 /= sqrt(sqrLightDist);
 
 	NL2 = clamp(dot(N, L2), 0.0, 1.0);
+    #if defined(SPEC_SKIP) && defined(USE_SHADOWMAP)
+	// r_specularSkip: lightColor below carries shadowValue, so the sun adds nothing when shadowed or behind
+	if (shadowValue * NL2 > 0.0)
+	{
+    #endif
 	H2 = normalize(L2 + E);
 	EH2 = clamp(dot(E, H2), 0.0, 1.0);
 	NH2 = clamp(dot(N, H2), 0.0, 1.0);
@@ -762,6 +837,9 @@ void main()
   #endif
 
 	gl_FragColor.rgb += lightColor * reflectance * NL2;
+    #if defined(SPEC_SKIP) && defined(USE_SHADOWMAP)
+	}
+    #endif
   #endif
 
   #if defined(USE_PBR)

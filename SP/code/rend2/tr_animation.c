@@ -258,6 +258,65 @@ static float RB_ProjectRadiusMainCam( float r, vec3_t location ) {
 
 
 /*
+=================
+RB_MdsShadowLodCap
+
+r_mdsShadowLod 2: shadow-resolution ceiling for the sun cascades 0-2. Returns the largest LOD fraction worth drawing
+(projected radius in shadow texels / 128, clamped to 0..1), or -1 when the cap does not apply (not a sun cascade FBO,
+invalid projection or dimensions) so the caller keeps the mode 1 result.
+=================
+*/
+#define MDS_SHADOW_FULL_TEXELS 128.0f
+static float RB_MdsShadowLodCap( const refEntity_t *refent, float radius ) {
+	const FBO_t *fbo = backEnd.viewParms.targetFbo;
+	float sx, sy, scale, axisLen, texels, f;
+	int i;
+
+	if ( !fbo ) {
+		return -1.0f;
+	}
+	for ( i = 0; i < 3; i++ ) {
+		if ( fbo == tr.sunShadowFbo[i] ) {
+			break;
+		}
+	}
+	if ( i == 3 ) {
+		return -1.0f;
+	}
+	if ( backEnd.viewParms.viewportWidth <= 0 || backEnd.viewParms.viewportHeight <= 0 ) {
+		return -1.0f;
+	}
+
+	sx = fabsf( backEnd.viewParms.projectionMatrix[0] ) * (float)backEnd.viewParms.viewportWidth;
+	sy = fabsf( backEnd.viewParms.projectionMatrix[5] ) * (float)backEnd.viewParms.viewportHeight;
+	scale = sx > sy ? sx : sy;
+	if ( !( scale > 0.0f ) || !( scale < 1e30f ) ) {	// also rejects NaN
+		return -1.0f;
+	}
+
+	// non-normalized entity axes scale the model radius, use the largest axis (conservative: never under-estimates)
+	scale *= 0.5f;
+	axisLen = 0.0f;
+	for ( i = 0; i < 3; i++ ) {
+		float l = DotProduct( refent->axis[i], refent->axis[i] );
+		if ( l > axisLen ) {
+			axisLen = l;
+		}
+	}
+	axisLen = sqrtf( axisLen );
+	if ( !( axisLen > 0.0f ) || !( axisLen < 1e30f ) ) {
+		return -1.0f;
+	}
+
+	texels = fabsf( radius ) * axisLen * scale;
+	f = texels / MDS_SHADOW_FULL_TEXELS;
+	if ( !( f >= 0.0f ) ) {
+		return -1.0f;
+	}
+	return f > 1.0f ? 1.0f : f;
+}
+
+/*
 codmod: per-frame MDS skin cache (r_mdsSkinCache). The skinned position, packed normal and texcoord of a surface depend only on
 the entity (bones) and the surface, not on the view or the LOD (MDS LOD is progressive: vertex j is independent of
 render_count), so the colour pass, depth prepass and sun cascades can share them. Entries hold the vertices for the largest
@@ -338,6 +397,74 @@ static mdsSkcEntry_t *R_MdsSkinCacheFind( const trRefEntity_t *ent, const mdsSur
 }
 
 /*
+codmod: MDS reduced-detail index cache (r_mdsIndexCache). Before the batch's base vertex is added, the triangle list of a
+reduced-detail draw depends only on the (immutable) surface and the integer render_count. Results are kept as local
+indices in a linear arena, with a bounded direct-mapped table in front. Cleared together on arena wrap, on a mode change,
+and when the renderer was re-registered (tr is zeroed by R_Init, detected lazily through frameCount / world / numModels).
+*/
+#define MDS_IDX_ENTRIES		1024		// power of two
+#define MDS_IDX_ARENA		( ( 1024 * 1024 ) / sizeof( glIndex_t ) )
+
+typedef struct {
+	const mdsSurface_t *surface;	// NULL = empty
+	int renderCount;
+	int numVerts, numTriangles;		// sanity check against a surface reallocated at the same address
+	int count;						// indices
+	int offset;						// into mdsIdxArena
+} mdsIdxEntry_t;
+
+static mdsIdxEntry_t mdsIdxEntries[MDS_IDX_ENTRIES];
+static glIndex_t mdsIdxArena[MDS_IDX_ARENA];
+static int mdsIdxUsed;
+static int mdsIdxModCount = -1;
+
+static void R_MdsIndexCacheClear( void ) {
+	memset( mdsIdxEntries, 0, sizeof( mdsIdxEntries ) );
+	mdsIdxUsed = 0;
+}
+
+/* called from R_ModelInit: every RE_BeginRegistration clears the hunk, so surface pointers can be reused by other models */
+void R_MdsAnimCachesReset( void ) {
+	R_MdsIndexCacheClear();
+	mdsSkcFrame = -1;
+	memset( mdsSkcHash, 0, sizeof( mdsSkcHash ) );
+}
+
+/*
+Emits the triangles of a reduced-detail draw (render_count < numVerts): collapse table rebuilt, source order kept,
+degenerates dropped, `base` added to every index. Returns the number of indices written. Uses the static collapse table.
+*/
+static int R_MdsEmitReduced( const mdsSurface_t *surf, int count, glIndex_t *out, int base ) {
+	const int *collapseMap = ( const int * )( ( const byte * )surf + surf->ofsCollapseMap );
+	const int *tri = ( const int * )( ( const byte * )surf + surf->ofsTriangles );
+	int *pc = collapse, *collapseEnd, c0, c1, c2, n = 0, t;
+	const int *pMap;
+
+	for ( t = 0; t < count; pc++, t++ ) {
+		*pc = t;
+	}
+	pMap = &collapseMap[count];
+	for ( collapseEnd = collapse + surf->numVerts; pc < collapseEnd; pc++, pMap++ ) {
+		*pc = collapse[*pMap];
+	}
+
+	for ( t = 0; t < surf->numTriangles * 3; t += 3 ) {
+		c0 = collapse[*( tri++ )];
+		c1 = collapse[*( tri++ )];
+		c2 = collapse[*( tri++ )];
+
+		// FIXME: sorting the triangles would turn this "continue" into a "break"
+		if ( c0 == c1 || c1 == c2 || c2 == c0 ) {
+			continue;
+		}
+		out[n++] = base + c0;
+		out[n++] = base + c1;
+		out[n++] = base + c2;
+	}
+	return n;
+}
+
+/*
 =================
 RB_CalcMDSLod
 
@@ -398,6 +525,15 @@ float RB_CalcMDSLod( refEntity_t *refent, vec3_t origin, float radius, float mod
 		flod = 0.0;
 	} else if ( flod > 1.0f ) {
 		flod = 1.0f;
+	}
+
+	// r_mdsShadowLod 2: sun cascades never need more detail than their texel density can show
+	if ( r_mdsShadowLod->integer == 2 && ( backEnd.viewParms.flags & VPF_ORTHOGRAPHIC ) && backEnd.refdef.mainCamValid ) {
+		float cap = RB_MdsShadowLodCap( refent, radius );
+
+		if ( cap >= 0.0f && cap < flod ) {
+			flod = cap;
+		}
 	}
 
 	return flod;
@@ -1273,38 +1409,49 @@ void RB_SurfaceAnim( mdsSurface_t *surface ) {
 		tess.numIndexes += indexes;
 	} else
 	{
-		int *collapseEnd;
+		const mdsIdxEntry_t *ie = NULL;
+		int n;
 
-		pCollapse = collapse;
-		for ( j = 0; j < render_count; pCollapse++, j++ )
-		{
-			*pCollapse = j;
-		}
+		if ( r_mdsIndexCache->integer ) {
+			mdsIdxEntry_t *slot;
+			unsigned int h;
 
-		pCollapseMap = &collapse_map[render_count];
-		for ( collapseEnd = collapse + surface->numVerts ; pCollapse < collapseEnd; pCollapse++, pCollapseMap++ )
-		{
-			*pCollapse = collapse[ *pCollapseMap ];
-		}
-
-		for ( j = 0 ; j < indexes ; j += 3 )
-		{
-			p0 = collapse[ *( triangles++ ) ];
-			p1 = collapse[ *( triangles++ ) ];
-			p2 = collapse[ *( triangles++ ) ];
-
-			// FIXME
-			// note:  serious optimization opportunity here,
-			//  by sorting the triangles the following "continue"
-			//  could have been made into a "break" statement.
-			if ( p0 == p1 || p1 == p2 || p2 == p0 ) {
-				continue;
+			// clear on mode change (re-registration is handled by R_MdsAnimCachesReset, called from R_ModelInit)
+			if ( mdsIdxModCount != r_mdsIndexCache->modificationCount ) {
+				R_MdsIndexCacheClear();
+				mdsIdxModCount = r_mdsIndexCache->modificationCount;
 			}
 
-			*( pIndexes++ ) = baseVertex + p0;
-			*( pIndexes++ ) = baseVertex + p1;
-			*( pIndexes++ ) = baseVertex + p2;
-			tess.numIndexes += 3;
+			h = ( ( (unsigned int)( (size_t)surface >> 4 ) * 2654435761u ) ^ ( (unsigned int)render_count * 40503u ) ) & ( MDS_IDX_ENTRIES - 1 );
+			slot = &mdsIdxEntries[h];
+			if ( slot->surface == surface && slot->renderCount == render_count &&
+				 slot->numVerts == surface->numVerts && slot->numTriangles == surface->numTriangles ) {
+				ie = slot;
+			} else if ( (size_t)indexes <= MDS_IDX_ARENA ) {	// worst case fits; larger surfaces bypass the cache
+				if ( mdsIdxUsed + (size_t)indexes > MDS_IDX_ARENA ) {
+					R_MdsIndexCacheClear();	// arena wrap: table and arena go together
+				}
+				n = R_MdsEmitReduced( surface, render_count, &mdsIdxArena[mdsIdxUsed], 0 );
+				slot->surface = surface;
+				slot->renderCount = render_count;
+				slot->numVerts = surface->numVerts;
+				slot->numTriangles = surface->numTriangles;
+				slot->count = n;
+				slot->offset = mdsIdxUsed;
+				mdsIdxUsed += n;
+				ie = slot;
+			}
+		}
+
+		if ( ie ) {
+			const glIndex_t *src = &mdsIdxArena[ie->offset];
+
+			for ( j = 0; j < ie->count; j++ ) {
+				pIndexes[j] = src[j] + baseVertex;
+			}
+			tess.numIndexes += ie->count;
+		} else {
+			tess.numIndexes += R_MdsEmitReduced( surface, render_count, pIndexes, baseVertex );
 		}
 
 		baseIndex = tess.numIndexes;

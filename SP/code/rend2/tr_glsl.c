@@ -1300,6 +1300,12 @@ void GLSL_InitGPUShaders(void)
 							Q_strcat(extradefines, 1024, "#define POM_OPT_ZERODEPTH\n");
 					}
 
+					// codmod perf A/B (2026-11-18): each define only when its cvar is set, so 0 = today's shader text
+					if (r_parallaxRefinePar->integer > 0)
+						Q_strcat(extradefines, 1024, va("#define POM_REFINE_PAR %d\n", MIN(r_parallaxRefinePar->integer, 3)));
+					if (r_parallaxNearHit->value > 0.0f)
+						Q_strcat(extradefines, 1024, va("#define POM_NEARHIT %f\n", MIN(r_parallaxNearHit->value, 4.0f)));
+
 					Q_strcat(extradefines, 1024, va("#define r_parallaxMapOffset %f\n", r_parallaxMapOffset->value));
 				}
 			}
@@ -1319,6 +1325,10 @@ void GLSL_InitGPUShaders(void)
 			{
 				Q_strcat(extradefines, 1024, va("#define r_deluxeSpecular %f\n", r_deluxeSpecular->value));
 			}
+
+			// codmod perf A/B (2026-11-18): skip specular ALU that is multiplied by 0 (lit, non-fast variants only)
+			if (r_specularSkip->integer && !fastLight)
+				Q_strcat(extradefines, 1024, "#define SPEC_SKIP\n");
 
 			switch (r_glossType->integer)
 			{

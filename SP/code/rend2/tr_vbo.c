@@ -631,6 +631,7 @@ static void RB_UpdateTessVaoInner(unsigned int attribBits)
 			attribBits = ATTR_BITS;
 
 		attribUpload = attribBits;
+		R_ProfCount(PCNT_UPLOAD_VERTS + !!backEnd.depthFill, tess.numVertexes);
 
 		for (attribIndex = 0; attribIndex < ATTR_INDEX_COUNT; attribIndex++)
 		{
@@ -639,6 +640,7 @@ static void RB_UpdateTessVaoInner(unsigned int attribBits)
 
 			if (attribUpload & attribBit)
 			{
+				R_ProfCount(PCNT_UPLOAD_BYTES + !!backEnd.depthFill, tess.numVertexes * vAtb->stride);
 				// note: tess has a VBO where stride == size
 				qglBufferSubData(GL_ARRAY_BUFFER, vAtb->offset, tess.numVertexes * vAtb->stride, tess.attribPointers[attribIndex]);
 			}
@@ -668,6 +670,7 @@ static void RB_UpdateTessVaoInner(unsigned int attribBits)
 		qglBufferData(GL_ELEMENT_ARRAY_BUFFER, tess.vao->indexesSize, NULL, GL_DYNAMIC_DRAW);
 
 		qglBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, tess.numIndexes * sizeof(tess.indexes[0]), tess.indexes);
+		R_ProfCount(PCNT_UPLOAD_BYTES + !!backEnd.depthFill, tess.numIndexes * sizeof(tess.indexes[0]));
 	}
 }
 
@@ -863,6 +866,7 @@ void VaoCache_Commit(void)
 
 	if (vcq.vertexCommitSize)
 	{
+		R_ProfCount(PCNT_VAOCACHE_BYTES + !!backEnd.depthFill, vcq.vertexCommitSize);
 		qglBindBuffer(GL_ARRAY_BUFFER, vc.vao->vertexesVBO);
 		qglBufferSubData(GL_ARRAY_BUFFER, vc.vertexOffset, vcq.vertexCommitSize, vcq.vertexes);
 		vc.vertexOffset += vcq.vertexCommitSize;
@@ -870,6 +874,7 @@ void VaoCache_Commit(void)
 
 	if (vcq.indexCommitSize)
 	{
+		R_ProfCount(PCNT_VAOCACHE_BYTES + !!backEnd.depthFill, vcq.indexCommitSize);
 		qglBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vc.vao->indexesIBO);
 		qglBufferSubData(GL_ELEMENT_ARRAY_BUFFER, vc.indexOffset, vcq.indexCommitSize, vcq.indexes);
 		vc.indexOffset += vcq.indexCommitSize;

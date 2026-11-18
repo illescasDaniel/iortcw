@@ -2646,7 +2646,12 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 	// a cascade size that does not change when the camera turns, and texel snapping.
 	qboolean stableCascade = (level != 3 && (r_sunShadowStable->integer & 1));
 	// codmod: far cascades may skip frames (see r_sunShadowCascadeUpdate)
-	int cascadeEvery = (stableCascade && level >= 1 && level <= 2) ? r_sunShadowCascadeUpdate->integer : 0;
+	// codmod: r_sunShadowNearReuse: the near cascade (level 0) of the primary scene may reuse its previous frame's
+	// map on alternate frames. A sky portal scene always renders level 0 normally (and invalidates the cache).
+	qboolean nearReuse = (stableCascade && level == 0 && r_sunShadowNearReuse->integer == 1
+		&& !(fd->rdflags & RDF_SKYBOXPORTAL));
+	int cascadeEvery = (stableCascade && level >= 1 && level <= 2) ? r_sunShadowCascadeUpdate->integer
+		: (nearReuse ? 2 : 0);
 	float cascadeMargin = cascadeEvery > 1 ? 8.0f : 0.0f;	// texels of slack on each side
 	float stableHalf = 0.0f;
 	vec3_t stableCenter = { 0, 0, 0 };
@@ -2976,10 +2981,12 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 		// at most the margin (so everything the current slice needs is still inside the old map), and
 		// only on frames this cascade is not scheduled (staggered by level).
 		typeof(tr.sunCascade[0]) *c = &tr.sunCascade[level];
-		float texel = 2.0f * stableHalf / c->size;
-		qboolean reuse = c->valid && c->size == tr.sunShadowFbo[level]->width
+		float texel = 0.0f;
+		// level 0 may only reuse what exactly the preceding renderer frame wrote
+		qboolean ageOk = nearReuse ? (tr.frameCount - c->frame == 1) : (tr.frameCount - c->frame < cascadeEvery * 2);
+		qboolean reuse = c->valid && c->size > 0 && c->size == tr.sunShadowFbo[level]->width
 			&& (tr.frameCount + level) % cascadeEvery != 0
-			&& tr.frameCount - c->frame < cascadeEvery * 2
+			&& ageOk
 			&& fabs(c->half - stableHalf) < 0.01f
 			&& VectorCompare(c->axis[0], lightViewAxis[0]) && VectorCompare(c->axis[1], lightViewAxis[1])
 			&& VectorCompare(c->axis[2], lightViewAxis[2]);
@@ -2987,6 +2994,7 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 		if (reuse)
 		{
 			int k;
+			texel = 2.0f * stableHalf / c->size;
 			for (k = 0; k < 3; k++)
 				if (fabs(c->center[k] - stableCenter[k]) > texel * (cascadeMargin - 1.0f))
 					reuse = qfalse;
@@ -3006,7 +3014,7 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 			if (!c->valid) reason = 1;
 			else if (c->size != tr.sunShadowFbo[level]->width) reason = 2;
 			else if ((tr.frameCount + level) % cascadeEvery == 0) reason = 3;
-			else if (tr.frameCount - c->frame >= cascadeEvery * 2) reason = 4;
+			else if (!ageOk) reason = 4;
 			else if (fabs(c->half - stableHalf) >= 0.01f) reason = 5;
 			else if (!VectorCompare(c->axis[0], lightViewAxis[0]) || !VectorCompare(c->axis[1], lightViewAxis[1])
 				|| !VectorCompare(c->axis[2], lightViewAxis[2])) reason = 6;
@@ -3024,7 +3032,12 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 		VectorCopy(stableCenter, c->center);
 	}
 	else
+	{
+		// an uncached write (cvar off, sky portal scene, ...) replaces what the level 0 cache describes
+		if (level == 0)
+			tr.sunCascade[0].valid = qfalse;
 		R_ProfSunCascade(level, 1, 8);	// not a cached cascade: rendered every frame
+	}
 
 	{
 		int firstDrawSurf;
