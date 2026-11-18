@@ -2216,6 +2216,7 @@ extern	cvar_t	*r_mdsDepthTangents;
 extern	cvar_t	*r_smaaT2xPingPong;
 extern	cvar_t	*r_smaaT2xNoSceneCopy;
 extern	cvar_t	*r_gradeNoCopy;
+extern	cvar_t	*r_postPingPong;
 extern	cvar_t	*r_depthAttribTrim;
 extern	cvar_t	*r_mdsSkinCache;
 extern	cvar_t	*r_mdsShadowLod;

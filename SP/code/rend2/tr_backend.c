@@ -2441,6 +2441,7 @@ const void *RB_PostProcess(const void *data)
 	qboolean tonemapped = qfalse;
 	FBO_t *sceneFbo = NULL;			// r_gradeNoCopy: where the anti-aliased scene is while srcFbo is stale (NULL = srcFbo)
 	qboolean directGrade = qfalse;	// r_gradeNoCopy: grade/bloom reads sceneFbo and writes srcFbo directly
+	FBO_t *outFbo = NULL;			// r_postPingPong: where the graded scene is when it was not copied back into srcFbo
 	qboolean upscale;
 
 	// finish any 2D drawing if needed
@@ -2604,7 +2605,29 @@ const void *RB_PostProcess(const void *data)
 		RB_SunRays(srcFbo, srcBox, srcFbo, srcBox);
 	RB_GpuMark( "rays_add" );
 
-	if (!RB_PostFx(srcFbo, sceneFbo, srcBox) && sceneFbo)
+	// r_postPingPong: the grade result stays in a scratch image and the sharpen / upscale pass reads it from there
+	// and writes the final target, instead of grade -> copy back -> sharpen (-> copy back). Not with a blur between,
+	// nor when srcFbo is not the final target (MSAA resolve: the frame warp captures srcFbo).
+	if (r_postPingPong->integer && srcFbo && tr.screenScratchFbo && RB_PostFxWillRun(srcFbo) &&
+		backEnd.refdef.blurFactor * 10.0f < 0.004f &&
+		(upscale || (srcFbo == dstFbo && (RB_RCASActive() || RB_DLSActive()))) &&
+		srcFbo->width == tr.screenScratchFbo->width && srcFbo->height == tr.screenScratchFbo->height)
+	{
+		if (!sceneFbo)
+			outFbo = tr.screenScratchFbo;	// grade reads srcFbo: the same scratch target the legacy path used (exact)
+		else if (r_postPingPong->integer >= 2 || !r_hdr->integer)
+		{
+			// direct grade: the scene is in sceneFbo, write the other RGBA8 image. Exact only when srcFbo is RGBA8 too.
+			if (sceneFbo != tr.screenScratchFbo)
+				outFbo = tr.screenScratchFbo;
+			else if (tr.smaaEdgesFbo && tr.smaaEdgesFbo->width == srcFbo->width && tr.smaaEdgesFbo->height == srcFbo->height)
+				outFbo = tr.smaaEdgesFbo;
+			if (outFbo == sceneFbo)
+				outFbo = NULL;
+		}
+	}
+
+	if (!RB_PostFx(srcFbo, sceneFbo, outFbo, srcBox) && sceneFbo)
 		FBO_FastBlit(sceneFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);	// cannot happen: RB_PostFxWillRun was true
 
 	if (1)
@@ -2617,11 +2640,11 @@ const void *RB_PostProcess(const void *data)
 		RB_GpuMark( "blur+copy" );
 		VectorSet4(dstBox, backEnd.viewParms.nativeViewport[0], backEnd.viewParms.nativeViewport[1],
 			backEnd.viewParms.nativeViewport[2], backEnd.viewParms.nativeViewport[3]);
-		RB_RenderScaleUpscale(srcFbo, srcBox, dstFbo, dstBox, qfalse);
+		RB_RenderScaleUpscale(outFbo ? outFbo : srcFbo, srcBox, dstFbo, dstBox, qfalse);
 	}
 	else
 	{
-		RB_SharpenBlit(srcFbo, srcBox, dstFbo, dstBox);
+		RB_SharpenBlit(outFbo ? outFbo : srcFbo, srcBox, dstFbo, dstBox);
 		RB_GpuMark( "blur+copy" );
 	}
 

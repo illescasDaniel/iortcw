@@ -310,6 +310,7 @@ cvar_t  *r_mdsDepthTangents;
 cvar_t  *r_smaaT2xPingPong;
 cvar_t  *r_smaaT2xNoSceneCopy;
 cvar_t  *r_gradeNoCopy;
+cvar_t  *r_postPingPong;
 cvar_t  *r_depthAttribTrim;
 cvar_t  *r_mdsSkinCache;
 cvar_t  *r_mdsShadowLod;
@@ -1877,6 +1878,9 @@ void R_Register( void ) {
 	// 1 = grade/bloom reads the anti-aliased scene from where it already is and writes the scene FBO directly (no
 	// scratch + copy back); T2x and AA off. 2 = also SMAA 1x on unjittered views (via the SMAA edges image, not bit exact)
 	r_gradeNoCopy = ri.Cvar_Get( "r_gradeNoCopy", "1", 0 );
+	// 1 = the grade result stays in the scratch image and the sharpen/upscale pass reads it from there (no grade copy
+	// back, no sharpen copy); 2 = also after a direct grade (RGBA8 scratch instead of an HDR scene FBO, not bit exact)
+	r_postPingPong = ri.Cvar_Get( "r_postPingPong", "0", 0 );
 	r_depthAttribTrim = ri.Cvar_Get( "r_depthAttribTrim", "1", 0 );
 	r_mdsSkinCache = ri.Cvar_Get( "r_mdsSkinCache", "1", 0 );
 	r_mdsShadowLod = ri.Cvar_Get( "r_mdsShadowLod", "1", 0 );

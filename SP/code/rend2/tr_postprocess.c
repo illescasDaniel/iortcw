@@ -1302,8 +1302,10 @@ qboolean RB_SunRaysMayDraw(void)
 sceneFbo: where the anti-aliased scene is (RGBA8, same size as srcFbo), when it is not in srcFbo (r_gradeNoCopy).
 The grade pass then reads it and writes srcFbo directly. NULL (or srcFbo) = the scene is in srcFbo: grade
 goes through screenScratch and is copied back.
+outFbo (r_postPingPong): when not NULL the graded result is left there (never srcFbo, never sceneFbo) and not copied
+back; the caller reads it from there.
 */
-qboolean RB_PostFx(FBO_t *srcFbo, FBO_t *sceneFbo, ivec4_t srcBox)
+qboolean RB_PostFx(FBO_t *srcFbo, FBO_t *sceneFbo, FBO_t *outFbo, ivec4_t srcBox)
 {
 	float bloomMul;
 	qboolean bloom, grade;
@@ -1364,14 +1366,15 @@ qboolean RB_PostFx(FBO_t *srcFbo, FBO_t *sceneFbo, ivec4_t srcBox)
 	GLSL_SetUniformVec4(&tr.gradeShader, UNIFORM_VIEWINFO, viewInfo);
 	if (direct)
 	{
-		FBO_Blit(sceneFbo, srcBox, NULL, srcFbo, srcBox, &tr.gradeShader, color, 0);
+		FBO_Blit(sceneFbo, srcBox, NULL, outFbo ? outFbo : srcFbo, srcBox, &tr.gradeShader, color, 0);
 		RB_GpuMark( "grade" );
 	}
 	else
 	{
-		FBO_Blit(srcFbo, srcBox, NULL, tr.screenScratchFbo, srcBox, &tr.gradeShader, color, 0);
+		FBO_Blit(srcFbo, srcBox, NULL, outFbo ? outFbo : tr.screenScratchFbo, srcBox, &tr.gradeShader, color, 0);
 		RB_GpuMark( "grade" );
-		FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		if (!outFbo)
+			FBO_FastBlit(tr.screenScratchFbo, srcBox, srcFbo, srcBox, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	}
 	RB_GpuMark( "grade_copy" );	// ~0 with r_gradeNoCopy (kept so the profile columns stay)
 

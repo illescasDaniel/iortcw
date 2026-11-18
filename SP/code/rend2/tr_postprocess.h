@@ -32,7 +32,7 @@ void RB_BokehBlur(FBO_t *src, ivec4_t srcBox, FBO_t *dst, ivec4_t dstBox, float 
 void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox);
 qboolean RB_PostFxWillRun(FBO_t *srcFbo);
 qboolean RB_SunRaysMayDraw(void);
-qboolean RB_PostFx(FBO_t *srcFbo, FBO_t *sceneFbo, ivec4_t srcBox);
+qboolean RB_PostFx(FBO_t *srcFbo, FBO_t *sceneFbo, FBO_t *outFbo, ivec4_t srcBox);
 void RB_GaussianBlur(FBO_t *srcFbo, FBO_t *dstFbo, float blur);
 qboolean RB_DLSActive(void);
 qboolean RB_RCASActive(void);
