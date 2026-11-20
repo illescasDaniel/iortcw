@@ -837,6 +837,7 @@ typedef enum
 	UNIFORM_SMAAMETRICS, // 1/w, 1/h, w, h of the SMAA render target
 
 	UNIFORM_LIGHTSPOT, // xyz = world/local spot dir, w = cos(outer half-angle); w < -1.5 = point
+	UNIFORM_SPOTMERGE, // r_dlightSpotMerge second lobe: x = colour ratio vs lobe 1 (0 = off), y = radius^2, z = cos(outer)
 
 	UNIFORM_SSAOPARAMS, // radius, strength, bias, sample count
 	UNIFORM_HALFDEPTHMAP, // half resolution depth, same size as the AO image
@@ -2222,6 +2223,8 @@ extern	cvar_t	*r_mdsSkinCache;
 extern	cvar_t	*r_mdsShadowLod;
 extern	cvar_t	*r_sunShadowNearReuse;
 extern	cvar_t	*r_mdsIndexCache;
+extern	cvar_t	*r_dlightSpotMerge;
+extern	cvar_t	*r_ssaoDepthInAO;
 extern	cvar_t	*r_gpuProfile;
 extern	cvar_t	*r_gpuLoad;
 extern	cvar_t	*r_smaaStencil;

@@ -316,6 +316,8 @@ cvar_t  *r_mdsSkinCache;
 cvar_t  *r_mdsShadowLod;
 cvar_t  *r_sunShadowNearReuse;
 cvar_t  *r_mdsIndexCache;
+cvar_t  *r_dlightSpotMerge;
+cvar_t  *r_ssaoDepthInAO;
 cvar_t  *r_gpuProfile;
 cvar_t  *r_gpuLoad;
 cvar_t  *r_smaaStencil;
@@ -1886,6 +1888,8 @@ void R_Register( void ) {
 	r_mdsShadowLod = ri.Cvar_Get( "r_mdsShadowLod", "1", 0 );
 	r_sunShadowNearReuse = ri.Cvar_Get( "r_sunShadowNearReuse", "0", 0 );
 	r_mdsIndexCache = ri.Cvar_Get( "r_mdsIndexCache", "0", 0 );
+	r_dlightSpotMerge = ri.Cvar_Get( "r_dlightSpotMerge", "0", 0 );
+	r_ssaoDepthInAO = ri.Cvar_Get( "r_ssaoDepthInAO", "0", 0 );
 	r_gpuProfile = ri.Cvar_Get( "r_gpuProfile", "0", 0 );
 	r_gpuLoad = ri.Cvar_Get( "r_gpuLoad", "0", 0 );	// dev only: synthetic GPU work per real frame in microseconds (tr_gpuprof.c), 0 = off
 	r_smaaStencil = ri.Cvar_Get( "r_smaaStencil", "1", 0 );

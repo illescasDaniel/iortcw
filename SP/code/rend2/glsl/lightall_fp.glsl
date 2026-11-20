@@ -368,6 +368,10 @@ float CalcLightAttenuation(float point, float normDist)
 // u_LightSpot.w < -1.5 → omnidirectional (disabled).
 uniform vec4 u_LightSpot;
 
+// r_dlightSpotMerge: second coaxial spot lobe folded into this draw. x = colour ratio vs lobe 1 (0 = off),
+// y = radius^2, z = cos(outer).
+uniform vec4 u_SpotMerge;
+
 float CalcSpotAttenuation(vec3 lightToFrag)
 {
 	if (u_LightSpot.w < -1.5)
@@ -461,6 +465,15 @@ void main()
   #if defined(USE_LIGHT_VECTOR)
 	attenuation  = CalcLightAttenuation(float(var_LightDir.w > 0.0), var_LightDir.w / sqrLightDist);
 	attenuation *= CalcSpotAttenuation(-L);
+	if (u_SpotMerge.x > 0.0 && u_LightSpot.w > -1.5)
+	{
+		// lobe 2 shares origin and axis with lobe 1, only radius and cone differ. Summed before the shadow mask
+		// and the parallax self shadow, which multiply each lobe identically in the two-draw path.
+		float attenuation2 = CalcLightAttenuation(1.0, u_SpotMerge.y / sqrLightDist);
+		float cd2 = dot(normalize(u_LightSpot.xyz), -L);
+		attenuation2 *= smoothstep(u_SpotMerge.z, mix(u_SpotMerge.z, 1.0, 0.35), cd2);
+		attenuation += u_SpotMerge.x * attenuation2;
+	}
 	// codmod: flashlight shadow mask
 	if (u_AoParams.y > 0.5)
 		attenuation *= texture2D(u_AoMap, gl_FragCoord.xy * r_FBufScale).r;

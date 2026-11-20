@@ -1,7 +1,9 @@
 uniform sampler2D u_ScreenImageMap;
 uniform sampler2D u_ScreenDepthMap;
 
-uniform vec4   u_ViewInfo; // zfar / znear, zfar, 1/width, 1/height
+// zfar / znear, zfar, 1/width, 1/height. The SSAO blur passes set 1/height < 0 for r_ssaoDepthInAO (the image's
+// g channel already holds the raw depth, so a tap is one fetch). Other users leave it positive.
+uniform vec4   u_ViewInfo;
 varying vec2   var_ScreenTex;
 
 //float gauss[8] = float[8](0.17, 0.17, 0.16, 0.14, 0.12, 0.1, 0.08, 0.06);
@@ -30,7 +32,16 @@ vec4 depthGaussian1D(sampler2D imageMap, sampler2D depthMap, vec2 tex, float zFa
 	gauss[3] = 0.0044;
 
 #if defined(USE_DEPTH)
-	float depthCenter = getLinearDepth(depthMap, tex, zFarDivZNear);
+	bool packedDepth = scale.y < 0.0;
+
+	scale = abs(scale);
+	vec4 centerTex = texture2D(imageMap, tex);
+	float depthCenter;
+
+	if (packedDepth)
+		depthCenter = 1.0 / mix(zFarDivZNear, 1.0, centerTex.g);
+	else
+		depthCenter = getLinearDepth(depthMap, tex, zFarDivZNear);
 	vec2 slope = vec2(dFdx(depthCenter), dFdy(depthCenter)) / vec2(dFdx(tex.x), dFdy(tex.y));
 	scale /= clamp(zFarDivZNear * depthCenter / 32.0, 1.0, 2.0);
 #endif
@@ -47,7 +58,11 @@ vec4 depthGaussian1D(sampler2D imageMap, sampler2D depthMap, vec2 tex, float zFa
 	vec4 result = texture2D(imageMap, tex) * gauss[0];
 	float total = gauss[0];
 #else
+#if defined(USE_DEPTH)
+	vec4 result = centerTex;
+#else
 	vec4 result = texture2D(imageMap, tex);
+#endif
 	float total = 1.0;
 #endif
 
@@ -65,7 +80,14 @@ vec4 depthGaussian1D(sampler2D imageMap, sampler2D depthMap, vec2 tex, float zFa
 		{
 			vec2 offset = direction * (float(j) - 0.25) + nudge;
 #if defined(USE_DEPTH)
-			float depthSample = getLinearDepth(depthMap, tex + offset, zFarDivZNear);
+			vec4 smp = texture2D(imageMap, tex + offset);
+			float depthSample;
+
+			if (packedDepth)
+				depthSample = 1.0 / mix(zFarDivZNear, 1.0, smp.g);
+			else
+				depthSample = getLinearDepth(depthMap, tex + offset, zFarDivZNear);
+
 			float depthExpected = depthCenter + dot(slope, offset);
 			float useSample = float(abs(depthSample - depthExpected) < zLimit);
 #else
@@ -74,6 +96,9 @@ vec4 depthGaussian1D(sampler2D imageMap, sampler2D depthMap, vec2 tex, float zFa
 #if defined(USE_GAUSS)
 			result += texture2D(imageMap, tex + offset) * (gauss[j] * useSample);
 			total += gauss[j] * useSample;
+#elif defined(USE_DEPTH)
+			result += smp * useSample;
+			total += useSample;
 #else
 			result += texture2D(imageMap, tex + offset) * useSample;
 			total += useSample;
@@ -84,6 +109,12 @@ vec4 depthGaussian1D(sampler2D imageMap, sampler2D depthMap, vec2 tex, float zFa
 		direction = -direction;
 		nudge = -nudge;
 	}
+
+#if defined(USE_DEPTH)
+	// depth-in-AO: only r is an average, g keeps this pixel's own depth for the next pass
+	if (packedDepth)
+		return vec4(result.r / total, centerTex.g, 0.0, 1.0);
+#endif
 
 	return result / total;
 }

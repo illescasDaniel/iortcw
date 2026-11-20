@@ -790,8 +790,64 @@ static void ComputeFogColorMask( shaderStage_t *pStage, vec4_t fogColorMask )
 }
 
 
+// r_dlightSpotMerge: find a later dlight that is a second coaxial spot lobe of dl (same origin and axis, same shadow
+// state, no dlshader, colour proportional to dl's) so both can be drawn in one pass. On success returns its index and
+// fills lobe2 (x = colour ratio vs dl, y = radius^2, z = cos(outer)); otherwise returns -1.
+static int FindSpotMergePartner( int l, const dlight_t *dl, vec4_t lobe2 ) {
+	float maxC1, maxC2, k;
+	int m, i;
+
+	if ( !r_dlightSpotMerge->integer || r_pbr->integer || r_dlightMode->integer >= 2
+		|| !( r_normalMapping->integer || r_specularMapping->integer )	// no fast light variant
+		|| dl->dlshader || dl->spotCosOuter <= -1.5f ) {
+		return -1;
+	}
+
+	maxC1 = MAX( dl->color[0], MAX( dl->color[1], dl->color[2] ) );
+	if ( maxC1 <= 0.0f ) {
+		return -1;
+	}
+
+	for ( m = l + 1 ; m < backEnd.refdef.num_dlights ; m++ ) {
+		const dlight_t *d2;
+
+		if ( !( tess.dlightBits & ( 1 << m ) ) ) {
+			continue;
+		}
+		d2 = &backEnd.refdef.dlights[m];
+		if ( d2->dlshader || d2->spotCosOuter <= -1.5f || d2->shadowed != dl->shadowed || d2->radius <= 0.0f ) {
+			continue;
+		}
+		if ( fabs( d2->origin[0] - dl->origin[0] ) > 0.01f || fabs( d2->origin[1] - dl->origin[1] ) > 0.01f
+			|| fabs( d2->origin[2] - dl->origin[2] ) > 0.01f
+			|| fabs( d2->dir[0] - dl->dir[0] ) > 1e-4f || fabs( d2->dir[1] - dl->dir[1] ) > 1e-4f
+			|| fabs( d2->dir[2] - dl->dir[2] ) > 1e-4f ) {
+			continue;
+		}
+
+		maxC2 = MAX( d2->color[0], MAX( d2->color[1], d2->color[2] ) );
+		k = maxC2 / maxC1;
+		for ( i = 0 ; i < 3 ; i++ ) {
+			if ( fabs( d2->color[i] - k * dl->color[i] ) > 1e-4f * maxC2 ) {
+				break;
+			}
+		}
+		if ( i < 3 ) {
+			continue;	// colours not proportional: the colour ratio can't be folded into one scalar
+		}
+
+		VectorSet( lobe2, k, d2->radius * d2->radius, d2->spotCosOuter );
+		lobe2[3] = 0.0f;
+		return m;
+	}
+
+	return -1;
+}
+
+
 static void ForwardDlight( void ) {
 	int		l;
+	int		mergedBits = 0;
 	//vec3_t	origin;
 	//float	scale;
 	float	radius;
@@ -819,11 +875,23 @@ static void ForwardDlight( void ) {
 		vec4_t vector;
 		vec4_t texMatrix[8];
 
+		vec4_t lobe2 = { 0, 0, 0, 0 };
+
 		if ( !( tess.dlightBits & ( 1 << l ) ) ) {
 			continue;	// this surface definitely doesn't have any of this light
 		}
+		if ( mergedBits & ( 1 << l ) ) {
+			continue;	// already drawn as the second lobe of an earlier spot
+		}
 
 		dl = &backEnd.refdef.dlights[l];
+		{
+			int partner = FindSpotMergePartner( l, dl, lobe2 );
+
+			if ( partner >= 0 ) {
+				mergedBits |= 1 << partner;
+			}
+		}
 		//VectorCopy( dl->transformed, origin );
 		radius = dl->radius;
 		//scale = 1.0f / radius;
@@ -964,6 +1032,9 @@ static void ForwardDlight( void ) {
 		vector[2] = dl->dir[2];
 		vector[3] = dl->spotCosOuter;
 		GLSL_SetUniformVec4(sp, UNIFORM_LIGHTSPOT, vector);
+
+		// r_dlightSpotMerge: second lobe; always set so a program reused by a non-merged draw gets x = 0 back
+		GLSL_SetUniformVec4(sp, UNIFORM_SPOTMERGE, lobe2);
 
 		GLSL_SetUniformVec4(sp, UNIFORM_NORMALSCALE, pStage->normalScale);
 		GLSL_SetUniformVec4(sp, UNIFORM_SPECULARSCALE, pStage->specularScale);
@@ -1637,6 +1708,10 @@ static void RB_IterateStagesGeneric( shaderCommands_t *input )
 			// codmod: not a spotlight
 			VectorSet4( vec, 0.0f, 0.0f, 0.0f, -2.0f );
 			GLSL_SetUniformVec4( sp, UNIFORM_LIGHTSPOT, vec );
+
+			// r_dlightSpotMerge: this program may have just drawn a merged flashlight, drop its second lobe
+			VectorSet4( vec, 0.0f, 0.0f, 0.0f, 0.0f );
+			GLSL_SetUniformVec4( sp, UNIFORM_SPOTMERGE, vec );
 		}
 
 		if (pStage->alphaGen == AGEN_PORTAL)

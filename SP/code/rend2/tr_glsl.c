@@ -185,6 +185,7 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_SmaaMetrics", GLSL_VEC4 },
 
 	{ "u_LightSpot", GLSL_VEC4 },
+	{ "u_SpotMerge", GLSL_VEC4 },
 
 	{ "u_SsaoParams", GLSL_VEC4 },
 	{ "u_HalfDepthMap", GLSL_INT },

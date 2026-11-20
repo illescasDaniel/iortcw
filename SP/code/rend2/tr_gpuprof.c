@@ -1253,7 +1253,7 @@ void R_GpuProfDump( void ) {
 			"r_ssao", "r_ssaoMode", "r_ssaoSamples", "r_ssaoSlices", "r_ssaoSteps", "r_ssaoDepthMips", "r_lodscale", "r_lodbias",
 			"r_picmip", "r_textureMode", "r_ext_max_anisotropy", "r_mode", "r_customwidth", "r_customheight", "r_fullscreen",
 			"r_swapInterval", "r_vsync", "r_finish", "r_swapFinish", "r_flares", "r_dynamiclight", "r_mergeLightmaps",
-			"r_vaoCacheStats", "r_mdsSkinCache", "r_mdsDepthTangents", "r_mdsShadowLod", "r_parallaxRefinePar", "r_parallaxNearHit", "r_specularSkip", "r_sunShadowNearReuse", "r_mdsIndexCache", "r_depthAttribTrim", "r_parallaxOpt", "r_codSpecular", "r_ssaoStrength", "r_ssaoAmbient", "r_gradeNoCopy", "r_postPingPong", "r_smaaT2xPingPong", "r_sunRaysOpt", "r_gpuProfile", "r_gpuLoad", "com_maxfps", "com_maxfpsMode", "com_maxfpsGpuSync", "cl_benchDemo",
+			"r_vaoCacheStats", "r_mdsSkinCache", "r_mdsDepthTangents", "r_mdsShadowLod", "r_parallaxRefinePar", "r_parallaxNearHit", "r_specularSkip", "r_sunShadowNearReuse", "r_mdsIndexCache", "r_dlightSpotMerge", "r_ssaoDepthInAO", "r_depthAttribTrim", "r_parallaxOpt", "r_codSpecular", "r_ssaoStrength", "r_ssaoAmbient", "r_gradeNoCopy", "r_postPingPong", "r_smaaT2xPingPong", "r_sunRaysOpt", "r_gpuProfile", "r_gpuLoad", "com_maxfps", "com_maxfpsMode", "com_maxfpsGpuSync", "cl_benchDemo",
 			"r_ssaoRadius", "r_parallaxMapOffset", "r_parallaxMinDepth", "r_parallaxMarchLod", "r_parallaxFloorScale", "r_parallaxCavity", "r_specularAA", "r_codSpecDirectional", "r_deluxeSpecular",
 			"cg_shadows", "cg_skybox"
 		};

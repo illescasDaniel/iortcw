@@ -23,14 +23,27 @@ float noise(const vec2 pixel)
 }
 
 // view space depth in world units, or -1.0 for view model / sky pixels
-float viewDepth(const vec2 tex)
+float depthToZ(const float d)
 {
-	float d = texture2D(u_ScreenDepthMap, tex).r;
-
 	if (d < VIEWMODEL_DEPTH || d > SKY_DEPTH)
 		return -1.0;
 
 	return u_ViewInfo.y / mix(u_ViewInfo.x, 1.0, d);
+}
+
+float viewDepth(const vec2 tex)
+{
+	return depthToZ(texture2D(u_ScreenDepthMap, tex).r);
+}
+
+// r_ssaoDepthInAO: the +0.25 fraction of the sample count / slice count (u_SsaoParams, int() drops it) asks for the
+// raw depth in the g channel next to the AO, so the blur taps need one fetch. Set once in main().
+float g_d0;
+bool  g_packDepth;
+
+vec4 aoOut(const float ao)
+{
+	return g_packDepth ? vec4(ao, g_d0, 0.0, 1.0) : vec4(vec3(ao), 1.0);
 }
 
 vec3 viewPos(const vec2 tex, const float z)
@@ -113,11 +126,15 @@ float viewDepthMip(const vec2 tex, const vec2 offPixels)
 void main()
 {
 	vec2 tex = var_ScreenTex;
-	float z = viewDepth(tex);
+
+	g_d0 = texture2D(u_ScreenDepthMap, tex).r;
+	g_packDepth = fract(u_SsaoParams.z) > 0.125;
+
+	float z = depthToZ(g_d0);
 
 	if (z < 0.0)
 	{
-		gl_FragColor = vec4(1.0);
+		gl_FragColor = aoOut(1.0);
 		return;
 	}
 
@@ -133,7 +150,7 @@ void main()
 	// too small on screen to see anything: far away
 	if (screenRadius.x < 2.0 * u_InvTexRes.x)
 	{
-		gl_FragColor = vec4(1.0);
+		gl_FragColor = aoOut(1.0);
 		return;
 	}
 
@@ -242,7 +259,7 @@ void main()
 
 	// GTAO is physically based: the power darkens it to taste (and to match the look
 	// of a lit, not ambient only, scene)
-	gl_FragColor = vec4(vec3(pow(visibility, 2.0 * strength)), 1.0);
+	gl_FragColor = aoOut(pow(visibility, 2.0 * strength));
 }
 
 #else
@@ -250,11 +267,15 @@ void main()
 void main()
 {
 	vec2 tex = var_ScreenTex;
-	float z = viewDepth(tex);
+
+	g_d0 = texture2D(u_ScreenDepthMap, tex).r;
+	g_packDepth = fract(u_SsaoParams.w) > 0.125;
+
+	float z = depthToZ(g_d0);
 
 	if (z < 0.0)
 	{
-		gl_FragColor = vec4(1.0);
+		gl_FragColor = aoOut(1.0);
 		return;
 	}
 
@@ -305,7 +326,7 @@ void main()
 
 	occlusion = occlusion * invSamples * 2.0 * strength;
 
-	gl_FragColor = vec4(vec3(clamp(1.0 - occlusion, 0.0, 1.0)), 1.0);
+	gl_FragColor = aoOut(clamp(1.0 - occlusion, 0.0, 1.0));
 }
 
 #endif

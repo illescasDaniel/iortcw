@@ -2944,6 +2944,14 @@ static void R_CreateSmaaImages( int width, int height ) {
 	qglTextureParameteriEXT( tr.smaaSearchImage->texnum, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 }
 
+// codmod r_ssaoDepthInAO: AO + depth ping-pong targets (see R_CreateBuiltinImages)
+static image_t *s_ssaoAoImage[2];
+
+image_t *R_SsaoAoImage(int i)
+{
+	return s_ssaoAoImage[i & 1];
+}
+
 void R_CreateBuiltinImages( void ) {
 	int		x,y;
 	byte	data[DEFAULT_SIZE][DEFAULT_SIZE][4];
@@ -3064,6 +3072,12 @@ void R_CreateBuiltinImages( void ) {
 
 		tr.aoImage = R_CreateImage("*ao", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_R8);
 		tr.ssaoDepthImage = R_CreateImage("*ssaoDepth", NULL, width / 2, height / 2, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_R32F);
+
+		// codmod r_ssaoDepthInAO: the first two SSAO passes write AO in r and the raw depth in g, so the
+		// blur taps need one fetch instead of two. Float, because the blur samples bilinearly between texels.
+		// Always created (about 8 MB at 1080p) so the cvar works live; tr_local.h has no slot for them.
+		for (x = 0; x < 2; x++)
+			s_ssaoAoImage[x] = R_CreateImage(va("*ssaoAo%d", x), NULL, width / 2, height / 2, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_RG32F);
 
 		// codmod: point-sampled mip chain for GTAO's far taps (filled per frame in RB_DrawSurfs).
 		// LINEAR_MIPMAP_NEAREST keeps level 0 sampled exactly as before; only textureLod

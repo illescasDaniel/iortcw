@@ -1414,7 +1414,7 @@ void CG_CodAddFlashlight( void ) {
 	vec3_t start, dir;
 	float intensity, radius;
 
-	if ( !cg.codFlashlightOn ) {
+	if ( !cg.codFlashlightOn && !cod_flashlightForce.integer ) {
 		return;
 	}
 	// Cutscene eye is the spline camera — do not light from there.
@@ -1472,7 +1472,7 @@ void CG_CodDrawFlashlightHudIcon( float weapX, float weapY, float weapW, float w
 	vec4_t body, tip;
 	float pulse;
 
-	if ( !cg.codFlashlightOn ) {
+	if ( !cg.codFlashlightOn && !cod_flashlightForce.integer ) {
 		return;
 	}
 	if ( !( bg_cod.enable && bg_cod.flashlightEnable ) ) {

@@ -1742,6 +1742,7 @@ extern vmCvar_t cg_subMsecLerp;
 extern vmCvar_t cg_drawFPGun;
 extern vmCvar_t cg_drawGamemodels;
 extern vmCvar_t cg_cursorHints;
+extern vmCvar_t cod_flashlightForce;
 extern vmCvar_t cod_tipFlashlightShown;
 extern vmCvar_t cg_hintFadeTime;            //----(SA)	added
 extern vmCvar_t cg_viewsize;

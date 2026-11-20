@@ -1509,6 +1509,10 @@ static void RB_WarpCheckpoint( int where ) {
 	}
 }
 
+// codmod r_ssaoDepthInAO: AO + depth ping-pong targets owned by tr_image.c / tr_fbo.c
+extern image_t *R_SsaoAoImage(int i);
+extern FBO_t *R_SsaoAoFbo(int i);
+
 /*
 =============
 RB_DrawSurfs
@@ -1818,15 +1822,27 @@ const void	*RB_DrawSurfs( const void *data ) {
 				vec4_t ssaoParams;
 				vec2_t invTexRes;
 				vec2_t ssaoMips;
+				vec4_t blurInfo;
+				float ssaoFlags = 0.0f;
+				// r_ssaoDepthInAO: AO + raw depth in a float target (needs both ping-pong FBOs)
+				qboolean aoPack = r_ssaoDepthInAO->integer && R_SsaoAoFbo(0) && R_SsaoAoFbo(1);
+				FBO_t *aoFbo0 = aoPack ? R_SsaoAoFbo(0) : tr.quarterFbo[0];
+				FBO_t *aoFbo1 = aoPack ? R_SsaoAoFbo(1) : tr.quarterFbo[1];
+				image_t *aoImg0 = aoPack ? R_SsaoAoImage(0) : tr.quarterImage[0];
+				image_t *aoImg1 = aoPack ? R_SsaoAoImage(1) : tr.quarterImage[1];
 
 				// the ssao shader wants tan(fov / 2) here, not a texel size
 				viewInfo[2] = tan(backEnd.viewParms.fovX * M_PI / 360.0f);
 				viewInfo[3] = tan(backEnd.viewParms.fovY * M_PI / 360.0f);
 
+				// the shader reads r_ssaoDepthInAO from the (int() truncated) fraction of the slice / sample count: +0.25
+				if (aoPack)
+					ssaoFlags += 0.25f;
+
 				if (r_ssaoMode->integer)
-					VectorSet4(ssaoParams, r_ssaoRadius->value, r_ssaoStrength->value, r_ssaoSlices->integer, r_ssaoSteps->integer);
+					VectorSet4(ssaoParams, r_ssaoRadius->value, r_ssaoStrength->value, r_ssaoSlices->integer + ssaoFlags, r_ssaoSteps->integer);
 				else
-					VectorSet4(ssaoParams, r_ssaoRadius->value, r_ssaoStrength->value, 0.1f, r_ssaoSamples->integer);
+					VectorSet4(ssaoParams, r_ssaoRadius->value, r_ssaoStrength->value, 0.1f, r_ssaoSamples->integer + ssaoFlags);
 				invTexRes[0] = 1.0f / (float)tr.ssaoDepthImage->width;
 				invTexRes[1] = 1.0f / (float)tr.ssaoDepthImage->height;
 
@@ -1855,10 +1871,10 @@ const void	*RB_DrawSurfs( const void *data ) {
 				}
 				RB_GpuMark( "ssao_depth" );
 
-				FBO_Bind(tr.quarterFbo[0]);
+				FBO_Bind(aoFbo0);
 
-				qglViewport(0, 0, tr.quarterFbo[0]->width, tr.quarterFbo[0]->height);
-				qglScissor(0, 0, tr.quarterFbo[0]->width, tr.quarterFbo[0]->height);
+				qglViewport(0, 0, aoFbo0->width, aoFbo0->height);
+				qglScissor(0, 0, aoFbo0->width, aoFbo0->height);
 
 				VectorSet4(quadVerts[0], -1,  1, 0, 1);
 				VectorSet4(quadVerts[1],  1,  1, 0, 1);
@@ -1885,24 +1901,28 @@ const void	*RB_DrawSurfs( const void *data ) {
 				RB_GpuMark( "ssao_ao" );
 
 
-				viewInfo[2] = 1.0f / (float)(tr.quarterImage[0]->width);
-				viewInfo[3] = 1.0f / (float)(tr.quarterImage[0]->height);
+				viewInfo[2] = 1.0f / (float)(aoImg0->width);
+				viewInfo[3] = 1.0f / (float)(aoImg0->height);
 
-				FBO_Bind(tr.quarterFbo[1]);
+				// r_ssaoDepthInAO: the blur shader reads it from the sign of the texel height (see depthblur_fp.glsl)
+				Vector4Copy(viewInfo, blurInfo);
+				if (aoPack)
+					blurInfo[3] = -blurInfo[3];
 
-				qglViewport(0, 0, tr.quarterFbo[1]->width, tr.quarterFbo[1]->height);
-				qglScissor(0, 0, tr.quarterFbo[1]->width, tr.quarterFbo[1]->height);
+				FBO_Bind(aoFbo1);
+
+				qglViewport(0, 0, aoFbo1->width, aoFbo1->height);
+				qglScissor(0, 0, aoFbo1->width, aoFbo1->height);
 
 				GLSL_BindProgram(&tr.depthBlurShader[0]);
 
-				GL_BindToTMU(tr.quarterImage[0],  TB_COLORMAP);
+				GL_BindToTMU(aoImg0,  TB_COLORMAP);
 				GL_BindToTMU(tr.ssaoDepthImage, TB_LIGHTMAP);
 
-				GLSL_SetUniformVec4(&tr.depthBlurShader[0], UNIFORM_VIEWINFO, viewInfo);
+				GLSL_SetUniformVec4(&tr.depthBlurShader[0], UNIFORM_VIEWINFO, blurInfo);
 
 				RB_InstantQuad2(quadVerts, texCoords); //, color, shaderProgram, invTexRes);
 				RB_GpuMark( "ssao_blur1" );
-
 
 				FBO_Bind(tr.screenSsaoFbo);
 
@@ -1911,11 +1931,10 @@ const void	*RB_DrawSurfs( const void *data ) {
 
 				GLSL_BindProgram(&tr.depthBlurShader[1]);
 
-				GL_BindToTMU(tr.quarterImage[1],  TB_COLORMAP);
+				GL_BindToTMU(aoImg1,  TB_COLORMAP);
 				GL_BindToTMU(tr.ssaoDepthImage, TB_LIGHTMAP);
 
-				GLSL_SetUniformVec4(&tr.depthBlurShader[1], UNIFORM_VIEWINFO, viewInfo);
-
+				GLSL_SetUniformVec4(&tr.depthBlurShader[1], UNIFORM_VIEWINFO, blurInfo);
 
 				RB_InstantQuad2(quadVerts, texCoords); //, color, shaderProgram, invTexRes);
 				RB_GpuMark( "ssao_blur2" );

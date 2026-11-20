@@ -263,10 +263,21 @@ static void FBO_SetDepthOnly(FBO_t *fbo)
 FBO_Init
 ============
 */
+// codmod r_ssaoDepthInAO: AO + depth ping-pong FBOs (the images live in tr_image.c)
+extern image_t *R_SsaoAoImage(int i);
+static FBO_t *s_ssaoAoFbo[2];
+
+FBO_t *R_SsaoAoFbo(int i)
+{
+	return s_ssaoAoFbo[i & 1];
+}
+
 void FBO_Init(void)
 {
 	int             i;
 	int             hdrFormat, multisample = 0;
+
+	s_ssaoAoFbo[0] = s_ssaoAoFbo[1] = NULL;
 
 	ri.Printf(PRINT_ALL, "------- FBO_Init -------\n");
 
@@ -534,6 +545,19 @@ void FBO_Init(void)
 				R_CheckFBO(fbo);
 				tr.ssaoDepthMipFbo[level] = fbo;
 			}
+		}
+	}
+
+	// codmod r_ssaoDepthInAO targets (images owned by tr_image.c)
+	for (i = 0; i < 2; i++)
+	{
+		image_t *img = R_SsaoAoImage(i);
+
+		if (img)
+		{
+			s_ssaoAoFbo[i] = FBO_Create(va("_ssaoAo%d", i), img->width, img->height);
+			FBO_AttachImage(s_ssaoAoFbo[i], img, GL_COLOR_ATTACHMENT0, 0);
+			R_CheckFBO(s_ssaoAoFbo[i]);
 		}
 	}
 
